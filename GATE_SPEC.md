@@ -804,6 +804,20 @@ Python 3.12+, `ruff` (lint+format) and `mypy --strict` mandatory in CI; `from __
 - `jsonschema` is **dev/test only** and validates the OSCAL export against the NIST schema vendored in `tests/oscal/`. §10.8 permits JSON Schema in place of `oscal-cli`; `oscal-cli` would put a JVM in CI for one check. Note that the NIST schema uses ES2018 Unicode property escapes (`\p{L}`), which CPython's `re` cannot compile, so the test supplies `regex` as the pattern engine — see `tests/oscal/__init__.py`.
 - `mcp` pulls `httpx2` transitively as of 2.3. It is a transport dependency of the SDK, not a direct import of `gate`, and `httpx` is already permitted above for infra and adapters.
 
+
+**Week 3 amendment — JOSE library.** §20.3 names `authlib` for JWT/JWKS/OAuth. As of
+authlib 1.8 the `authlib.jose` module is deprecated in favour of **`joserfc`** (same
+author) and emits `AuthlibDeprecationWarning` on import, which this suite treats as an
+error. The allowed set therefore reads `joserfc` where it read `authlib`; this is a
+rename of the same capability, not an additional dependency. `authlib` remains the name
+to use if OAuth *client* flows are ever needed outside JOSE.
+
+**Token algorithm.** Gate-issued tokens are signed `alg: Ed25519`, not `EdDSA`:
+RFC 9864 deprecates the generic `EdDSA` JWS identifier in favour of the concrete curve
+name, and `joserfc` raises `SecurityWarning` on `EdDSA`. The identifier is baked into
+every token the gate mints, so it is settled before the first one is issued rather than
+after. Evidence signing is unaffected — it is raw Ed25519, not JOSE.
+
 ### 20.4 Packaging
 PyPI `valqore-gate` (CLI `gate`), `gate-verify`; container `ghcr.io/valqore/gate` (distroless, non-root, cosign); Homebrew tap `valqore/tap` with single-file binary (PyInstaller via `pyoxidizer`/`nuitka` evaluated in week 5; fallback: brew formula depending on python@3.12); Helm OCI chart.
 
