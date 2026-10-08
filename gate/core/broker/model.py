@@ -11,13 +11,12 @@ something you have to type out.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from fnmatch import fnmatchcase
 from typing import Any, Literal
 
 from pydantic import Field
 
-from gate.core.schemas import ActionProposal, Environment, Frozen
+from gate.core.schemas import ActionProposal, Enforcement, Environment, Frozen
 
 __all__ = [
     "CredentialSpec",
@@ -33,18 +32,15 @@ __all__ = [
 REDACTED = "<redacted>"
 
 
-class Enforcement(StrEnum):
-    """Whether the gate actually holds the credential for this upstream.
-
-    ``advisory`` is the honest answer when it does not: the gate still decides
-    and still records, but the agent is carrying its own credential and could
-    bypass the gate entirely. Saying so is the point -- an adapter that
-    claimed to be enforcing while the agent held the token would make the
-    evidence a lie.
-    """
-
-    enforcing = "enforcing"
-    advisory = "advisory"
+#: Re-exported, not redefined. `Enforcement` already exists on the proposal
+#: schema, and a second enum with the same two members would type-check
+#: everywhere and compare unequal exactly once, in the one place it mattered
+#: -- which is how mypy found it.
+#:
+#: ``advisory`` is the honest answer when the gate does not hold the
+#: credential: it still decides and still records, but the agent carries its
+#: own token and could bypass the gate entirely. An adapter claiming to be
+#: enforcing in that state would put a lie in the evidence.
 
 
 class Secret:

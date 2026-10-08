@@ -7,7 +7,10 @@ proxy's transport handling was broken.
 
 The tool list is chosen to cover the classification cases that matter: a mild
 verb carrying a destructive payload (``execute_sql`` with ``DROP TABLE``), an
-obviously destructive verb, a bulk selector, and a plain read.
+obviously destructive verb, a bulk selector, and a plain read. ``echo_env``
+reports one environment variable, which is the only way to show that the
+credential broker's injection reached this process rather than stopping at
+the proxy.
 """
 
 from __future__ import annotations
@@ -45,6 +48,18 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
+        name="echo_env",
+        description=(
+            "Report one environment variable. The only way to prove the broker's "
+            "credential reached this process rather than stopping at the proxy."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    ),
+    types.Tool(
         name="explode",
         description="Always fails, so the proxy's error path is exercised.",
         inputSchema={"type": "object", "properties": {}},
@@ -72,6 +87,13 @@ async def on_list_tools(
 async def on_call_tool(ctx: object, params: types.CallToolRequestParams) -> types.CallToolResult:
     if params.name == "explode":
         raise ValueError("the upstream tool failed on purpose")
+    if params.name == "echo_env":
+        import os
+
+        wanted = str((params.arguments or {}).get("name", ""))
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=os.environ.get(wanted, "<unset>"))]
+        )
     return types.CallToolResult(
         content=[
             types.TextContent(type="text", text=f"{NAME}.{params.name} ran with {params.arguments}")

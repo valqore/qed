@@ -132,8 +132,64 @@ printed.
 `len(secret)` and `bool(secret)` work, because "set but empty" is a thing a
 health check needs to be able to say without printing anything.
 
+## Enforcement is derived, not asserted
+
+Before the broker, an adapter was *told* it was enforcing by a flag. That
+claim went into `context.enforcement`, and from there into the evidence. If
+the credential was missing the claim was simply wrong, and nothing in the
+chain said so.
+
+Now the gate is enforcing for a call **if and only if it is holding the
+credential for that call**. The adapter does not get asked.
+
+```
+$ gate mcp --config gate.yaml -- npx -y @some/mcp-server
+...
+gate: 4 tool call(s); 4 forwarded, ...
+gate: 1 of those call(s) were ADVISORY -- decided and recorded, but the gate
+      was not holding the credential.
+```
+
+The advisory count is printed separately and last, because a session that was
+entirely advisory looks identical to an enforcing one in every other number.
+
+With no upstreams configured the adapter keeps whatever the flag says, which
+is how every deployment behaved before the broker existed — going silently
+advisory on an existing install would be the worse surprise.
+
+## When the credential is attached
+
+| Transport | When | Why |
+|---|---|---|
+| stdio MCP | at spawn, into the child's environment | A child process receives its environment once. "Resolved per request" is not something the transport can offer, and claiming it would be worse than saying so. |
+| HTTP | per request, as a header | Genuinely per request. |
+
+For stdio the TTL cache governs **re-spawns**, not calls. A rotated secret
+reaches a long-lived child process when it restarts, not before.
+
+## Stripping comes first
+
+An enforcing adapter removes whatever the agent supplied before attaching
+anything:
+
+```
+authorization · proxy-authorization · cookie · x-api-key · api-key
+x-auth-token · x-access-token · x-amz-security-token · x-goog-api-key
+```
+
+Matched case-insensitively, because HTTP header names are and an agent that
+capitalised `AUTHORIZATION` would otherwise sail straight through.
+
+This matters more than the attaching. An adapter that added the broker's
+header while leaving the agent's in place would be an adapter where the agent
+still chooses which credential gets used.
+
+`sigv4` cannot be planned ahead, because the signature covers the request
+body. The injection plan says `needs_signing` and the adapter refuses rather
+than forwarding unsigned — forwarding unsigned would mean the agent's own
+credentials get used after all.
+
 ## Still to come
 
-Enforcing MCP and the HTTP forward proxy — the parts that strip an
-agent-supplied `Authorization` header and attach the broker's own. The
-matching, resolution and posture reporting they need are done.
+The HTTP forward proxy (`gate proxy`), for agents that make plain HTTP calls
+rather than MCP ones. Everything it needs exists.

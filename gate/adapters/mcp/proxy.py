@@ -54,6 +54,7 @@ from gate.core.schemas import (
     Mandate,
     Mode,
 )
+from gate.infra.secrets.broker import CredentialBroker
 from gate.runtime import CheckOutcome, Session, check_proposal
 
 __all__ = [
@@ -165,6 +166,10 @@ class ProxyStats:
     refused: int = 0
     ungated: int = 0
     passthrough: int = 0
+    #: Calls the gate decided but did not hold the credential for. Worth
+    #: counting separately: a session that is entirely advisory looks
+    #: identical to an enforcing one in every other number here.
+    advisory: int = 0
     errors: int = 0
     decisions: list[str] = field(default_factory=list)
 
@@ -182,8 +187,16 @@ def build_tool_proposal(
     options: ProxyOptions,
     mode: Mode,
     intent_text: str | None = None,
+    enforcement: Enforcement | None = None,
 ) -> tuple[ActionProposal, ToolIntent]:
-    """Turn one ``tools/call`` into a proposal. Pure apart from id and clock."""
+    """Turn one ``tools/call`` into a proposal. Pure apart from id and clock.
+
+    ``enforcement`` overrides the option when the broker has answered for this
+    specific action. That is the honest source: the gate is enforcing for a
+    call if and only if it is holding the credential for it, and an adapter
+    that asserted otherwise would be putting a claim into the evidence that
+    nothing backs.
+    """
     hints = classify(f"{upstream.name}.{tool}", arguments)
     target = derive_target(
         server=upstream.name,
@@ -199,7 +212,7 @@ def build_tool_proposal(
         params=arguments,
         adapter=options.adapter,
         environment=options.environment,
-        enforcement=options.enforcement,
+        enforcement=options.enforcement if enforcement is None else enforcement,
         mode=mode,
         token_jti=options.token_jti,
         human_hash=options.human_hash,
@@ -241,12 +254,17 @@ class _Proxy:
         client: ClientSession,
         options: ProxyOptions,
         stats: ProxyStats,
+        broker: CredentialBroker | None = None,
     ) -> None:
         self.session = session
         self.upstream = upstream
         self.client = client
         self.options = options
         self.stats = stats
+        #: None when no upstreams are configured, in which case the adapter
+        #: keeps whatever `options.enforcement` claims -- which is what every
+        #: deployment looked like before week 5.
+        self.broker = broker
 
     # ----------------------------------------------------------------- tools
 
@@ -362,6 +380,28 @@ class _Proxy:
     def _decide(
         self, tool: str, arguments: object, intent_text: str | None
     ) -> tuple[CheckOutcome, ActionProposal]:
+        # Built twice on purpose. The broker matches on the *proposal*, and
+        # the proposal carries the enforcement the broker decides -- so the
+        # first build answers "which upstream is this", and the second records
+        # the honest answer. Both are pure apart from the id, and the cost is
+        # a dictionary walk; the alternative is a proposal whose
+        # `enforcement` field was filled in before anyone knew whether it was
+        # true.
+        draft, _ = build_tool_proposal(
+            upstream=self.upstream,
+            tool=tool,
+            arguments=arguments,
+            options=self.options,
+            mode=self.session.config.mode,
+            intent_text=intent_text,
+        )
+        enforcement = self.options.enforcement
+        if self.broker is not None:
+            brokerage = self.broker.for_action(draft)
+            enforcement = brokerage.enforcement
+            if not brokerage.enforcing and brokerage.reason:
+                self.stats.advisory += 1
+
         proposal, _ = build_tool_proposal(
             upstream=self.upstream,
             tool=tool,
@@ -369,6 +409,7 @@ class _Proxy:
             options=self.options,
             mode=self.session.config.mode,
             intent_text=intent_text,
+            enforcement=enforcement,
         )
         return check_proposal(self.session, proposal, mandate=self.options.mandate), proposal
 
@@ -550,13 +591,24 @@ def _intent_of(params: mcp_types.CallToolRequestParams) -> str | None:
 
 
 @asynccontextmanager
-async def _connect(upstream: UpstreamSpec) -> AsyncIterator[ClientSession]:
-    """Open and initialise the upstream connection, stdio or Streamable HTTP."""
+async def _connect(
+    upstream: UpstreamSpec, *, injected_env: dict[str, str] | None = None
+) -> AsyncIterator[ClientSession]:
+    """Open and initialise the upstream connection, stdio or Streamable HTTP.
+
+    ``injected_env`` is the broker's contribution, merged over whatever the
+    spec already carries. It is applied here rather than per call because a
+    stdio child receives its environment once, at spawn, and no amount of
+    wishing in SPEC §7.2 changes that.
+    """
     if upstream.command is not None:
+        env = dict(upstream.env or {})
+        if injected_env:
+            env.update(injected_env)
         params = StdioServerParameters(
             command=upstream.command,
             args=list(upstream.args),
-            env=upstream.env,
+            env=env or None,
             cwd=upstream.cwd,
         )
         async with (
@@ -615,18 +667,40 @@ async def run_proxy(
     upstream: UpstreamSpec,
     options: ProxyOptions | None = None,
     stats: ProxyStats | None = None,
+    broker: CredentialBroker | None = None,
 ) -> ProxyStats:
-    """Serve the proxy on stdio until the client disconnects."""
+    """Serve the proxy on stdio until the client disconnects.
+
+    With a ``broker``, `context.enforcement` on every proposal is derived
+    from whether the gate actually holds the credential for that action.
+    Without one it stays whatever ``options.enforcement`` claims, which is
+    what every deployment looked like before the broker existed.
+    """
     opts = options if options is not None else ProxyOptions()
     counters = stats if stats is not None else ProxyStats()
 
-    async with _connect(upstream) as client:
+    injected: dict[str, str] | None = None
+    if broker is not None:
+        spawn = broker.for_server(upstream.name, environment=opts.environment)
+        if spawn.injection is not None and spawn.injection.env:
+            injected = spawn.injection.env_values()
+            logger.info(
+                "upstream %s: injecting %d credential(s) from %s",
+                upstream.name,
+                len(injected),
+                spawn.injection.upstream_id,
+            )
+        elif spawn.reason:
+            logger.warning("upstream %s: %s", upstream.name, spawn.reason)
+
+    async with _connect(upstream, injected_env=injected) as client:
         proxy = _Proxy(
             session=session,
             upstream=upstream,
             client=client,
             options=opts,
             stats=counters,
+            broker=broker,
         )
         server = _build_server(proxy, client)
         async with stdio_server() as (read, write):

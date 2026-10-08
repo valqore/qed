@@ -15,10 +15,17 @@ be told what to install.
 
 from __future__ import annotations
 
+from gate.infra.secrets.broker import Brokerage, CredentialBroker
 from gate.infra.secrets.resolver import (
     CredentialResolver,
     SecretNotAvailable,
     SecretResolutionError,
 )
 
-__all__ = ["CredentialResolver", "SecretNotAvailable", "SecretResolutionError"]
+__all__ = [
+    "Brokerage",
+    "CredentialBroker",
+    "CredentialResolver",
+    "SecretNotAvailable",
+    "SecretResolutionError",
+]

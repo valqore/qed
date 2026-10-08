@@ -16,6 +16,11 @@ reading Vault is I/O and the decision path must stay replayable.
 
 from __future__ import annotations
 
+from gate.core.broker.injection import (
+    Injection,
+    plan_injection,
+    strip_agent_credentials,
+)
 from gate.core.broker.model import (
     CredentialSpec,
     Enforcement,
@@ -32,10 +37,13 @@ __all__ = [
     "CredentialSpec",
     "Enforcement",
     "InjectSpec",
+    "Injection",
     "Match",
     "Secret",
     "Upstream",
     "UpstreamSet",
     "describe",
     "match_upstream",
+    "plan_injection",
+    "strip_agent_credentials",
 ]

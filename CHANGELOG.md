@@ -6,6 +6,39 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - enforcing MCP (SPEC 7.2, week 5)
+
+- **`context.enforcement` is derived per action, not asserted by a flag.**
+  The gate is enforcing for a call if and only if it is holding the
+  credential for it. Before this an adapter was told it was enforcing by a
+  command-line option, that claim reached the evidence, and a missing
+  credential made it silently false.
+- Credentials are injected into a stdio upstream **at spawn**, into the
+  child's environment. A child receives its environment once, so "resolved
+  per request" is true for HTTP and not for stdio, where the TTL cache
+  governs re-spawns. Saying so beats implying a freshness the transport
+  cannot give.
+- `strip_agent_credentials` removes nine credential-shaped headers,
+  case-insensitively, *before* the broker's own is attached. An adapter that
+  added its header while leaving the agent's would be one where the agent
+  still chooses which credential is used.
+- `sigv4` reports `needs_signing` rather than faking a header: the signature
+  covers the request body, so it cannot be planned ahead, and forwarding
+  unsigned would mean the agent's credentials get used after all.
+- `ProxyStats.advisory` is printed separately, because a session that was
+  entirely advisory looks identical to an enforcing one in every other count.
+- With no upstreams configured the adapter keeps whatever the flag says.
+  Going silently advisory on an existing install would be the worse surprise.
+- The upstream test server gained `echo_env`, which is the only way to show
+  the injected credential reached the child process rather than stopping at
+  the proxy.
+
+### Fixed - one `Enforcement`, not two
+
+The broker defined its own enum with the same two members. It type-checked
+everywhere and compared unequal in exactly the one place it mattered, which
+is where mypy found it. The schema's enum is now re-exported.
+
 ### Added — credential broker: matching, resolution, posture (SPEC §7, week 5)
 
 - `gate/core/broker/` (pure) matches an action to an upstream;

@@ -1210,9 +1210,37 @@ def mcp(
             err=True,
         )
 
+    from gate.infra.secrets.broker import CredentialBroker
+    from gate.infra.secrets.resolver import CredentialResolver
+    from gate.infra.upstreams import load_upstreams
+
+    upstreams = load_upstreams(session.config, base=config)
+    broker = (
+        CredentialBroker(
+            upstreams=upstreams,
+            resolver=CredentialResolver(ttl_seconds=session.config.broker.ttl_seconds),
+        )
+        if upstreams.upstreams
+        else None
+    )
+    if broker is None:
+        typer.secho(
+            "gate: no upstreams configured, so this session is ADVISORY -- every call is "
+            "decided and recorded, but the agent is using its own credentials and could "
+            "go around the gate. `gate doctor` says the same thing at more length.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+
     try:
         anyio.run(
-            lambda: run_proxy(session=session, upstream=upstream, options=options, stats=stats)
+            lambda: run_proxy(
+                session=session,
+                upstream=upstream,
+                options=options,
+                stats=stats,
+                broker=broker,
+            )
         )
     except KeyboardInterrupt:  # pragma: no cover - interactive
         pass
@@ -1248,6 +1276,15 @@ def _print_stats(stats: ProxyStats) -> None:
         fg=typer.colors.CYAN,
         err=True,
     )
+    if stats.advisory:
+        # Said separately and last, because a session that was entirely
+        # advisory looks identical to an enforcing one in every number above.
+        typer.secho(
+            f"gate: {stats.advisory} of those call(s) were ADVISORY -- decided and "
+            "recorded, but the gate was not holding the credential.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
 
 def main() -> None:
