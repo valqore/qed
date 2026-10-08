@@ -17,7 +17,15 @@ from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 
-from gate.core.schemas import EvidenceRecord, SigningKeyInfo, rfc3339_ms
+from gate.core.budget import Charge, apply_charge
+from gate.core.schemas import (
+    Budget,
+    BudgetState,
+    EvidenceRecord,
+    SigningKeyInfo,
+    rfc3339_ms,
+    utcnow,
+)
 
 __all__ = ["MIGRATIONS_DIR", "SqliteStore"]
 
@@ -47,8 +55,33 @@ class SqliteStore:
     # ---------------------------------------------------------------- lifecycle
 
     def migrate(self) -> None:
+        """Apply each migration once, in name order.
+
+        Until 0002 every script was re-executed on every open, which worked
+        only because each statement was ``CREATE TABLE IF NOT EXISTS``. SQLite
+        has no ``ADD COLUMN IF NOT EXISTS``, so the first migration that alters
+        an existing table has to be run exactly once, and the ledger of what
+        has run has to live in the database.
+
+        An existing database has no ledger, so 0001 is replayed there the first
+        time this runs. That is safe precisely because 0001 is idempotent, and
+        it is why the ledger could be introduced without a backfill step.
+        """
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "  name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        applied = {
+            str(row["name"]) for row in self._conn.execute("SELECT name FROM schema_migrations")
+        }
         for script in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            if script.name in applied:
+                continue
             self._conn.executescript(script.read_text(encoding="utf-8"))
+            self._conn.execute(
+                "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+                (script.name, rfc3339_ms(utcnow())),
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -310,6 +343,156 @@ class SqliteStore:
         if row is None:
             return None
         return int(row["seq_from"]), int(row["seq_to"]), str(row["merkle_root"])
+
+    # ------------------------------------------------------------- budgets
+
+    def upsert_budget_caps(self, token_jti: str, budget: Budget) -> None:
+        """Record the caps a token was issued with (SPEC §6.2, §8).
+
+        Caps are written once at issuance and not touched by a charge, so a
+        later ``UPDATE`` of usage cannot silently widen them. Re-issuing the
+        same ``jti`` replaces the caps and leaves usage alone, which is what a
+        re-exchange of an unexpired token should do.
+        """
+        self._conn.execute(
+            "INSERT INTO budgets (token_jti, cap_steps, cap_tokens, cap_seconds, "
+            "cap_money_cents, currency) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(token_jti) DO UPDATE SET "
+            "cap_steps = excluded.cap_steps, cap_tokens = excluded.cap_tokens, "
+            "cap_seconds = excluded.cap_seconds, cap_money_cents = excluded.cap_money_cents, "
+            "currency = excluded.currency",
+            (
+                token_jti,
+                budget.steps,
+                budget.tokens,
+                budget.seconds,
+                budget.money_cents,
+                budget.currency,
+            ),
+        )
+
+    def load_budget(self, token_jti: str) -> BudgetState | None:
+        row = self._conn.execute(
+            "SELECT * FROM budgets WHERE token_jti = ?", (token_jti,)
+        ).fetchone()
+        return None if row is None else _row_to_budget(row)
+
+    def charge_budget(
+        self,
+        token_jti: str,
+        charge: Charge,
+        *,
+        now: datetime,
+        principal_hash: str | None = None,
+    ) -> tuple[BudgetState, BudgetState]:
+        """Apply one charge atomically. Returns ``(before, after)``.
+
+        ``BEGIN IMMEDIATE`` takes the write lock before the row is read, so two
+        adapters charging the same token cannot both read the same ``steps_used``
+        and write back the same incremented value. This is the same guarantee
+        ``append_evidence`` relies on, for the same reason.
+
+        A token with no row is charged against an uncapped state and a row is
+        created. Refusing instead would mean the first action of every token
+        that skipped issuance is lost to an error, and an uncapped budget is
+        already the documented meaning of a cap of 0.
+        """
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._conn.execute(
+                "SELECT * FROM budgets WHERE token_jti = ?", (token_jti,)
+            ).fetchone()
+            before = BudgetState(token_jti=token_jti) if row is None else _row_to_budget(row)
+            after = apply_charge(before, charge, now=now)
+            stamp = rfc3339_ms(now)
+            first_seen = rfc3339_ms(after.first_seen) if after.first_seen is not None else None
+            exhausted_at = stamp if after.exhausted(now) else None
+            if row is None:
+                self._conn.execute(
+                    "INSERT INTO budgets (token_jti, steps_used, tokens_used, "
+                    "money_used_cents, first_seen, updated_at, exhausted_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (
+                        token_jti,
+                        after.steps_used,
+                        after.tokens_used,
+                        after.money_used_cents,
+                        first_seen,
+                        stamp,
+                        exhausted_at,
+                    ),
+                )
+            else:
+                # `exhausted_at` only ever moves from NULL to a time: the first
+                # moment the token was spent is the interesting one, and a
+                # later charge must not overwrite it.
+                self._conn.execute(
+                    "UPDATE budgets SET steps_used = ?, tokens_used = ?, "
+                    "money_used_cents = ?, first_seen = ?, updated_at = ?, "
+                    "exhausted_at = COALESCE(exhausted_at, ?) WHERE token_jti = ?",
+                    (
+                        after.steps_used,
+                        after.tokens_used,
+                        after.money_used_cents,
+                        first_seen,
+                        stamp,
+                        exhausted_at,
+                        token_jti,
+                    ),
+                )
+            if principal_hash is not None:
+                self._conn.execute(
+                    "INSERT INTO budget_daily (principal_hash, day, steps_used, "
+                    "tokens_used, money_used_cents) VALUES (?,?,?,?,?) "
+                    "ON CONFLICT(principal_hash, day) DO UPDATE SET "
+                    "steps_used = steps_used + excluded.steps_used, "
+                    "tokens_used = tokens_used + excluded.tokens_used, "
+                    "money_used_cents = money_used_cents + excluded.money_used_cents",
+                    (
+                        principal_hash,
+                        stamp[:10],
+                        charge.steps,
+                        charge.tokens,
+                        charge.money_cents,
+                    ),
+                )
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+        return before, after
+
+    def daily_usage(self, principal_hash: str, day: str) -> tuple[int, int, int]:
+        """``(steps, tokens, money_cents)`` for one principal on one UTC day."""
+        row = self._conn.execute(
+            "SELECT steps_used, tokens_used, money_used_cents FROM budget_daily "
+            "WHERE principal_hash = ? AND day = ?",
+            (principal_hash, day),
+        ).fetchone()
+        if row is None:
+            return 0, 0, 0
+        return (
+            int(row["steps_used"]),
+            int(row["tokens_used"]),
+            int(row["money_used_cents"]),
+        )
+
+
+def _row_to_budget(row: sqlite3.Row) -> BudgetState:
+    return BudgetState(
+        token_jti=str(row["token_jti"]),
+        budget=Budget(
+            steps=int(row["cap_steps"]),
+            tokens=int(row["cap_tokens"]),
+            seconds=int(row["cap_seconds"]),
+            money_cents=int(row["cap_money_cents"]),
+            currency=str(row["currency"]),
+        ),
+        steps_used=int(row["steps_used"]),
+        tokens_used=int(row["tokens_used"]),
+        money_used_cents=int(row["money_used_cents"]),
+        first_seen=row["first_seen"],
+    )
 
 
 def _row_to_record(row: sqlite3.Row) -> EvidenceRecord:

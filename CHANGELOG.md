@@ -6,6 +6,52 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — budget ledger (SPEC §8), week 3
+
+- **Budgets are persisted and charged.** `check_proposal` previously passed an
+  empty `BudgetState` into the engine, so `derived.budget.*` was always zero
+  and the three AG-BUD-* rules could never fire against stored state. The caps
+  now live in `budgets` next to the usage, a decision reads them, and an action
+  that runs is charged.
+- `gate.core.budget` holds the arithmetic and stays pure: `charge_for` (cost
+  from the adapter's estimate), `apply_charge`, `newly_exhausted`. The atomic
+  read-modify-write is `SqliteStore.charge_budget`, under the same
+  `BEGIN IMMEDIATE` write lock `append_evidence` uses and for the same reason —
+  two adapters charging one token must not both read the same `steps_used`.
+- **A charge follows what happened, not what was decided.** In enforce mode a
+  BLOCK stops the action and nothing is spent. In shadow mode — the shipped
+  default — the adapter proceeds whatever the verdict says, the tokens are
+  really spent upstream, and the ledger says so. `effective_decision` already
+  encoded that difference.
+- Usage may exceed its cap and is not clamped. Clamping would make the ledger
+  disagree with what was spent, and the overshoot is what tells an operator the
+  cap was set too low.
+- `first_seen` is set by the first charge, not at issuance: a `seconds` budget
+  that started ticking when a token was minted would punish an agent for the
+  gap before it was used.
+- Per-principal daily aggregate (`budget_daily`), kept as its own table so a
+  retention purge of payloads cannot erase counts a policy reads.
+- **No evidence record per charge.** SPEC §8 writes one only on exhaustion, and
+  §6.2 writes `budget_update` only when a token is issued. A record per allowed
+  action would double the chain, restate what the verdict record already
+  implies, and put a signature and an insert on the hot path the week-7 p95
+  target has to defend. The first draft of this change did write one; the
+  record counts in eleven existing tests were what caught it.
+- 41 tests: arithmetic, ledger, migration, and the runtime rules above.
+  End-to-end on the CLI: a 2-step token allows two actions, the third is
+  blocked by the AG-BUD-001 short-circuit, exactly one `budget_exhausted` sits
+  after the verdict that caused it, and `gate-verify` still passes on the
+  resulting chain.
+
+### Changed — migrations are applied once
+
+- `SqliteStore.migrate` replayed every script on every open, which worked only
+  while every statement was `CREATE TABLE IF NOT EXISTS`. SQLite has no
+  `ADD COLUMN IF NOT EXISTS`, so 0002 could not be written that way. A
+  `schema_migrations` ledger now records what has run. An existing database has
+  no ledger, so 0001 is replayed there once — safe precisely because it is
+  idempotent, which is why no backfill was needed.
+
 ### Added — licence applied, name settled (SPEC §24.1, §24.2)
 
 - **Apache-2.0 is applied.** `LICENSE` (verbatim, 202 lines) and `NOTICE` at

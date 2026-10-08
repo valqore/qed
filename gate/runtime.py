@@ -14,6 +14,7 @@ from pathlib import Path
 
 from gate.config import DEFAULT_DIR, GateConfig, LoadedConfig, load_config
 from gate.core import jcs
+from gate.core.budget import charge_for, newly_exhausted
 from gate.core.policy.engine import evaluate
 from gate.core.policy.loader import LoadResult, baseline_pack_dir, load_bundle
 from gate.core.policy.model import LintFinding, PolicyBundle
@@ -204,7 +205,15 @@ def check_proposal(
         )
 
     stamp = now if now is not None else utcnow()
-    state = budget if budget is not None else BudgetState(token_jti=proposal.principal.token_jti)
+    jti = proposal.principal.token_jti
+    # An explicit `budget` overrides the ledger: the CLI passes one for
+    # `--budget` dry-runs and the tests pass one to pin a state. Otherwise the
+    # ledger is the source of truth, and a token with no row is uncapped.
+    state = (
+        budget
+        if budget is not None
+        else (session.store.load_budget(jti) or BudgetState(token_jti=jti))
+    )
     ctx = EvalContext(
         now=stamp, mandate=mandate, history=history if history is not None else HistoryDerived()
     )
@@ -238,6 +247,52 @@ def check_proposal(
         )
     )
 
+    outcome = CheckOutcome(
+        verdict=verdict, enforced=session.config.mode is Mode.enforce, records=records
+    )
+
+    # Charge only when the action is actually going to run. In enforce mode a
+    # BLOCK stops it, so nothing is spent; in shadow mode the adapter proceeds
+    # whatever the verdict says, and the tokens and money are spent for real.
+    # `effective_decision` already encodes that difference, so the ledger
+    # follows what happened rather than what was decided.
+    #
+    # A charge is skipped when the caller pinned a `budget`, because that is a
+    # hypothetical state and writing it back would corrupt the real ledger.
+    if budget is None and outcome.effective_decision is Decision.ALLOW:
+        charge = charge_for(proposal)
+        before, after = session.store.charge_budget(
+            jti, charge, now=stamp, principal_hash=proposal.principal.human_hash
+        )
+        # No evidence record per charge. SPEC §8 writes one only on exhaustion,
+        # and §6.2 writes `budget_update` only when a token is issued. A record
+        # per allowed action would double the chain, restate what the verdict
+        # record already implies (one ALLOW is one step), and put a signature
+        # and an insert on the hot path the week-7 p95 target has to defend.
+        # The running totals live in the ledger, which the next decision reads.
+        if newly_exhausted(before, after, now=stamp):
+            # Written after the update that caused it, so a reader of the chain
+            # sees the charge and then the consequence, in that order. The next
+            # action on this token short-circuits on AG-BUD-001.
+            records.append(
+                session.writer.append(
+                    type_=EvidenceType.budget_exhausted,
+                    assurance=Assurance.kernel,
+                    payload={
+                        "token_jti": jti,
+                        "budget": after.budget.model_dump(mode="json"),
+                        "steps_used": after.steps_used,
+                        "tokens_used": after.tokens_used,
+                        "money_used_cents": after.money_used_cents,
+                    },
+                    mode=session.config.mode,
+                    enforcement=proposal.context.enforcement,
+                    proposal_id=proposal.id,
+                    principal_hash=proposal.principal.human_hash,
+                    ts=stamp,
+                )
+            )
+
     session.store.record_proposal(
         proposal_json=jcs.dumps(proposal.model_dump(mode="json")),
         verdict_json=jcs.dumps(verdict.model_dump(mode="json")),
@@ -255,9 +310,7 @@ def check_proposal(
         mode=session.config.mode.value,
     )
 
-    return CheckOutcome(
-        verdict=verdict, enforced=session.config.mode is Mode.enforce, records=records
-    )
+    return outcome
 
 
 def chain_status(session: Session) -> dict[str, object]:
