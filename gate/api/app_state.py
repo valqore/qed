@@ -15,6 +15,7 @@ from fastapi import Request
 
 from gate.api.auth import AdapterAuth
 from gate.api.problems import Problem
+from gate.config import IssuerConfig
 from gate.core.delegation.claims import TokenClaims, TokenVerificationError
 from gate.core.schemas import Principal
 from gate.infra.jwks import JwksCache, discover_jwks_uri
@@ -100,11 +101,10 @@ class GateState:
                 last = exc
         raise last or TokenVerificationError("no configured issuer accepted this token")
 
-    def _jwks_uri(self, configured: object) -> str:
-        issuer = str(configured.issuer)
-        explicit = getattr(configured, "jwks_uri", None)
-        if explicit:
-            return str(explicit)
+    def _jwks_uri(self, configured: IssuerConfig) -> str:
+        issuer = configured.issuer
+        if configured.jwks_uri:
+            return configured.jwks_uri
         if issuer not in self._jwks_uris:
             # Discovery is done once per process. An air-gapped install sets
             # `jwks_uri` explicitly and never reaches this branch.

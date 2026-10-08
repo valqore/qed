@@ -182,7 +182,7 @@ async def exchange(request: Request) -> JSONResponse:
         lifetime=granted.lifetime,
         scope=granted.scope,
         budget=granted.budget,
-        environments=claims.environments or None,
+        environments=[str(e) for e in claims.environments] or None,
         agent_id=_string(body.get("agent_id")),
         mandate_id=_string(body.get("mandate_id")) or claims.mandate_id,
         parent=claims if claims.token_type == "gate" else None,

@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from joserfc.jwk import KeySet
@@ -151,7 +151,10 @@ class JwksCache:
     @staticmethod
     def _to_keyset(document: dict[str, Any]) -> tuple[KeySet, frozenset[str]]:
         try:
-            keyset = KeySet.import_key_set(document)
+            # `import_key_set` is typed against joserfc's own TypedDict; a
+            # document off the wire is a plain dict and is validated by the
+            # call itself, which is what the except clause below is for.
+            keyset = KeySet.import_key_set(cast("Any", document))
         except Exception as exc:  # joserfc raises several unrelated types here
             raise JwksError(f"key set could not be parsed: {exc}") from exc
         kids = frozenset(
@@ -189,7 +192,11 @@ class JwksCache:
             try:
                 document = self._fetch(jwks_uri)
             except JwksError:
-                document = None  # type: ignore[assignment]
+                # Fall through to the cached copies below. The failure is not
+                # re-raised here: an unreachable issuer is what the on-disk
+                # fallback exists for, and the honest error at the end of this
+                # method is the one that says nothing is cached either.
+                pass
             else:
                 keyset, kids = self._to_keyset(document)
                 self._write_disk(issuer, document)
