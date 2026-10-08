@@ -339,9 +339,11 @@ def test_config_reports_the_sections_it_does_not_honour_yet(tmp_path: Path) -> N
         tmp_path / "gate.yaml",
         instance_id="acme",
         mode="enforce",
-        approvals={"channels": ["slack"]},
         broker={"upstreams_file": "/etc/gate/upstreams.yaml"},
+        ui={"enabled": True},
     )
     loaded = load_config(cfg)
     assert loaded.config.instance_id == "acme"
-    assert loaded.ignored_sections == ["approvals", "broker"]
+    # `approvals` left this list in week 4: it is honoured now, and a section
+    # reported as ignored while it is in force would be worse than silence.
+    assert loaded.ignored_sections == ["broker", "ui"]

@@ -18,6 +18,7 @@ from gate.api.problems import Problem
 from gate.config import IssuerConfig
 from gate.core.delegation.claims import TokenClaims, TokenVerificationError
 from gate.core.schemas import Principal
+from gate.infra.channels.slack import SlackChannel
 from gate.infra.jwks import JwksCache, discover_jwks_uri
 from gate.infra.tokens import GATE_ALG, TokenIssuer, decode_unverified_header, verify_token
 from gate.runtime import Session
@@ -37,6 +38,10 @@ class GateState:
     #: answers 501 without it rather than minting tokens nobody asked for.
     token_issuer: TokenIssuer | None = None
     jwks: JwksCache | None = None
+    #: Present only when a bot token is configured. Without it a button click
+    #: cannot be resolved to a person, so the endpoint refuses rather than
+    #: recording a Slack user id as the approver.
+    slack: SlackChannel | None = None
     _jwks_uris: dict[str, str] = field(default_factory=dict, repr=False)
     #: Why the service is not ready, if it is not. Empty when it is.
     blockers: list[str] = field(default_factory=list)

@@ -11,6 +11,7 @@ when nothing is listening.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -31,9 +32,12 @@ __all__ = [
 DEFAULT_DIR = Path(".gate")
 
 #: Sections of SPEC §16 that are still unimplemented after week 2.
+#: Sections a config file may carry that this build does not act on yet. A
+#: silently ignored section is a setting somebody believes is in force, so
+#: `load_config` reports them. `approvals` left this list in week 4 and
+#: `delegation` was never on it.
 UNIMPLEMENTED_SECTIONS = (
     "identity",
-    "approvals",
     "broker",
     "remote",
     "observability",
@@ -99,6 +103,41 @@ class DelegationConfig(Frozen):
     offline: bool = False
 
 
+class SlackConfig(Frozen):
+    """Slack as an approval channel (SPEC §9.5)."""
+
+    #: Env var holding the bot token. The token itself never goes in the file:
+    #: a config a person edits is a config that ends up in a repository.
+    bot_token_env: str | None = None
+    signing_secret_env: str | None = None
+    channel: str | None = None
+
+
+class ApprovalsConfig(Frozen):
+    """How approvals reach a person, and who that person is allowed to be."""
+
+    slack: SlackConfig = SlackConfig()
+    #: Generic outbound notification, one-way. Teams, PagerDuty, anything.
+    webhook_url: str | None = None
+    #: email -> groups. Needed because a channel knows an email and a rule
+    #: names a group, and nothing in between has told the gate which is which.
+    #: Week 6 replaces this with the IdP's own claims; until then it is
+    #: explicit rather than assumed, so nobody is accidentally an approver.
+    groups_by_email: dict[str, list[str]] = Field(default_factory=dict)
+    require_reason_for_deny: bool = False
+
+    def slack_bot_token(self) -> str | None:
+        name = self.slack.bot_token_env
+        return os.environ.get(name) if name else None
+
+    def slack_signing_secret_value(self) -> str | None:
+        name = self.slack.signing_secret_env
+        return os.environ.get(name) if name else None
+
+    def groups_for(self, email: str) -> list[str]:
+        return list(self.groups_by_email.get(email, ()))
+
+
 class GateConfig(Frozen):
     instance_id: str = "gate-local"
     mode: Mode = Mode.shadow
@@ -109,6 +148,7 @@ class GateConfig(Frozen):
     api: ApiConfig = ApiConfig()
     adapters: list[AdapterCredential] = Field(default_factory=list)
     delegation: DelegationConfig = DelegationConfig()
+    approvals: ApprovalsConfig = ApprovalsConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 

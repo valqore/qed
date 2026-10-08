@@ -125,8 +125,75 @@ approval_decided       (also written for a refused attempt, with the SoD rule)
 approval_expired       nobody answered in time
 ```
 
+## Channels
+
+A channel does two things and nothing else: it renders a request so somebody
+can judge it, and it turns a click back into an **identified person**. The
+decision is always `gate.core.approval.model.decide` — a channel that decided
+for itself would be a channel where separation of duties worked differently,
+and that is the one place a second implementation must not exist.
+
+### HTTP
+
+```
+GET  /v1/approvals?status=pending
+GET  /v1/approvals/{id}           # includes the approver view stored at request time
+POST /v1/approvals/{id}           # {"decision": "approve_once|approve_window|deny", ...}
+```
+
+The approver travels in `X-Gate-Approver` and `X-Gate-Approver-Groups`, **not
+in the body**. An endpoint that let the request name its own approver would
+make the whole control decorative.
+
+### Slack
+
+```yaml
+approvals:
+  slack:
+    bot_token_env: GATE_SLACK_BOT_TOKEN
+    signing_secret_env: GATE_SLACK_SIGNING_SECRET
+    channel: "#approvals"
+  groups_by_email:
+    priya@example.com: [sre-oncall]
+```
+
+Point Slack interactivity at `POST /slack/interactivity`. It sits outside
+`/v1` because Slack cannot sign our adapter envelope; it authenticates with
+Slack's own `X-Slack-Signature` over the exact bytes received.
+
+**A Slack user id is not an identity.** It says somebody with access to a
+workspace pressed a button. It is resolved to an email through `users.info`
+and *that* becomes the principal hash in the chain. If the lookup fails the
+decision is refused rather than recorded against an unknown person.
+
+The timestamp is checked before the MAC: a signature stays valid forever, so
+the five-minute window is the only thing that makes a captured request stop
+working.
+
+### Webhook
+
+```yaml
+approvals:
+  webhook_url: https://hooks.example/gate
+```
+
+One-way, for Teams or PagerDuty. It announces; it does not accept decisions,
+because a channel that decides needs an identity story and "whoever can POST
+to this URL" is not one. Delivery failures are logged and ignored — a
+notification channel that is down must not hold up a verdict.
+
+### Live feed
+
+```
+GET /v1/events          # text/event-stream, resumable with Last-Event-ID
+```
+
+Streams the evidence chain itself rather than a second event bus: a feed
+assembled from somewhere else could disagree with the evidence. It polls the
+store rather than being pushed to, so a slow reader never ends up on the hot
+path of a verdict. Proposal bodies and redacted parameters are dropped — a
+live feed reaches more screens than the queue does.
+
 ## Not built yet
 
-Slack Block Kit buttons, the `/events` SSE stream and the web approval page
-are the remaining week-4 items. The decision path they would call is finished
-and is the same one `gate approve` uses.
+The web approval page (`/ui/approvals`). Every API it needs exists.

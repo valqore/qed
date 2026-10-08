@@ -589,6 +589,17 @@ class SqliteStore:
             )
         return expired
 
+    def approval_request_json(self, approval_id: str) -> str | None:
+        """The approver view stored when the request was opened.
+
+        Kept rather than rebuilt so it reflects the proposal as it was when
+        the question was asked, not as the record looks now.
+        """
+        row = self._conn.execute(
+            "SELECT request_json FROM approvals WHERE id = ?", (approval_id,)
+        ).fetchone()
+        return None if row is None or row["request_json"] is None else str(row["request_json"])
+
     def list_approvals(
         self, *, status: str | None = None, limit: int = 50
     ) -> list[ApprovalRequest]:

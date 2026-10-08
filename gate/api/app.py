@@ -21,8 +21,17 @@ from fastapi import FastAPI
 from gate.api.app_state import GateState
 from gate.api.auth import AdapterAuth
 from gate.api.problems import install_handlers
-from gate.api.routers import evidence, health, proposals, token
+from gate.api.routers import (
+    approvals,
+    events,
+    evidence,
+    health,
+    proposals,
+    slack,
+    token,
+)
 from gate.config import DEFAULT_DIR
+from gate.infra.channels.slack import SlackChannel
 from gate.infra.jwks import JwksCache
 from gate.infra.keys.file import MissingSigningKey
 from gate.infra.tokens import TokenIssuer, load_or_create_token_key
@@ -82,6 +91,10 @@ def create_app(
                     directory=directory / delegation.jwks_cache,
                     offline=delegation.offline,
                 )
+            bot_token = state.session.config.approvals.slack_bot_token()
+            channel_name = state.session.config.approvals.slack.channel
+            if bot_token and channel_name:
+                state.slack = SlackChannel(bot_token=bot_token, channel=channel_name)
         try:
             yield
         finally:
@@ -100,6 +113,9 @@ def create_app(
     app.include_router(health.router)
     app.include_router(proposals.router)
     app.include_router(evidence.router)
+    app.include_router(approvals.router)
+    app.include_router(events.router)
+    app.include_router(slack.router)
     app.include_router(token.router)
     app.include_router(token.public_router)
     return app
