@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gate-verify"
+version = "0.1.0.dev1"
+description = "Independent verifier for gate evidence chains"
+requires-python = ">=3.12"
+# See ../../PATENT-AND-LICENCE-GATE.md. Intended licence is Apache-2.0; not
+# applied until SPEC §24.2 (patent scope) closes.
+classifiers = ["Private :: Do Not Upload"]
+# One dependency, on purpose: an auditor must be able to install this on a
+# machine that is not allowed to reach the internet twice.
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+gate-verify = "gate_verify.cli:main"
+
+[tool.setuptools]
+packages = ["gate_verify"]

@@ -1,0 +1,47 @@
+# agent-baseline — skills (SPEC §4.6, AG-SKL-*)
+#
+# gate does not scan skill *content* (SPEC §1.3). These two rules are about
+# provenance and declared capability, which are facts an adapter can report
+# deterministically. AG-SKL-002 ("skill requests tools outside token scope")
+# needs the verified token scope and arrives in week 3.
+
+- rule_id: AG-SKL-001
+  name: Skill from a source that is not trusted
+  severity: HIGH
+  mode: enforce
+  applies_to:
+    kinds: [skill]
+  when:
+    any:
+      - { field: action.params_redacted.source, exists: false }
+      - field: action.params_redacted.source
+        glob:
+          - "http://*"
+          - "*gist.github.com*"
+          - "*pastebin*"
+  verdict: BLOCK
+  message: "This skill comes from an untrusted or unstated source."
+  fix: "Install the skill from your own repository, then re-run."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI01" }
+    - { framework: owasp_llm, control: "LLM05" }
+    - { framework: soc2, control: "CC8.1" }
+
+- rule_id: AG-SKL-003
+  name: Skill with no allowed-tools manifest
+  severity: MEDIUM
+  # Shadow: most skills in the wild have no manifest yet, so this measures the
+  # gap rather than blocking on it.
+  mode: shadow
+  applies_to:
+    kinds: [skill]
+  when: { field: action.params_redacted.allowed_tools, exists: false }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 30m
+  message: "This skill does not declare which tools it may use."
+  fix: "Add an allowed-tools manifest to the skill."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI01" }
+    - { framework: nist_ai_rmf, control: "MEASURE-2.7" }

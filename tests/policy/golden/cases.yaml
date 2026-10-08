@@ -1,0 +1,720 @@
+# Golden policy cases (SPEC §21).
+#
+# Each case is a deep-merge patch over tests/conftest.py::BASE_PROPOSAL plus the
+# expected outcome. `rules` is the EXACT sorted set of rule ids in the verdict,
+# so a case fails both when a rule stops firing and when an unrelated rule
+# starts firing — the second kind is what catches an accidentally widened rule.
+#
+# `blast_radius` is asserted only where the arithmetic is worth pinning; the
+# table itself is covered exhaustively in tests/policy/test_blast_radius.py.
+#
+# The base proposal is a read-only GitHub call in dev: nothing should fire.
+
+# ---------------------------------------------------------------- default path
+- id: def-001-plain-read-allows
+  patch: {}
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+    default_applied: true
+    blast_radius: 10
+
+- id: def-001-staging-read-allows
+  patch: { context: { environment: staging } }
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 15
+
+- id: def-001-prod-read-allows
+  patch: { context: { environment: prod } }
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 25
+
+# ------------------------------------------------------------------- AG-IDN-001
+- id: idn-001-empty-token
+  patch: { principal: { token_jti: "" } }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-IDN-001]
+
+- id: idn-001-token-present-does-not-fire
+  patch: { principal: { token_jti: "01JB000000000000000000JTIX" } }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------- AG-IDN-007 (synthetic)
+- id: idn-007-unattended-without-mandate
+  patch: { principal: { human_hash: null } }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-IDN-007]
+
+- id: idn-007-unattended-with-mandate-is-not-blocked-here
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+  mandate: within
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------- AG-IDN-006 (synthetic)
+- id: idn-006-action-kind-outside-mandate
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+  mandate: http_only
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+- id: idn-006-target-outside-mandate
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+    action: { target: "db:prod/orders" }
+  mandate: within
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+- id: idn-006-name-outside-mandate
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+    action: { name: "github.delete_repo" }
+  mandate: within
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+- id: idn-006-environment-outside-mandate
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+    context: { environment: prod }
+  mandate: within
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+- id: idn-006-mandate-expired
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+  mandate: expired
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+- id: idn-006-mandate-revoked
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+  mandate: revoked
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+- id: idn-006-mandate-applies-to-attended-principal-too
+  patch:
+    principal: { mandate_id: md_01 }
+    context: { environment: prod }
+  mandate: within
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]
+
+# ------------------------------------------------- AG-BUD-001 (synthetic)
+- id: bud-001-steps-exhausted
+  patch: {}
+  budget: { budget: { steps: 5 }, steps_used: 5 }
+  expect:
+    decision: BLOCK
+    rules: [AG-BUD-001]
+
+- id: bud-001-tokens-exhausted
+  patch: {}
+  budget: { budget: { tokens: 1000 }, tokens_used: 1000 }
+  expect:
+    decision: BLOCK
+    rules: [AG-BUD-001]
+
+- id: bud-001-money-exhausted
+  patch: {}
+  budget: { budget: { money_cents: 500 }, money_used_cents: 500 }
+  expect:
+    decision: BLOCK
+    rules: [AG-BUD-001]
+
+- id: bud-001-uncapped-budget-is-never-exhausted
+  patch: {}
+  budget: { steps_used: 99999, tokens_used: 99999999 }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+- id: bud-001-steps-one-left
+  patch: {}
+  budget: { budget: { steps: 10 }, steps_used: 9 }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-BUD-002, AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-BUD-002
+- id: bud-002-steps-at-eighty-percent
+  patch: {}
+  budget: { budget: { steps: 10 }, steps_used: 8 }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-BUD-002, AG-DEF-001]
+    default_applied: true
+
+- id: bud-002-steps-below-threshold
+  patch: {}
+  budget: { budget: { steps: 100 }, steps_used: 79 }
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+
+- id: bud-002-tokens-at-eighty-percent
+  patch: {}
+  budget: { budget: { tokens: 1000 }, tokens_used: 800 }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-BUD-002, AG-DEF-001]
+
+- id: bud-002-money-at-eighty-percent
+  patch: {}
+  budget: { budget: { money_cents: 1000 }, money_used_cents: 820 }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-BUD-002, AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-BUD-003
+- id: bud-003-cost-exceeds-remaining-money
+  patch: { context: { cost_estimate: { money_cents: 500 } } }
+  budget: { budget: { money_cents: 1000 }, money_used_cents: 900 }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-BUD-002, AG-BUD-003]
+
+- id: bud-003-cost-within-remaining-money
+  patch: { context: { cost_estimate: { money_cents: 50 } } }
+  budget: { budget: { money_cents: 1000 }, money_used_cents: 100 }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+- id: bud-003-no-money-cap-means-no-overrun
+  patch: { context: { cost_estimate: { money_cents: 500000 } } }
+  budget: {}
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-BUD-004
+- id: bud-004-unknown-cost-is-recorded-not-enforced
+  patch: { context: { cost_estimate: { known: false } } }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-BUD-004, AG-DEF-001]
+    default_applied: true
+
+- id: bud-004-known-cost-does-not-fire
+  patch: { context: { cost_estimate: { known: true, tokens: 1200 } } }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-BLR-001
+- id: blr-001-account-scope-in-prod
+  patch:
+    context:
+      environment: prod
+      blast_radius_hints: { scope: account }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-BLR-001, AG-BLR-005]
+    blast_radius: 75
+
+- id: blr-001-global-scope-in-prod
+  patch:
+    context:
+      environment: prod
+      blast_radius_hints: { scope: global }
+  expect:
+    decision: BLOCK
+    rules: [AG-BLR-001, AG-BLR-005]
+    blast_radius: 95
+
+- id: blr-001-account-scope-in-staging-is-not-blocked
+  patch:
+    context:
+      environment: staging
+      blast_radius_hints: { scope: account }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-005]
+    blast_radius: 65
+
+- id: blr-001-single-resource-in-prod-does-not-fire
+  patch:
+    context:
+      environment: prod
+      blast_radius_hints: { scope: single_resource }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-BLR-002
+- id: blr-002-multi-resource-delete-in-dev
+  patch:
+    context:
+      blast_radius_hints: { deletes: true, scope: multi_resource }
+  expect:
+    decision: REQUIRE_APPROVAL
+    would: REQUIRE_APPROVAL
+    rules: [AG-BLR-002]
+    blast_radius: 55
+
+- id: blr-002-single-resource-delete-in-dev-does-not-fire
+  patch:
+    context:
+      blast_radius_hints: { deletes: true, scope: single_resource }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 35
+
+- id: blr-002-global-delete-in-dev
+  patch:
+    context:
+      blast_radius_hints: { deletes: true, scope: global }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-002, AG-BLR-005]
+    blast_radius: 100
+
+# ------------------------------------------------------------------- AG-BLR-003
+- id: blr-003-prod-delete
+  patch:
+    context:
+      environment: prod
+      blast_radius_hints: { writes: true, deletes: true }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-003]
+    blast_radius: 60
+
+- id: blr-003-prod-sql-drop-in-params
+  patch:
+    action:
+      params_redacted: { sql: "DROP TABLE orders_archive;" }
+    context: { environment: prod }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-003]
+    blast_radius: 40
+
+- id: blr-003-prod-destructive-tool-name
+  patch:
+    action: { name: "ec2.terminate_instances", target: "aws:ec2:i-123" }
+    context: { environment: prod }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-003]
+    blast_radius: 40
+
+- id: blr-003-staging-sql-drop-does-not-fire
+  patch:
+    action:
+      params_redacted: { sql: "DROP TABLE scratch;" }
+    context: { environment: staging }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 30
+
+- id: blr-003-prod-select-does-not-fire
+  patch:
+    action:
+      params_redacted: { sql: "SELECT 1" }
+    context: { environment: prod }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 25
+
+- id: blr-003-prod-shell-delete
+  patch:
+    action: { kind: shell, name: "bash", target: "host:web-01" }
+    context:
+      environment: prod
+      blast_radius_hints: { deletes: true }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-003]
+    blast_radius: 60
+
+# ------------------------------------------------------------------- AG-BLR-004
+- id: blr-004-iam-role-write
+  patch:
+    action: { name: "aws.put_role_policy", target: "aws:iam:role/admin" }
+    context:
+      blast_radius_hints: { writes: true }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-004]
+    blast_radius: 35
+
+- id: blr-004-secret-write-in-prod
+  patch:
+    action: { name: "vault.write", target: "vault:secret/prod/db" }
+    context:
+      environment: prod
+      blast_radius_hints: { writes: true }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-004]
+    blast_radius: 50
+
+- id: blr-004-iam-read-does-not-fire
+  patch:
+    action: { name: "aws.get_role", target: "aws:iam:role/admin" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 25
+
+- id: blr-004-prod-iam-account-delete-is-the-worst-case
+  patch:
+    action: { name: "aws.delete_account_roles", target: "aws:iam:*" }
+    context:
+      environment: prod
+      blast_radius_hints: { writes: true, deletes: true, scope: account }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-BLR-001, AG-BLR-002, AG-BLR-003, AG-BLR-004, AG-BLR-005]
+    blast_radius: 100
+
+# ------------------------------------------------------------------- AG-BLR-005
+- id: blr-005-exactly-sixty-does-not-fire
+  patch:
+    context:
+      environment: prod
+      blast_radius_hints: { writes: true, deletes: true }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-003]
+    blast_radius: 60
+
+- id: blr-005-seventy-fires
+  patch:
+    context:
+      environment: prod
+      blast_radius_hints: { deletes: true, scope: multi_resource }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-BLR-002, AG-BLR-003, AG-BLR-005]
+    blast_radius: 70
+
+# ------------------------------------------------------------------- AG-DAT-001
+- id: dat-001-aws-key-in-body
+  patch:
+    action:
+      params_redacted: { body: "aws_key=AKIAIOSFODNN7EXAMPLE and more" }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-DAT-001]
+
+- id: dat-001-github-token-in-command
+  patch:
+    action:
+      kind: shell
+      params_redacted: { command: "GH=ghp_abcdefghijklmnopqrstuvwxyz0123456789 gh pr list" }
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-001]
+
+- id: dat-001-private-key-in-body
+  patch:
+    action:
+      params_redacted:
+        body: "-----BEGIN OPENSSH PRIVATE KEY-----abc-----END OPENSSH PRIVATE KEY-----"
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-001]
+
+- id: dat-001-password-assignment-in-sql
+  patch:
+    action:
+      params_redacted: { sql: "UPDATE users SET password='hunter2' WHERE id=1" }
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-001]
+
+- id: dat-001-clean-body-does-not-fire
+  patch:
+    action:
+      params_redacted: { body: "{\"title\": \"Fix the retry loop\"}" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-DAT-002
+- id: dat-002-email-in-body
+  patch:
+    action:
+      params_redacted: { body: "notify ali.celik@acme.com about the outage" }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-DAT-002]
+
+- id: dat-002-sensitive-column-in-sql
+  patch:
+    action:
+      params_redacted: { sql: "SELECT ssn, name FROM customers" }
+  expect:
+    decision: REQUIRE_APPROVAL
+    rules: [AG-DAT-002]
+
+- id: dat-002-no-personal-data-does-not-fire
+  patch:
+    action:
+      params_redacted: { body: "restart the worker pool" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-DAT-003
+- id: dat-003-egress-to-unknown-host-is-recorded-not-enforced
+  patch:
+    action:
+      kind: http
+      name: "POST /collect"
+      target: "https://telemetry.unknown-vendor.io/collect"
+      method: POST
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-DAT-003, AG-DEF-001]
+    default_applied: true
+
+- id: dat-003-allowlisted-host-does-not-fire
+  patch:
+    action:
+      kind: http
+      name: "GET /repos"
+      target: "https://api.github.com/repos/acme/payments"
+      method: GET
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+
+- id: dat-003-does-not-fire-on-a-cloud-resource-target
+  patch:
+    action:
+      kind: http
+      name: "PUT /ec2/security-groups/sg-0a1b2c"
+      target: "aws:ec2:sg-0a1b2c"
+      method: PUT
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 10
+
+- id: dat-003-does-not-apply-to-mcp-tools
+  patch:
+    action: { target: "https://telemetry.unknown-vendor.io/collect" }
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-DAT-007
+- id: dat-007-open-ingress-cidr
+  patch:
+    action:
+      name: "ec2.authorize_security_group_ingress"
+      target: "aws:ec2:sg-123"
+      params_redacted: { cidr: "0.0.0.0/0" }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-DAT-007]
+
+- id: dat-007-open-ingress-in-body
+  patch:
+    action:
+      params_redacted: { body: "{\"source\": \"0.0.0.0/0\"}" }
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-007]
+
+- id: dat-007-ipv6-open-ingress
+  patch:
+    action:
+      params_redacted: { cidr: "::/0" }
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-007]
+
+- id: dat-007-narrow-cidr-does-not-fire
+  patch:
+    action:
+      params_redacted: { cidr: "10.0.1.0/24" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------------------- AG-SKL-*
+- id: skl-001-skill-without-a-source
+  patch:
+    action: { kind: skill, name: "Skill:deploy-prod", target: "skill:deploy-prod" }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-SKL-001, AG-SKL-003]
+
+- id: skl-001-skill-from-a-gist
+  patch:
+    action:
+      kind: skill
+      name: "Skill:deploy-prod"
+      target: "skill:deploy-prod"
+      params_redacted:
+        source: "https://gist.github.com/someone/abc123"
+        allowed_tools: ["bash"]
+  expect:
+    decision: BLOCK
+    rules: [AG-SKL-001]
+
+- id: skl-001-skill-over-plain-http
+  patch:
+    action:
+      kind: skill
+      name: "Skill:deploy-prod"
+      target: "skill:deploy-prod"
+      params_redacted:
+        source: "http://wiki.local/skills/deploy.md"
+        allowed_tools: ["bash"]
+  expect:
+    decision: BLOCK
+    rules: [AG-SKL-001]
+
+- id: skl-001-trusted-source-with-manifest-allows
+  patch:
+    action:
+      kind: skill
+      name: "Skill:deploy-prod"
+      target: "skill:deploy-prod"
+      params_redacted:
+        source: "https://git.acme.internal/skills/deploy.md"
+        allowed_tools: ["bash", "kubectl"]
+  expect:
+    decision: ALLOW
+    would: ALLOW
+    rules: [AG-DEF-001]
+    blast_radius: 15
+
+- id: skl-003-trusted-source-without-manifest-is-recorded
+  patch:
+    action:
+      kind: skill
+      name: "Skill:deploy-prod"
+      target: "skill:deploy-prod"
+      params_redacted:
+        source: "https://git.acme.internal/skills/deploy.md"
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-DEF-001, AG-SKL-003]
+    default_applied: true
+
+- id: skl-003-does-not-apply-to-mcp-tools
+  patch:
+    action:
+      params_redacted: { note: "no allowed_tools here, but this is not a skill" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# ------------------------------------------------------- precedence and mixing
+- id: precedence-block-beats-approval
+  patch:
+    action:
+      params_redacted: { cidr: "0.0.0.0/0", body: "ali@acme.com" }
+    context:
+      environment: prod
+      blast_radius_hints: { writes: true, deletes: true }
+  expect:
+    decision: BLOCK
+    would: BLOCK
+    rules: [AG-BLR-003, AG-DAT-002, AG-DAT-007]
+
+- id: precedence-shadow-hit-never-decides
+  patch:
+    action:
+      kind: http
+      name: "GET /x"
+      target: "https://unknown.example.net/x"
+      method: GET
+    context:
+      cost_estimate: { known: false }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-BUD-004, AG-DAT-003, AG-DEF-001]
+    default_applied: true
+
+- id: precedence-shadow-and-enforce-together
+  patch:
+    action:
+      kind: http
+      name: "PUT /things"
+      target: "https://unknown.example.net/things"
+      method: PUT
+    context:
+      environment: prod
+      blast_radius_hints: { deletes: true }
+  expect:
+    decision: REQUIRE_APPROVAL
+    would: REQUIRE_APPROVAL
+    rules: [AG-BLR-003, AG-DAT-003]
+    default_applied: false
+
+- id: precedence-synthetic-budget-beats-every-rule
+  patch:
+    action:
+      params_redacted: { cidr: "0.0.0.0/0" }
+    context: { environment: prod }
+  budget: { budget: { steps: 1 }, steps_used: 1 }
+  expect:
+    decision: BLOCK
+    rules: [AG-BUD-001]
+
+- id: precedence-synthetic-mandate-beats-every-rule
+  patch:
+    principal: { human_hash: null, mandate_id: md_01 }
+    action:
+      params_redacted: { cidr: "0.0.0.0/0" }
+    context: { environment: prod }
+  mandate: http_only
+  expect:
+    decision: BLOCK
+    rules: [AG-IDN-006]

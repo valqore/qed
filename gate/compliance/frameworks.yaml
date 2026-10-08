@@ -1,0 +1,46 @@
+# Canonical framework ids and the aliases that normalise to them (SPEC §11).
+# A rule's `compliance.framework` must be a canonical id or a listed alias;
+# anything else is a lint warning, never a silent pass-through. `depth` is the
+# honesty flag exported to OSCAL so an auditor can see how deep the mapping
+# actually goes.
+frameworks:
+  - id: eu_ai_act
+    title: EU Artificial Intelligence Act (Regulation 2024/1689)
+    depth: article
+    aliases: ["EU AI Act", "EU-AI-Act", "eu-ai-act", "AI Act", "ai_act"]
+  - id: nist_ai_rmf
+    title: NIST AI Risk Management Framework 1.0
+    depth: category
+    aliases: ["NIST AI RMF", "NIST-AI-RMF", "nist-ai-rmf", "AI RMF"]
+  - id: iso_42001
+    title: ISO/IEC 42001:2023 AI management systems
+    depth: pack
+    aliases: ["ISO/IEC 42001", "ISO 42001", "iso42001", "iso-42001"]
+  - id: dora
+    title: Digital Operational Resilience Act (Regulation 2022/2554)
+    depth: pack
+    aliases: ["DORA", "EU DORA"]
+  - id: owasp_agentic
+    title: OWASP Agentic AI Top 10
+    depth: category
+    aliases: ["OWASP Agentic", "owasp-agentic", "ASI"]
+  - id: owasp_mcp
+    title: OWASP MCP Top 10
+    depth: category
+    aliases: ["OWASP MCP", "owasp-mcp"]
+  - id: owasp_llm
+    title: OWASP Top 10 for LLM Applications
+    depth: category
+    aliases: ["OWASP LLM", "owasp-llm", "LLM Top 10"]
+  - id: soc2
+    title: AICPA SOC 2 Trust Services Criteria
+    depth: pack
+    aliases: ["SOC2", "SOC 2", "soc-2", "TSC"]
+  - id: nist_csf
+    title: NIST Cybersecurity Framework 2.0
+    depth: pack
+    aliases: ["NIST CSF", "nist-csf", "CSF"]
+  - id: iso_27001
+    title: ISO/IEC 27001:2022
+    depth: pack
+    aliases: ["ISO/IEC 27001", "ISO 27001", "iso27001", "iso-27001"]

@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "valqore-gate"
+version = "0.1.0.dev1"
+description = "Self-hosted policy and evidence kernel for AI-agent actions"
+requires-python = ">=3.12"
+# NOTE: `license` is deliberately absent and no LICENSE file is in this tree.
+# SPEC 25.1 fixes Apache-2.0 for this repo, but SPEC 24.2 (Valqore patent scope)
+# is unresolved and an Apache-2.0 patent grant is irrevocable once distributed.
+# See PATENT-AND-LICENCE-GATE.md. Do not add a LICENSE file or publish until that
+# item is closed.
+classifiers = [
+    # Guard rail: PyPI refuses uploads carrying this classifier. Remove only
+    # together with the license decision above.
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "pydantic>=2.7",
+    "cryptography>=42",
+    "typer>=0.12",
+    "pyyaml>=6",
+    "python-ulid>=2",
+    "regex>=2024.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+]
+
+[project.scripts]
+gate = "gate.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["gate*"]
+
+[tool.setuptools.package-data]
+gate = ["core/policy/packs/*/*.yaml", "infra/storage/migrations/*.sql"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN"]
+# RUF001-003: docstrings and prose use typographic dashes on purpose; the
+# only places ASCII is mandatory are strings printed to a terminal, and
+# tests/cli asserts that.
+ignore = ["ANN401", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["ANN", "B"]
+"**/conftest.py" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["gate", "packages/gate-verify/gate_verify"]
+mypy_path = "packages/gate-verify"
+
+[[tool.mypy.overrides]]
+module = ["ulid.*", "regex.*", "yaml.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages/gate-verify/tests"]
+pythonpath = [".", "packages/gate-verify"]
+filterwarnings = ["error"]

@@ -1,0 +1,7 @@
+# Normalise line endings in the repository. Evidence records and hashes are
+# computed over in-memory values, never over files, so this is hygiene rather
+# than correctness — but a chain fixture that differs by line ending between
+# platforms would be an unpleasant way to learn that.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

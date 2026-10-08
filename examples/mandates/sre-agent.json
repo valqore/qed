@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "id": "md_01JB00000000000000000001",
+  "issued_by_hash": "6b8f2a1d4c7e9035b1a2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef01",
+  "for_agent": "svc:sre-agent",
+  "purpose": "Automated remediation for payment-api alerts",
+  "allowed": {
+    "kinds": ["http"],
+    "name_globs": ["GET *", "PUT /ec2/*", "POST /ec2/*"],
+    "target_globs": ["aws:ec2:*", "aws:rds:describe*"],
+    "environments": ["prod"]
+  },
+  "budget": { "steps": 20, "tokens": 0, "seconds": 600, "money_cents": 0 },
+  "oversight": {
+    "approvers": ["sre-oncall"],
+    "require_approval_when": ["blast_radius > 60"]
+  },
+  "valid": {
+    "from": "2026-10-01T00:00:00.000Z",
+    "until": "2026-12-31T23:59:59.000Z"
+  }
+}

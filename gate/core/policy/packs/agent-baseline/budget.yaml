@@ -1,0 +1,58 @@
+# agent-baseline — budgets (SPEC §4.6, AG-BUD-*)
+#
+# AG-BUD-001 (exhausted) is synthetic and short-circuits in the engine before
+# any rule runs, so it is not a file rule. The three here are the warnings
+# ahead of it.
+
+- rule_id: AG-BUD-002
+  name: Budget at or past 80 percent consumed
+  severity: LOW
+  # Shipped in shadow: it is a useful signal, but an agent being stopped at 80%
+  # of its budget surprises people on day one. Flip to enforce deliberately.
+  mode: shadow
+  when:
+    any:
+      - { field: derived.budget.steps_pct_used, gte: 80 }
+      - { field: derived.budget.tokens_pct_used, gte: 80 }
+      - { field: derived.budget.money_pct_used, gte: 80 }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 10m
+  message: "This token has consumed 80 percent or more of a budget axis."
+  fix: "Let the run finish, or issue a fresh token with a larger budget."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+
+- rule_id: AG-BUD-003
+  name: Action costs more money than the token has left
+  severity: HIGH
+  mode: enforce
+  # `money_overrun` is derived rather than written as a comparison between two
+  # fields, because the predicate language has no arithmetic (ADR-002.5). A
+  # rule that could only fire once the budget was already spent would be dead
+  # code: AG-BUD-001 short-circuits that case before any rule runs.
+  when: { field: derived.budget.money_overrun, equals: true }
+  verdict: BLOCK
+  message: "The money budget for this token is spent."
+  fix: "Raise the money cap for this group, or approve the spend out of band."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+    - { framework: dora, control: "Art. 8" }
+
+- rule_id: AG-BUD-004
+  name: Adapter could not estimate the cost of this action
+  severity: LOW
+  # Shadow by design (SPEC §8): most adapters cannot estimate cost yet, so
+  # enforcing this would block almost everything. It exists so that the gap is
+  # visible in the chain instead of invisible.
+  mode: shadow
+  when: { field: context.cost_estimate.known, equals: false }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 10m
+  message: "Cost is unknown for this action, so budget enforcement cannot see it."
+  fix: "Teach the adapter to estimate cost, or cap the budget by steps instead."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MEASURE-2.7" }

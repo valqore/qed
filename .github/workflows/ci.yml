@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is in the matrix because two week-1 bugs were platform
+        # specific: `key_id` contains a colon (not a legal filename), and the
+        # default console encoding cannot print the characters the CLI used.
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" -e packages/gate-verify
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Types
+        run: mypy
+
+      - name: Tests
+        run: pytest -q
+
+      - name: Week 1 exit criterion end to end
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate keys init --dir ci-gate
+          gate check examples/proposals/prod-db-drop.json --dir ci-gate --json
+          gate check examples/proposals/open-ingress.json --dir ci-gate --json \
+            --mandate examples/mandates/sre-agent.json
+          gate check examples/proposals/github-read.json --dir ci-gate --json
+          gate checkpoint --dir ci-gate --force
+          gate export --dir ci-gate --out ci-chain.jsonl
+          gate-verify ci-chain.jsonl --keys ci-gate/public --instance-id gate-local
+
+      - name: A tampered chain must fail verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib
+          lines = pathlib.Path("ci-chain.jsonl").read_text().splitlines()
+          i, record = next(
+              (i, json.loads(line))
+              for i, line in enumerate(lines)
+              if json.loads(line)["type"] == "verdict"
+          )
+          record["payload"]["verdict"]["decision"] = "ALLOW"
+          lines[i] = json.dumps(record)
+          pathlib.Path("ci-tampered.jsonl").write_text("\n".join(lines) + "\n")
+          PY
+          if gate-verify ci-tampered.jsonl --keys ci-gate/public; then
+            echo "FAIL: the verifier accepted a tampered chain"
+            exit 1
+          fi
+          echo "ok: tampering was detected"
+
+      - name: No LICENSE file until SPEC 24.2 closes
+        shell: bash
+        run: |
+          if ls LICENSE* NOTICE* 2>/dev/null | grep -q .; then
+            echo "A licence file appeared. See PATENT-AND-LICENCE-GATE.md:"
+            echo "the Apache-2.0 patent grant is irrevocable once distributed,"
+            echo "and the Valqore patent-scope check (SPEC 24.2) is still open."
+            exit 1
+          fi
+          test -f PATENT-AND-LICENCE-GATE.md

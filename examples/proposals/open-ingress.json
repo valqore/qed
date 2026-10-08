@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "id": "01JB0000000000000000000002",
+  "ts": "2026-10-07T09:20:11.004Z",
+  "principal": {
+    "token_jti": "01JB000000000000000000JTI2",
+    "human_hash": null,
+    "agent_chain": ["svc:sre-agent"],
+    "mandate_id": "md_01JB00000000000000000001",
+    "client_fingerprint": null
+  },
+  "action": {
+    "kind": "http",
+    "name": "PUT /ec2/security-groups/sg-0a1b2c",
+    "target": "aws:ec2:sg-0a1b2c",
+    "params_hash": "8c7e4b2a1f0d9e8c7b6a5948372615049382716450392817465038291746503a",
+    "params_redacted": {
+      "cidr": "0.0.0.0/0",
+      "port": 22,
+      "protocol": "tcp"
+    },
+    "method": "PUT"
+  },
+  "context": {
+    "environment": "prod",
+    "tags": ["incident-4821"],
+    "adapter": "http-proxy/0.1.0",
+    "adapter_id": "adp_sre_agent",
+    "enforcement": "enforcing",
+    "mode": "enforce",
+    "cost_estimate": { "tokens": 0, "money_cents": 0, "currency": "USD", "known": true },
+    "blast_radius_hints": { "writes": true, "deletes": false, "scope": "single_resource" },
+    "intent": "Open SSH so the on-call engineer can reach the host during incident 4821.",
+    "summary": "sre-agent wants to allow 0.0.0.0/0 on port 22 for sg-0a1b2c in prod"
+  }
+}

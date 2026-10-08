@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "id": "01JB0000000000000000000001",
+  "ts": "2026-10-07T09:14:22.431Z",
+  "principal": {
+    "token_jti": "01JB000000000000000000JTI1",
+    "human_hash": "6b8f2a1d4c7e9035b1a2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef01",
+    "agent_chain": ["claude-code@laptop-ali", "sub:planner"],
+    "mandate_id": null,
+    "client_fingerprint": "sha256:advisory-only"
+  },
+  "action": {
+    "kind": "mcp_tool",
+    "name": "postgres.execute_sql",
+    "target": "db:prod/orders",
+    "params_hash": "3f786850e387550fdab836ed7e6dc881de23001b4e9b1c0b2a0e9f0bb6f1c2d3",
+    "params_redacted": {
+      "sql": "DROP TABLE orders_archive;"
+    },
+    "method": null
+  },
+  "context": {
+    "environment": "prod",
+    "tags": ["migration", "cleanup"],
+    "adapter": "mcp-proxy/0.1.0",
+    "adapter_id": "adp_laptop_ali",
+    "enforcement": "enforcing",
+    "mode": "enforce",
+    "cost_estimate": { "tokens": 0, "money_cents": 0, "currency": "USD", "known": true },
+    "blast_radius_hints": { "writes": true, "deletes": true, "scope": "single_resource" },
+    "intent": "Clean up the archive table left over from the September migration.",
+    "summary": "claude-code wants to DROP TABLE orders_archive on db:prod/orders"
+  }
+}
