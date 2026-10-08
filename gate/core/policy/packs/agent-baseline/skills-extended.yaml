@@ -1,0 +1,135 @@
+# agent-baseline — skills and tool supply chain (SPEC §4.6, AG-SKL-*)
+#
+# A skill is code somebody else wrote that an agent decided to run. Static
+# scanning of skills is where most of the industry stopped, and it is not
+# enough: the question at the gate is not "does this skill look safe" but
+# "is this agent allowed to run this skill, here, now".
+
+- rule_id: AG-SKL-002
+  name: Skill fetched over an unencrypted or unpinned source
+  severity: HIGH
+  mode: enforce
+  applies_to:
+    kinds: [skill]
+  when:
+    any:
+      - { field: action.target, regex: "^http://" }
+      - field: action.target
+        regex: "(?i)(@(latest|main|master|head)$|:latest$)"
+  verdict: BLOCK
+  message: "This skill comes from a source that can change under you, or arrive over plain HTTP."
+  fix: "Pin the skill to a digest or a tag that cannot move, and fetch it over TLS."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI07" }
+    - { framework: owasp_llm, control: "LLM05" }
+    - { framework: soc2, control: "CC8.1" }
+
+- rule_id: AG-SKL-004
+  name: Skill that runs in production
+  severity: MEDIUM
+  mode: shadow
+  # Not inherently wrong, but a skill in production is third-party code with
+  # production credentials, and that is worth seeing before it is normal.
+  applies_to:
+    kinds: [skill]
+    environments: [prod]
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [platform-team]
+    timeout: 20m
+  message: "A skill is about to run against production."
+  fix: "Review the skill once and record the decision, or keep skills to lower environments."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI07" }
+    - { framework: nist_ai_rmf, control: "MAP-4.1" }
+
+- rule_id: AG-SKL-005
+  name: Skill piping a download into a shell
+  severity: HIGH
+  mode: enforce
+  # Only the unambiguous pattern blocks. `curl | sh` has no benign reading:
+  # whatever the server returns is executed, and no manifest can describe code
+  # that does not exist until the request is made.
+  applies_to:
+    kinds: [skill]
+  when:
+    field: action.params_redacted.command
+    regex: "(?i)\\b(curl|wget)\\b[^|]*\\|\\s*(ba)?sh\\b"
+  verdict: BLOCK
+  message: "This skill downloads code and runs it in one step."
+  fix: "Fetch the artefact, pin it, review it, then run it."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI07" }
+    - { framework: owasp_llm, control: "LLM05" }
+
+- rule_id: AG-SKL-008
+  name: Skill manifest that allows a shell
+  severity: MEDIUM
+  # Shadow, not enforce. A manifest listing `bash` makes the rest of the
+  # manifest decorative -- but plenty of legitimate internal skills do exactly
+  # that today, and a BLOCK here would be the first rule an operator turned
+  # off. Surfacing it is useful; tightening it is their call, not the pack's.
+  mode: shadow
+  applies_to:
+    kinds: [skill]
+  when:
+    field: action.params_redacted.allowed_tools
+    regex: "(?i)\\b(bash|zsh|powershell|exec|eval|subprocess)\\b"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [platform-team]
+    timeout: 20m
+  message: "This skill's manifest allows a shell, so the manifest does not bound what it can do."
+  fix: "Narrow the allowed tools to the specific calls the skill actually makes."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI02" }
+    - { framework: owasp_llm, control: "LLM05" }
+
+- rule_id: AG-SKL-006
+  name: Skill requesting credentials
+  severity: CRITICAL
+  mode: enforce
+  applies_to:
+    kinds: [skill]
+  when:
+    any:
+      - field: action.params_redacted.allowed_tools
+        regex: "(?i)\\b(read_secret|get_credential|vault|keychain|env)\\b"
+      - field: action.params_redacted.command
+        regex: "(?i)(cat\\s+[^|;]*\\.(pem|key|env)\\b|printenv|env\\s*\\|)"
+  verdict: BLOCK
+  message: "This skill is reaching for credentials rather than being handed what it needs."
+  fix: "The broker injects credentials at the upstream. A skill never reads them itself."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI05" }
+    - { framework: owasp_llm, control: "LLM02" }
+    - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-SKL-007
+  name: Tool call whose name does not match the adapter's family
+  severity: LOW
+  mode: shadow
+  # A weak signal on its own. It earns its place because the strong signals
+  # are all about what an action does, and this one is about an action
+  # arriving from somewhere it should not have.
+  applies_to:
+    kinds: [mcp_tool]
+  when:
+    not:
+      field: action.name
+      # Two legitimate shapes, both of which the proxy produces: a tool call
+      # (`github.list_issues`) and an MCP protocol method (`resources/read`,
+      # `prompts/get`). The first version of this rule only allowed the first
+      # shape and flagged every resource read -- caught by the MCP golden
+      # table, which builds proposals through the real adapter rather than
+      # hand-writing them.
+      regex: "^[a-z0-9_-]+[./][a-z0-9_.\\-/]+$"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [platform-team]
+    timeout: 30m
+  message: "This tool name is not in a shape any MCP adapter produces."
+  fix: "Check which adapter sent this; a malformed name usually means a hand-built request."
+  compliance:
+    - { framework: owasp_agentic, control: "ASI03" }
+    - { framework: nist_ai_rmf, control: "MEASURE-2.7" }

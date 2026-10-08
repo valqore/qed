@@ -182,14 +182,17 @@ class TestCheck:
         assert payload["verdict"]["decision"] == Decision.REQUIRE_APPROVAL.value
         assert payload["verdict"]["blast_radius"] == 75
         hits = {h["rule_id"] for h in payload["verdict"]["hits"]}
-        assert hits == {"AG-BLR-003", "AG-BLR-005"}
+        # AG-BUD-005 is a shadow hit: the demo token carries no budget, which
+        # is worth saying in production and does not change the decision. The
+        # two enforce hits are what the verdict rests on.
+        assert hits == {"AG-BLR-003", "AG-BLR-005", "AG-BUD-005"}
 
 
 class TestPolicy:
     def test_lint_passes_on_the_shipped_pack(self) -> None:
         result = runner.invoke(app, ["policy", "lint"])
         assert result.exit_code == 0, result.output
-        assert "15 rules (15 active)" in result.output
+        assert "45 rules (45 active)" in result.output
         assert "ok" in result.output
 
     def test_lint_fails_on_a_broken_rule(self, tmp_path: Path) -> None:
@@ -307,7 +310,7 @@ class TestExportAndVerify:
         result = runner.invoke(app, ["status", "--dir", str(gate_dir)])
         payload = json.loads(result.output)
         assert payload["records"] == 8
-        assert payload["rules_active"] == 15
+        assert payload["rules_active"] == 45
         assert payload["mode"] == "shadow"
         assert payload["key_id"].startswith("ed25519:")
 

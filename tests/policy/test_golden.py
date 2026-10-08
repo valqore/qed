@@ -51,6 +51,17 @@ MANDATES: dict[str, dict[str, Any]] = {
         "valid": {"from": "2026-01-01T00:00:00.000Z", "until": "2026-01-02T00:00:00.000Z"},
     },
     "revoked": {**_BASE_MANDATE, "revoked_at": "2026-05-01T00:00:00.000Z"},
+    # An unattended agent that IS inside its mandate, so AG-IDN-006 stays
+    # quiet and AG-IDN-008 is the only thing left to see.
+    "prod_http": {
+        **_BASE_MANDATE,
+        "allowed": {
+            "kinds": ["http"],
+            "name_globs": ["PUT /ec2/*", "GET *"],
+            "target_globs": ["aws:ec2:*"],
+            "environments": ["prod"],
+        },
+    },
 }
 
 

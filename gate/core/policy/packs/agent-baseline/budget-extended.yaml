@@ -1,0 +1,93 @@
+# agent-baseline — budget and rate, second set (SPEC §4.6, AG-BUD-005..012)
+#
+# AG-BUD-001 short-circuits an exhausted token before any rule runs, so
+# nothing here is about a budget already spent. These are about the shapes a
+# run takes on the way to spending one: too fast, too expensive for what it
+# is, or spending against a token with no cap at all.
+
+- rule_id: AG-BUD-005
+  name: Production action against an uncapped token
+  severity: MEDIUM
+  mode: shadow
+  # A cap of 0 means uncapped. That is a reasonable default for a laptop and
+  # a poor one for production, and the difference is worth seeing before it
+  # is worth enforcing.
+  applies_to:
+    environments: [prod]
+  when:
+    all:
+      - { field: derived.budget.steps_remaining, exists: false }
+      - { field: derived.budget.money_remaining_cents, exists: false }
+      # Writes only. An uncapped token doing read-only work is not a finding,
+      # and firing on every read would make this ambient noise instead of a
+      # signal -- which is how a shadow rule gets ignored.
+      - any:
+          - { field: context.blast_radius_hints.writes, equals: true }
+          - { field: context.blast_radius_hints.deletes, equals: true }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 30m
+  message: "This token has no budget on any axis, and it is acting in production."
+  fix: "Issue production tokens with a step or money cap; `gate token --budget` takes one."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+    - { framework: eu_ai_act, control: "Art. 14" }
+
+- rule_id: AG-BUD-006
+  name: Single action costs more than a fifth of the money budget
+  severity: MEDIUM
+  mode: shadow
+  # Not an overrun — AG-BUD-003 has that. This is the action that is
+  # disproportionate to the run it belongs to, which is usually a sign the
+  # agent has misunderstood the task rather than that the budget is wrong.
+  when:
+    all:
+      - { field: context.cost_estimate.known, equals: true }
+      - { field: context.cost_estimate.money_cents, gt: 0 }
+      - { field: derived.budget.money_pct_used, lt: 80 }
+      - { field: derived.budget.money_remaining_cents, exists: true }
+      - { field: context.cost_estimate.money_cents, gte: 100 }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 15m
+  message: "One action is asking for a large share of what this token may spend."
+  fix: "Check the agent understood the task before letting it spend the run on one call."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+
+- rule_id: AG-BUD-007
+  name: High call rate in the last day
+  severity: MEDIUM
+  mode: shadow
+  when:
+    field: derived.history.calls_24h
+    gte: 500
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 30m
+  message: "This principal has made an unusual number of calls in the last day."
+  fix: "A loop is the usual cause. Look at what it is repeating before raising any limit."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MEASURE-2.7" }
+    - { framework: owasp_agentic, control: "ASI06" }
+
+- rule_id: AG-BUD-008
+  name: Time budget nearly spent
+  severity: LOW
+  mode: shadow
+  # A run near the end of its clock is the one most likely to leave something
+  # half-done, which is a worse state than not having started.
+  when:
+    field: derived.budget.seconds_pct_used
+    gte: 90
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 10m
+  message: "This token is nearly out of time, and a half-finished change is worse than none."
+  fix: "Let the run end, then issue a fresh token rather than extending this one."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }

@@ -30,7 +30,7 @@ hardware, including air-gapped.
 | Evidence ledger on SQLite | `gate/infra/storage/sqlite.py` |
 | Policy loader, linter, predicates, engine | `gate/core/policy/` |
 | Deterministic blast-radius score (0–100) | `gate/core/policy/blast_radius.py` |
-| Baseline pack, 15 rules | `gate/core/policy/packs/agent-baseline/` |
+| Baseline pack, 45 rules | `gate/core/policy/packs/agent-baseline/` |
 | Standalone verifier | `packages/gate-verify/` |
 | **MCP proxy** (stdio and Streamable HTTP), shadow mode | `gate/adapters/mcp/` |
 | **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `gate/api/` |

@@ -38,6 +38,7 @@ from gate.core.schemas import (
     BudgetState,
     Decision,
     EvalContext,
+    HistoryDerived,
     Mandate,
     Verdict,
 )
@@ -165,7 +166,18 @@ def build_inputs(
             raise CaseError(f"case {case['id']!r} names mandate {name!r}, which is not defined")
         mandate = Mandate.model_validate(case_file.mandates[name])
 
-    return proposal, budget, EvalContext(now=now, mandate=mandate)
+    # `derived.history` is a documented field path and rules read it, so a
+    # case has to be able to set it. Without this a rule keyed on call or
+    # block counts is untestable, and an untestable rule is one nobody can
+    # change safely.
+    history_patch = case.get("history")
+    history = (
+        HistoryDerived.model_validate(history_patch)
+        if isinstance(history_patch, dict)
+        else HistoryDerived()
+    )
+
+    return proposal, budget, EvalContext(now=now, mandate=mandate, history=history)
 
 
 def _compare(case: dict[str, Any], verdict: Verdict) -> list[str]:

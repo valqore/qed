@@ -1,0 +1,122 @@
+# agent-baseline — blast radius, second set (SPEC §4.6, AG-BLR-006..010)
+#
+# The first five rules read the declared hints. These five mostly do not: they
+# match the verb, the target, or the absence of something. An adapter that
+# forgot to set `deletes` on a terminate call is exactly the case the hints
+# cannot catch, and it is the case that costs the most.
+
+- rule_id: AG-BLR-006
+  name: Shell command in production
+  severity: HIGH
+  mode: enforce
+  # A shell is the one action kind whose blast radius cannot be read off the
+  # proposal. The hints describe what the adapter believes; a shell can do
+  # whatever the credential allows, whatever was declared.
+  applies_to:
+    kinds: [shell]
+    environments: [prod]
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [sre-oncall]
+    timeout: 15m
+  message: "A shell command in production cannot be scoped from its declaration."
+  fix: "Use a specific tool for the task, or request approval with the exact command in the intent."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: owasp_agentic, control: "ASI02" }
+    - { framework: soc2, control: "CC8.1" }
+
+- rule_id: AG-BLR-007
+  name: Infrastructure teardown
+  severity: CRITICAL
+  mode: enforce
+  when:
+    any:
+      # Deliberately *not* the single-resource verbs. Terminating one instance
+      # is destructive, and AG-BLR-003 already stops it for an approver to
+      # look at. This rule is for the actions that take a whole system away,
+      # where there is no useful approval conversation to have mid-incident --
+      # so it blocks outright and has no approvers list.
+      #
+      # Not `\b`: `_` is a word character, so `\bdrop_database\b` is fine but
+      # a bare verb followed by `_` is not, and tool names are full of
+      # snake_case. The boundary that works is "not a letter or digit".
+      - field: action.name
+        regex: "(?i)(?:^|[^a-z0-9])(delete_cluster|destroy_cluster|drop_database|delete_database|decommission|delete_organization|close_account)(?:[^a-z0-9]|$)"
+      - field: action.params_redacted.command
+        regex: "(?i)(terraform\\s+destroy|kubectl\\s+delete\\s+(ns|namespace)\\b)"
+  verdict: BLOCK
+  message: "This action tears down infrastructure."
+  fix: "Teardown goes through a change window with a named owner, not through an agent."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+    - { framework: soc2, control: "CC8.1" }
+
+- rule_id: AG-BLR-008
+  name: Action targets production from a non-production context
+  severity: HIGH
+  mode: enforce
+  # The mismatch an environment check alone misses: the context says dev, the
+  # target names prod. One of the two is wrong, and neither is safe to guess.
+  applies_to:
+    environments: [dev, staging]
+  when:
+    all:
+      - field: action.target
+        regex: "(?i)(^|[:/._-])prod(uction)?([:/._-]|$)"
+      - any:
+          - { field: context.blast_radius_hints.writes, equals: true }
+          - { field: context.blast_radius_hints.deletes, equals: true }
+  verdict: BLOCK
+  message: "The context says this is not production, but the target names a production resource."
+  fix: "Correct the environment on the proposal, or point the action at the right target."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 12" }
+    - { framework: soc2, control: "CC8.1" }
+
+- rule_id: AG-BLR-009
+  name: Production write with no stated intent
+  severity: MEDIUM
+  # Shadow by design: an adapter that does not populate `intent` yet would
+  # otherwise stop every production write on the day this ships.
+  mode: shadow
+  applies_to:
+    environments: [prod]
+  when:
+    all:
+      - { field: context.intent, exists: false }
+      - any:
+          - { field: context.blast_radius_hints.writes, equals: true }
+          - { field: context.blast_radius_hints.deletes, equals: true }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [sre-oncall]
+    timeout: 15m
+  message: "A production write arrived with no stated intent, so an approver has nothing to judge."
+  fix: "Have the adapter pass the agent's reason in `context.intent`."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 12" }
+    - { framework: nist_ai_rmf, control: "MEASURE-2.8" }
+
+- rule_id: AG-BLR-010
+  name: Capacity change in production
+  severity: MEDIUM
+  mode: enforce
+  applies_to:
+    environments: [prod]
+  when:
+    any:
+      - field: action.name
+        regex: "(?i)(?:^|[^a-z0-9])(scale|resize|set_replicas|update_capacity|modify_instance)(?:[^a-z0-9]|$)"
+      - field: action.params_redacted.command
+        regex: "(?i)kubectl\\s+scale\\b"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [sre-oncall]
+    timeout: 10m
+  message: "This changes production capacity."
+  fix: "Capacity changes in production are reviewed; say what prompted this one in the intent."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+    - { framework: soc2, control: "CC8.1" }

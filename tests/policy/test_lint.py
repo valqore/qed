@@ -297,7 +297,7 @@ def test_the_shipped_baseline_pack_lints_clean() -> None:
 
     result = load_bundle([baseline_pack_dir()])
     assert result.findings == [], [f.format() for f in result.findings]
-    assert len(result.bundle.rules) == 15
+    assert len(result.bundle.rules) == 45
 
 
 @pytest.mark.parametrize("rule_id", ["AG", "ag-blr-001", "AG_BLR_001", "A-1"])

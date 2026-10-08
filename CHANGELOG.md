@@ -6,6 +6,49 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — baseline pack, 15 rules to 45 (SPEC §22 week 3)
+
+Thirty new rules across the five existing families: blast radius 10, budget 7,
+data 12, identity 8, skills 8. 29 enforce, 16 shadow; 18 BLOCK, 27
+REQUIRE_APPROVAL. The golden table goes from 74 cases to 107 and every rule
+has one, which `test_every_shipped_rule_is_exercised` enforces.
+
+The theme of the second set is that it mostly does not read the declared
+hints. The first fifteen trust what the adapter said; these match the verb,
+the target, or the absence of something, because an adapter that forgot to set
+`deletes` on a teardown call is exactly the case the hints cannot catch.
+
+Four of them are about the actions that make later actions invisible or
+unrecoverable -- audit logging off, encryption off, backups weakened, data
+made public -- which are worth blocking on their own terms whatever the agent
+was trying to achieve.
+
+### Fixed — three rules I got wrong, caught by the existing suites
+
+- **`` does not bound a snake_case verb.** `terminate` never matches
+  `terminate_instances`, because `_` is a word character, and tool names are
+  full of snake_case. AG-BLR-007 and AG-BLR-010 silently matched nothing until
+  their own cases failed.
+- **AG-SKL-007 flagged `resources/read`**, which is an MCP protocol method and
+  entirely ordinary. The regex only allowed the `server.tool` shape. Caught by
+  the MCP golden table, which builds proposals through the real adapter rather
+  than hand-writing them -- the exact gap its docstring says it exists to
+  close.
+- **AG-BLR-007 blocked single-instance teardown**, escalating a documented
+  REQUIRE_APPROVAL to BLOCK with no approval path. Narrowed to the verbs that
+  take a whole system away; AG-BLR-003 already handles one instance, with a
+  route for a person to say yes.
+
+Two more were over-broad rather than wrong and were narrowed before they
+shipped: AG-BUD-005 fired on reads (ambient noise is how a shadow rule gets
+ignored) and AG-IDN-004 was harsher than the AG-BLR-004 it backs up.
+
+### Added — `history` in policy cases
+
+`derived.history` is a documented field path and rules read it, but a case
+could not set it, so any rule keyed on call or block counts was untestable.
+An untestable rule is one nobody can change safely.
+
 ### Added — `gate policy test` (SPEC §14)
 
 - Runs cases you write against the rules you have loaded. Touches nothing: no
