@@ -59,9 +59,7 @@ class TestItRefusesBeforeItListens:
         assert "--allow-non-loopback" in result.output
 
     @pytest.mark.parametrize("value", ["staging-ish", "production"])
-    def test_an_environment_that_is_not_one_of_the_three(
-        self, gate_dir: Path, value: str
-    ) -> None:
+    def test_an_environment_that_is_not_one_of_the_three(self, gate_dir: Path, value: str) -> None:
         result = runner.invoke(
             app, ["proxy", "--dir", str(gate_dir), "--human", "me@acme.com", "--env", value]
         )

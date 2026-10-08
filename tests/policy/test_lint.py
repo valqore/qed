@@ -309,9 +309,7 @@ class TestASuspiciousGlob:
         assert [code for code, _ in findings] == ["suspicious_glob"]
 
     def test_the_message_names_the_escape_and_the_alternative(self) -> None:
-        _, message = validate_predicate(
-            {"field": "action.target", "glob": "*://[fd00::254]*"}
-        )[0]
+        _, message = validate_predicate({"field": "action.target", "glob": "*://[fd00::254]*"})[0]
         assert "[[]" in message
         assert "contains" in message
 
