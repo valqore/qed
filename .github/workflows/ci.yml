@@ -13,6 +13,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # SPEC.md 25.1. Runs as its own job, not in the matrix: one scan of the whole
+  # history is the point, and four matrix cells scanning the same commits adds
+  # nothing. `fetch-depth: 0` is required — `gitleaks detect` walks commits, and
+  # the default shallow checkout would scan only the tip.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          # Pinned. An unpinned scanner changes the rule set under you, so a
+          # build that passed yesterday fails today for no change of ours.
+          GITLEAKS_VERSION: 8.18.4
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: No secret in any commit
+        run: gitleaks detect --config=.gitleaks.toml --redact --no-banner -v
+
+      - name: No secret in the working tree
+        run: gitleaks detect --no-git --config=.gitleaks.toml --redact --no-banner -v
+
+      # The allowlist in .gitleaks.toml names four non-secrets by value. If it
+      # ever becomes a blanket exemption for tests/ the two steps above keep
+      # passing and stop meaning anything, so prove the scanner still bites.
+      - name: A planted credential must fail the scan
+        run: |
+          set -euo pipefail
+          # Assembled from two halves on purpose. Written as one literal, the
+          # canary is itself a finding and this workflow file fails the scan.
+          canary="AKIA""3KL9ZQ7XW2VNBM4P"
+          printf 'LEAK = "%s"\n' "$canary" > tests/_canary.py
+          if gitleaks detect --no-git --config=.gitleaks.toml --redact --no-banner; then
+            echo "FAIL: gitleaks ignored a planted AWS key in tests/"
+            exit 1
+          fi
+          rm tests/_canary.py
+          echo "ok: the scanner is still live"
+
   check:
     runs-on: ${{ matrix.os }}
     strategy:

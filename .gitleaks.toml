@@ -1,0 +1,54 @@
+# Secret scanning config. SPEC.md 25.1 requires gitleaks in CI on all repos.
+#
+# This runs before a remote exists, not after. Git history is irreversible: a
+# secret pushed once stays recoverable in the object store and in every clone
+# and fork, so the only cheap moment to get this right is while the repository
+# is still local.
+#
+# Gotcha, learned the hard way while writing this file: `[extend] useDefault`
+# extends the default *rules*, but declaring `[allowlist]` here *replaces* the
+# default global allowlist rather than adding to it. The default allowlist
+# carries stopwords that quietly suppress things like "EXAMPLE", so adding a
+# two-entry allowlist took the finding count from 2 to 9. Every non-secret this
+# repository contains therefore has to be listed below explicitly. Verify with
+# the command in `.github/workflows/ci.yml`, never by eye.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+Four literals in this repository are secret-shaped and are not secrets.
+
+Note what is deliberately NOT here: no blanket exception for tests/, and no
+allowlisted file paths other than build output. Fixture directories are exactly
+where a real credential gets parked "just for a minute". Each non-secret is
+allowed by its own value, so a genuine key pasted next to one of these still
+fails the scan.
+"""
+
+regexes = [
+  # AWS publishes this access key id in its own documentation as the canonical
+  # example; it has never been a live credential. In the masking tests and in
+  # golden policy case AG-DAT-001.
+  '''AKIAIOSFODNN7EXAMPLE''',
+
+  # A GitHub PAT shape filled with the alphabet and the digits in order.
+  '''ghp_abcdefghijklmnopqrstuvwxyz0123456789''',
+
+  # PEM stubs. The body is the part that proves there is no key: a real RSA
+  # private key does not have a 12-byte payload, and a real OpenSSH key is not
+  # the word "abc".
+  '''MIIBOgIBAAJB''',
+  '''PRIVATE KEY-----abc-----END''',
+]
+
+# Only for a local `--no-git` working-tree scan, which does not honour
+# .gitignore. CI scans commits, where none of these exist. The separator class
+# is `[\\/]` because on Windows gitleaks reports native backslash paths, so a
+# pattern written with `/` silently matches nothing.
+paths = [
+  '''(^|[\\/])\.venv[\\/]''',
+  '''\.egg-info[\\/]''',
+  '''(^|[\\/])(build|dist|htmlcov|__pycache__)[\\/]''',
+]

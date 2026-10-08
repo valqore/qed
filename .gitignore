@@ -20,3 +20,10 @@ htmlcov/
 .gate/
 data/
 scratch/
+
+# artefacts of the week-1 exit criterion, which developers run locally as well
+# as in CI. *.pem already covers the keys; an exported chain is evidence data,
+# not source, and carries whatever was in the proposals that produced it.
+ci-gate/
+*-chain.jsonl
+ci-tampered.jsonl
