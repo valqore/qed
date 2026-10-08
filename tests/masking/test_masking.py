@@ -83,6 +83,47 @@ def test_a_number_that_fails_luhn_is_not_a_card() -> None:
     assert "[masked:card]" not in mask_text("order 1234567890123456 shipped")
 
 
+class TestLuhnAloneIsNotEnough:
+    """Luhn is a checksum, not an identifier: one run in ten passes by chance.
+
+    Over-masking is not the harmless direction it sounds like. The chain is
+    masked *before* it is hashed, so a false positive does not redact a secret,
+    it rewrites a value gate itself generated -- and the record then attests to
+    something nothing else in the system has.
+    """
+
+    def test_a_run_of_zeros_is_not_a_card(self) -> None:
+        """Eighteen zeros pass Luhn exactly: the sum is 0, and 0 % 10 == 0."""
+        assert "[masked:card]" not in mask_text("id 000000000000000000 ok")
+
+    @pytest.mark.parametrize("digit", list("0123456789"))
+    def test_no_run_of_one_repeated_digit_is_a_card(self, digit: str) -> None:
+        assert "[masked:card]" not in mask_text(f"id {digit * 16} ok")
+
+    def test_a_ulid_shaped_token_id_survives(self) -> None:
+        """The exact value that was being corrupted in every proposal record."""
+        token = "01JB000000000000000000JTI0"
+        assert mask_text(f"token_jti {token}") == f"token_jti {token}"
+
+    @pytest.mark.parametrize(
+        "number",
+        [
+            "4111111111111111",  # Visa
+            "5500005555555559",  # Mastercard
+            "2221000000000009",  # Mastercard 2-series
+            "378282246310005",  # Amex
+            "6011111111111117",  # Discover
+        ],
+    )
+    def test_real_card_ranges_are_still_masked(self, number: str) -> None:
+        assert mask_text(f"card {number} charged") == "card [masked:card] charged"
+
+    def test_a_luhn_valid_number_outside_every_card_range_is_not_masked(self) -> None:
+        """No issued card starts with 0, 1, 7, 8 or 9."""
+        assert "[masked:card]" not in mask_text("ref 0000000000000018 ok")
+        assert "[masked:card]" not in mask_text("ref 1234567812345670 ok")
+
+
 def test_ordinary_text_is_untouched() -> None:
     text = "restart the worker pool in staging, then re-run the migration"
     assert mask_text(text) == text

@@ -1,13 +1,17 @@
 """`gate` command line (SPEC §14).
 
-Week 1 ships 5 of the 18 commands: ``keys``, ``check``, ``policy``, ``export``
-and ``verify``. SPEC §14 forbids adding a top-level command without a spec
-update, so the missing ones are absent rather than stubbed -- a command that
-prints "not implemented" is worse than one that does not exist, because it ends
-up in somebody's script.
+Week 2 ships 7 of the 18 commands: ``keys``, ``check``, ``policy``, ``export``,
+``verify``, ``serve`` and ``mcp``. SPEC §14 forbids adding a top-level command
+without a spec update, so the missing ones are absent rather than stubbed -- a
+command that prints "not implemented" is worse than one that does not exist,
+because it ends up in somebody's script.
 
 ``check`` exit codes: 0 ALLOW, 2 REQUIRE_APPROVAL, 3 BLOCK, 1 error. In shadow
 mode the decision is recorded and the exit code is 0 (ADR-003).
+
+``mcp`` is the one command that must not print to stdout: stdout is the MCP
+transport, and a stray line of status text there is a protocol error that
+presents to the user as "the server crashed". Everything it says goes to stderr.
 """
 
 from __future__ import annotations
@@ -15,15 +19,24 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
 import typer
 
 from gate.config import DEFAULT_DIR
 from gate.core.evidence.export.jsonl import to_csv, to_jsonl
+from gate.core.evidence.export.oscal import to_oscal
 from gate.core.policy.engine import explain as explain_proposal
 from gate.core.policy.loader import baseline_pack_dir, load_bundle
-from gate.core.schemas import ActionProposal, BudgetState, Decision, Mandate
+from gate.core.schemas import (
+    ActionProposal,
+    BudgetState,
+    Decision,
+    Enforcement,
+    Environment,
+    Mandate,
+    utcnow,
+)
 from gate.infra.keys.file import PUBLIC_DIR_NAME, MissingSigningKey, init_keys
 from gate.runtime import (
     DuplicateProposal,
@@ -32,6 +45,11 @@ from gate.runtime import (
     check_proposal,
     open_session,
 )
+
+if TYPE_CHECKING:  # `gate mcp` imports the MCP SDK lazily: it is an
+    # adapters-only dependency (SPEC 20.3) and `gate check` should not pay for
+    # importing it on every invocation.
+    from gate.adapters.mcp.proxy import ProxyStats
 
 app = typer.Typer(
     add_completion=False,
@@ -241,16 +259,41 @@ def policy_explain(
 def export(
     directory: DirOption = DEFAULT_DIR,
     out: Annotated[Path | None, typer.Option("--out", help="Write here instead of stdout.")] = None,
-    export_format: Annotated[str, typer.Option("--format", help="jsonl or csv.")] = "jsonl",
+    export_format: Annotated[str, typer.Option("--format", help="jsonl, csv or oscal.")] = "jsonl",
     from_seq: Annotated[int, typer.Option("--from", help="First seq to include.")] = 0,
     to_seq: Annotated[int | None, typer.Option("--to", help="Last seq to include.")] = None,
 ) -> None:
-    """Export the evidence chain. JSONL is what `gate-verify` reads."""
-    if export_format not in {"jsonl", "csv"}:
-        _fail("--format must be jsonl or csv (oscal lands in week 2)")
+    """Export the evidence chain. JSONL is what `gate-verify` reads.
+
+    `oscal` writes an OSCAL 1.1.2 assessment-results document: one observation
+    per record, one finding per rule hit, public keys in back-matter. It maps
+    only the control references the rules themselves declare (SPEC 10.8).
+    """
+    if export_format not in {"jsonl", "csv", "oscal"}:
+        _fail("--format must be jsonl, csv or oscal")
     session = open_session(directory=directory, strict_policy=False)
     records = list(session.store.iter_evidence(from_seq, to_seq))
-    text = to_jsonl(records) if export_format == "jsonl" else to_csv(records)
+    if export_format == "oscal":
+        if not records:
+            session.close()
+            _fail("that range holds no records; an OSCAL result needs at least one observation")
+            return
+        text = (
+            json.dumps(
+                to_oscal(
+                    records,
+                    instance_id=session.config.instance_id,
+                    generated_at=utcnow(),
+                    signing_keys=session.store.signing_keys(),
+                    policy_hash=session.bundle.hash,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+    else:
+        text = to_jsonl(records) if export_format == "jsonl" else to_csv(records)
     session.close()
     if out is None:
         sys.stdout.write(text)
@@ -322,6 +365,260 @@ def verify(
     )
     typer.echo(json.dumps(report.to_dict(), indent=2) if as_json else report.summary())
     raise typer.Exit(0 if report.ok else 1)
+
+
+# -------------------------------------------------------------------- serve
+
+
+@app.command()
+def serve(
+    directory: DirOption = DEFAULT_DIR,
+    policy: PolicyOption = None,
+    config: ConfigOption = None,
+    host: Annotated[str | None, typer.Option("--host", help="Bind address.")] = None,
+    port: Annotated[int | None, typer.Option("--port", help="Bind port.")] = None,
+    dev: Annotated[
+        bool,
+        typer.Option(
+            "--dev",
+            help="Skip adapter signature checks and mark records as dev. Local use only.",
+        ),
+    ] = False,
+) -> None:
+    """Run the HTTP API (SPEC 13).
+
+    `/readyz` answers 503 until there is a signing key and a way to
+    authenticate adapters, so `gate keys init` comes first. Without `--dev`,
+    register an adapter under `adapters:` in gate.yaml with a `secret_env`.
+    """
+    try:
+        import uvicorn
+    except ImportError:  # pragma: no cover - fastapi and uvicorn are install deps
+        _fail("uvicorn is not installed: pip install 'valqore-gate'")
+        return
+
+    from gate.api.app import create_app
+    from gate.config import load_config
+
+    settings = load_config(config).config
+    bind_host = host if host is not None else settings.api.host
+    bind_port = port if port is not None else settings.api.port
+
+    if dev:
+        typer.secho(
+            "gate: --dev is on. Adapter signatures are NOT checked and every record is "
+            "marked dev. Do not point real agents at this.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+    typer.echo(f"gate: serving on http://{bind_host}:{bind_port} (mode {settings.mode.value})")
+
+    application = create_app(directory=directory, config_path=config, policy_paths=policy, dev=dev)
+    uvicorn.run(application, host=bind_host, port=bind_port, log_level="info")
+
+
+# ---------------------------------------------------------------------- mcp
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def mcp(
+    ctx: typer.Context,
+    directory: DirOption = DEFAULT_DIR,
+    policy: PolicyOption = None,
+    config: ConfigOption = None,
+    upstream_url: Annotated[
+        str | None,
+        typer.Option("--upstream-url", help="Streamable HTTP upstream instead of a command."),
+    ] = None,
+    server_name: Annotated[
+        str | None,
+        typer.Option("--server-name", help="Name used in action.name. Default: the command."),
+    ] = None,
+    target_template: Annotated[
+        str | None,
+        typer.Option(
+            "--target-template",
+            help="How to build action.target, e.g. 'db:{env}/{args.table}'.",
+        ),
+    ] = None,
+    environment: Annotated[
+        str, typer.Option("--env", help="dev, staging or prod. Scores the blast radius.")
+    ] = "dev",
+    enforcement: Annotated[
+        str,
+        typer.Option("--enforcement", help="advisory or enforcing (SPEC 3.1)."),
+    ] = "enforcing",
+    fail_mode: Annotated[
+        str,
+        typer.Option("--fail-mode", help="closed or open, when the kernel itself fails."),
+    ] = "closed",
+    adapter_id: Annotated[
+        str, typer.Option("--adapter-id", help="Registered adapter id (SPEC 12.6).")
+    ] = "adp_mcp_local",
+    token_jti: Annotated[
+        str, typer.Option("--token-jti", help="Token id to attribute calls to (week 3: real).")
+    ] = "mcp-proxy-local",
+    human: Annotated[
+        str | None,
+        typer.Option(
+            "--human",
+            help="Who this session acts for, e.g. an email. Hashed into principal_hash.",
+        ),
+    ] = None,
+    issuer: Annotated[
+        str,
+        typer.Option("--issuer", help="Identity provider that `--human` belongs to."),
+    ] = "local",
+    mandate_file: Annotated[
+        Path | None,
+        typer.Option("--mandate", help="Mandate as JSON, for an unattended agent."),
+    ] = None,
+) -> None:
+    """Proxy an MCP server through the kernel, deciding every tool call.
+
+        gate mcp --human you@acme.com -- npx -y @scope/server
+
+    Everything after `--` is the upstream command. Decisions and results go into
+    the evidence chain; in shadow mode (the default) nothing is stopped.
+
+    `--human` or `--mandate` is required. Without one, every proposal has no
+    principal and no delegated authority, the engine answers with a synthetic
+    AG-IDN-007 identity BLOCK before any rule is evaluated, and the chain fills
+    with identical verdicts that say nothing about your policy.
+    """
+    import anyio
+
+    from gate.adapters.mcp.proxy import ProxyOptions, ProxyStats, UpstreamSpec, run_proxy
+    from gate.adapters.mcp.targets import DEFAULT_TEMPLATE, TemplateError
+    from gate.core.evidence.hashing import principal_hash
+
+    command = list(ctx.args)
+    if bool(command) == bool(upstream_url):
+        _fail("give either an upstream command after `--` or --upstream-url, not both")
+        return
+    if environment not in {"dev", "staging", "prod"}:
+        _fail("--env must be dev, staging or prod")
+        return
+    if enforcement not in {"advisory", "enforcing"}:
+        _fail("--enforcement must be advisory or enforcing")
+        return
+    if fail_mode not in {"closed", "open"}:
+        _fail("--fail-mode must be closed or open")
+        return
+    if human is None and mandate_file is None:
+        _fail(
+            "give --human <who you are> or --mandate <file>. Without either, every verdict "
+            "is a synthetic AG-IDN-007 identity BLOCK and no policy rule is evaluated. "
+            "Verified identity from an IdP arrives in week 3; until then --human is the "
+            "adapter's own assertion and is recorded as such."
+        )
+        return
+
+    mandate = None
+    if mandate_file is not None:
+        try:
+            mandate = Mandate.model_validate_json(mandate_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            _fail(f"cannot read mandate: {exc}")
+            return
+
+    name = server_name or _default_server_name(command, upstream_url)
+    try:
+        upstream = UpstreamSpec(
+            name=name,
+            command=command[0] if command else None,
+            args=command[1:],
+            url=upstream_url,
+            target_template=target_template or DEFAULT_TEMPLATE,
+        )
+    except (TemplateError, ValueError) as exc:
+        _fail(str(exc))
+        return
+
+    try:
+        session = open_session(directory=directory, policy_paths=policy, config_path=config)
+    except MissingSigningKey as exc:
+        _fail(f"{exc}. Run `gate keys init` first: an unsigned decision is not evidence.")
+        return
+    except PolicyErrors as exc:
+        for finding in exc.findings:
+            typer.secho(f"  {finding.format()}", fg=typer.colors.RED, err=True)
+        _fail("the policy bundle has errors; refusing to proxy against a broken bundle")
+        return
+
+    options = ProxyOptions(
+        environment=cast(Environment, environment),
+        enforcement=Enforcement(enforcement),
+        token_jti=token_jti,
+        human_hash=None if human is None else principal_hash(human, issuer=issuer),
+        mandate=mandate,
+        adapter_id=adapter_id,
+        identity_note=None if human is None else f"adapter-asserted:--human:{issuer}",
+        fail_mode="closed" if fail_mode == "closed" else "open",
+    )
+    stats = ProxyStats()
+    mode = session.config.mode.value
+    # stderr, always: stdout is the MCP transport.
+    typer.secho(
+        f"gate: proxying {name} in {mode} mode, env {environment}, "
+        f"target template {upstream.target_template!r}",
+        fg=typer.colors.CYAN,
+        err=True,
+    )
+    if human is not None:
+        typer.secho(
+            f"gate: calls are attributed to {human} at issuer {issuer!r}, on this adapter's "
+            "word alone. Verified identity arrives in week 3.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+    if mode == "shadow":
+        typer.secho(
+            "gate: shadow mode. Every call is decided and recorded; nothing is stopped.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+
+    try:
+        anyio.run(
+            lambda: run_proxy(session=session, upstream=upstream, options=options, stats=stats)
+        )
+    except KeyboardInterrupt:  # pragma: no cover - interactive
+        pass
+    finally:
+        session.close()
+        _print_stats(stats)
+
+
+def _default_server_name(command: list[str], url: str | None) -> str:
+    """A readable server name when the operator did not supply one.
+
+    The last path-ish segment of the command, or the URL host. It ends up in
+    every ``action.name`` in the chain, so it is worth getting a sensible
+    default rather than the whole command line.
+    """
+    if url:
+        host = url.split("//", 1)[-1].split("/", 1)[0]
+        return host or "upstream"
+    if not command:  # pragma: no cover - guarded by the caller
+        return "upstream"
+    candidates = [part for part in command if not part.startswith("-")]
+    tail = candidates[-1] if candidates else command[0]
+    return Path(tail).name.removesuffix(".js").removesuffix(".py") or "upstream"
+
+
+def _print_stats(stats: ProxyStats) -> None:
+    typer.secho(
+        f"gate: {stats.calls} tool call(s); {stats.allowed} forwarded, "
+        f"{stats.refused} refused, {stats.would_block} would BLOCK, "
+        f"{stats.would_require_approval} would need approval, "
+        f"{stats.passthrough} read-through, {stats.ungated} ungated, "
+        f"{stats.errors} error(s)",
+        fg=typer.colors.CYAN,
+        err=True,
+    )
 
 
 def main() -> None:

@@ -43,9 +43,31 @@ A shadow record proves the decision *would* have been made. It does not prove
 the action was prevented. Both are in the same chain, distinguished by one
 field, so "we have been observing since this date" is demonstrable.
 
-## Week 1 status
+## Week 2 status
 
-Only `kernel` records exist today: the kernel is the only component built. The
-field, the enum and the verifier support for all four classes are in place so
-that the format does not change when the broker and the adapters arrive in
-weeks 2–6.
+Three of the four classes are written today.
+
+| Class | Written by | Since |
+|---|---|---|
+| `kernel` | every proposal, verdict, policy load and checkpoint | week 1 |
+| `adapter` | an execution result from an **enforcing** adapter — the MCP proxy, and `POST /v1/proposals/{id}/result` | week 2 |
+| `self` | an execution result from an **advisory** adapter | week 2 |
+| `broker` | — | week 5, with the credential broker |
+
+The rule for an execution result is the proposal's own `enforcement` field
+(SPEC §13, "assurance from adapter enforcement"):
+
+- `enforcement: enforcing` → `assurance: adapter`. The adapter could not have
+  been bypassed without leaving a gap in the chain, so its report is evidence
+  about the adapter.
+- `enforcement: advisory` → `assurance: self`. An advisory adapter — a
+  coding-agent hook the user can switch off — is one the agent could have gone
+  around, so its report is the agent's own claim.
+
+The same MCP proxy therefore produces `self` results under
+`--enforcement advisory` and `adapter` results when enforcing. The difference is
+not cosmetic: a control assertion may rest on the second and not on the first.
+
+`broker` is still unwritten because the broker does not exist yet. The field,
+the enum and the verifier support all four, so the evidence format does not
+change when it arrives.

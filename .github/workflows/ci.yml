@@ -130,6 +130,175 @@ jobs:
           fi
           echo "ok: tampering was detected"
 
+      # SPEC 22 week 2: `gate mcp -- <server>` in shadow against a real MCP
+      # server. tests/adapters/upstream_server.py is a real MCP server process
+      # speaking the real protocol; this drives it through the CLI the way an
+      # agent would, then verifies the chain the proxy wrote.
+      - name: Week 2 exit criterion -- MCP proxy in shadow, end to end
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate keys init --dir ci-mcp
+          python - <<'PY'
+          import anyio, sys
+          from mcp import ClientSession, StdioServerParameters, stdio_client
+
+          PROXY = StdioServerParameters(
+              command=sys.executable,
+              args=[
+                  "-c", "from gate.cli import main; main()", "mcp",
+                  "--dir", "ci-mcp", "--env", "prod",
+                  "--server-name", "orders",
+                  "--human", "ci@example.com",
+                  "--target-template", "db:{env}/{args.table}",
+                  "--", sys.executable, "tests/adapters/upstream_server.py",
+              ],
+          )
+
+          async def main() -> None:
+              async with stdio_client(PROXY) as (read, write):
+                  async with ClientSession(read, write, read_timeout_seconds=60) as client:
+                      init = await client.initialize()
+                      assert init.server_info.name == "orders-db", init.server_info
+                      tools = await client.list_tools()
+                      assert "execute_sql" in [t.name for t in tools.tools]
+
+                      result = await client.call_tool(
+                          "execute_sql",
+                          {"sql": "DROP TABLE orders_archive;", "table": "orders_archive"},
+                      )
+                      # Shadow mode: decided, recorded, forwarded.
+                      assert not result.is_error, result.content
+                      await client.read_resource("db://orders/schema")
+
+          anyio.run(main)
+          print("ok: the proxy forwarded a call in shadow mode")
+          PY
+
+          gate export --dir ci-mcp --out ci-mcp-chain.jsonl
+          gate-verify ci-mcp-chain.jsonl --keys ci-mcp/public --instance-id gate-local
+
+          python - <<'PY'
+          import json, pathlib
+          records = [
+              json.loads(line)
+              for line in pathlib.Path("ci-mcp-chain.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          by_type: dict[str, list[dict]] = {}
+          for record in records:
+              by_type.setdefault(record["type"], []).append(record)
+
+          verdicts = by_type["verdict"]
+          assert len(verdicts) == 2, [r["type"] for r in records]
+          assert all(v["mode"] == "shadow" for v in verdicts), "shadow mode was not recorded"
+
+          tool_call = verdicts[0]["payload"]["verdict"]
+          assert tool_call["decision"] == "REQUIRE_APPROVAL", tool_call["decision"]
+          assert "AG-BLR-003" in [h["rule_id"] for h in tool_call["hits"]], tool_call["hits"]
+          assert tool_call["blast_radius"] >= 60, tool_call["blast_radius"]
+
+          assert by_type["execution_result"][0]["payload"]["status"] == "ok"
+          assert by_type["execution_result"][0]["assurance"] == "adapter"
+          print("ok: a destructive payload under a mild tool name routed to approval")
+          PY
+
+      # SPEC 10.8: the OSCAL export MUST validate against the NIST schema.
+      # Also run outside pytest, so the shipped CLI path is covered.
+      - name: OSCAL export validates against the vendored NIST schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate export --dir ci-mcp --format oscal --out ci-oscal.json
+          python - <<'PY'
+          import hashlib, json, pathlib, sys
+          sys.path.insert(0, "tests")
+          from oscal import build_validator
+
+          schema_path = pathlib.Path("tests/oscal/oscal_assessment-results_schema.json")
+          raw = schema_path.read_bytes()
+          expected = "d033da70154cf6625ae46a746199e88e58f2928b1387dfac051d381b92f41b0d"
+          actual = hashlib.sha256(raw).hexdigest()
+          assert actual == expected, f"the vendored NIST schema changed: {actual}"
+
+          document = json.loads(pathlib.Path("ci-oscal.json").read_text(encoding="utf-8"))
+          errors = sorted(
+              build_validator(json.loads(raw.decode("utf-8"))).iter_errors(document),
+              key=lambda e: list(e.path),
+          )
+          for error in errors[:20]:
+              print("/".join(str(p) for p in error.path), error.message)
+          assert not errors, f"{len(errors)} OSCAL validation error(s)"
+          print("ok: valid OSCAL 1.1.2 assessment-results")
+          PY
+
+      # Both serve steps redirect the server's output to a file. A backgrounded
+      # process that inherits the step's stdout keeps the pipe open, and the
+      # runner then waits for it after the script has finished.
+      - name: gate serve answers readyz
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate serve --dir ci-mcp --host 127.0.0.1 --port 8711 --dev \
+            > ci-serve.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:8711/readyz" >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$server" 2>/dev/null; then
+              echo "FAIL: the server exited before answering"
+              cat ci-serve.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          curl -fsS "http://127.0.0.1:8711/healthz" > ci-healthz.json || {
+            cat ci-serve.log; exit 1; }
+          curl -fsS "http://127.0.0.1:8711/readyz" > ci-readyz.json || {
+            cat ci-serve.log; exit 1; }
+          python - <<'PY'
+          import json, pathlib
+          body = json.loads(pathlib.Path("ci-readyz.json").read_text())
+          assert body["ready"] is True, body
+          assert body["checks"]["signing_key"] is True, body
+          assert body["checks"]["policy_bundle"] is True, body
+          print("ok: readyz is true with a signing key")
+          PY
+
+      - name: readyz is false without a signing key (SPEC 17)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate serve --dir ci-no-keys --host 127.0.0.1 --port 8712 --dev \
+            > ci-serve-nokeys.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:8712/healthz" >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$server" 2>/dev/null; then
+              echo "FAIL: the server exited instead of reporting why it is not ready"
+              cat ci-serve-nokeys.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Alive, because restarting the container would not conjure up a key.
+          curl -fsS "http://127.0.0.1:8712/healthz" >/dev/null
+
+          code=$(curl -s -o ci-readyz-nokeys.json -w '%{http_code}' \
+            "http://127.0.0.1:8712/readyz")
+          if [ "$code" != "503" ]; then
+            echo "FAIL: readyz answered $code without a signing key"
+            cat ci-readyz-nokeys.json
+            exit 1
+          fi
+          grep -q "signing key" ci-readyz-nokeys.json
+          echo "ok: no signing key means not ready"
+
       - name: No LICENSE file until SPEC 24.2 closes
         shell: bash
         run: |

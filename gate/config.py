@@ -19,15 +19,21 @@ from pydantic import ConfigDict, Field
 from gate.core.evidence.masking import MaskingProfile
 from gate.core.schemas import Decision, Frozen, Mode
 
-__all__ = ["DEFAULT_DIR", "GateConfig", "LoadedConfig", "load_config"]
+__all__ = [
+    "DEFAULT_DIR",
+    "AdapterCredential",
+    "ApiConfig",
+    "GateConfig",
+    "LoadedConfig",
+    "load_config",
+]
 
 DEFAULT_DIR = Path(".gate")
 
-#: Sections of SPEC §16 that week 1 does not implement yet.
+#: Sections of SPEC §16 that are still unimplemented after week 2.
 UNIMPLEMENTED_SECTIONS = (
     "identity",
     "approvals",
-    "adapters",
     "broker",
     "remote",
     "observability",
@@ -41,6 +47,28 @@ class EvidenceConfig(Frozen):
     masking: MaskingProfile = "default"
 
 
+class AdapterCredential(Frozen):
+    """One registered adapter and where its shared secret comes from.
+
+    The secret is never in ``gate.yaml``. ``secret_env`` names the environment
+    variable holding it, so the config file stays safe to commit and the secret
+    stays out of the process table and out of any backup of the repo. SPEC §12.6
+    moves this to ``gate adapters add`` with per-adapter rotation in week 5.
+    """
+
+    adapter_id: str
+    secret_env: str
+    kind: str = "mcp"
+
+
+class ApiConfig(Frozen):
+    host: str = "127.0.0.1"
+    port: int = 8710
+    adapters: list[AdapterCredential] = Field(default_factory=list)
+    #: Reject a signed request whose timestamp is further away than this.
+    max_clock_skew_seconds: int = 300
+
+
 class GateConfig(Frozen):
     instance_id: str = "gate-local"
     mode: Mode = Mode.shadow
@@ -48,8 +76,23 @@ class GateConfig(Frozen):
     environment_profile: str = "dev"
     policies: list[str] = Field(default_factory=list)
     evidence: EvidenceConfig = EvidenceConfig()
+    api: ApiConfig = ApiConfig()
+    adapters: list[AdapterCredential] = Field(default_factory=list)
 
     model_config = ConfigDict(frozen=True, extra="ignore")
+
+    @property
+    def registered_adapters(self) -> list[AdapterCredential]:
+        """Adapters from either ``api.adapters`` or the top-level ``adapters``.
+
+        SPEC §16's reference file puts them at the top level and SPEC §13 reads
+        them as an API concern. Both spellings are accepted rather than making
+        an operator guess which one this build wants.
+        """
+        seen: dict[str, AdapterCredential] = {}
+        for entry in [*self.adapters, *self.api.adapters]:
+            seen[entry.adapter_id] = entry
+        return [seen[key] for key in sorted(seen)]
 
 
 class LoadedConfig(Frozen):

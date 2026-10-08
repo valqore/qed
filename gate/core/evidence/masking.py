@@ -63,6 +63,10 @@ _STRICT_RULES: list[tuple[regex.Pattern[str], str]] = [
 
 _CARD = _p(r"(?<![\d-])(?:\d[ -]?){12,18}\d(?![\d-])")
 
+#: First digit of every live card range: Mastercard's 2221-2720, Amex 34/37,
+#: Visa 4, Mastercard 51-55, Discover/JCB/UnionPay/Maestro 6x.
+_CARD_PREFIXES = frozenset("23456")
+
 
 def _luhn_ok(digits: str) -> bool:
     total = 0
@@ -76,12 +80,35 @@ def _luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _looks_like_a_card(digits: str) -> bool:
+    """Luhn alone is not enough to call a digit run a card number.
+
+    Luhn is a checksum, not an identifier: one run in ten passes it by chance,
+    and a run of eighteen zeros passes it exactly (the sum is zero, and zero is
+    divisible by ten). That is not hypothetical. The ULID-shaped
+    ``token_jti`` ``01JB000000000000000000JTI0`` contains such a run, so before
+    this check every proposal carrying one had its token id rewritten to
+    ``01JB[masked:card]JTI0`` *inside the chain* -- after which the recorded
+    token no longer matched the token the budget ledger and the API's
+    ``GET /v1/proposals/{id}`` know about, and a corrupted identifier looked
+    exactly like a redacted one.
+
+    Two cheap conditions fix it without weakening the real check: no issued card
+    has every digit the same, and none starts outside :data:`_CARD_PREFIXES`.
+    """
+    if len(set(digits)) == 1:
+        return False
+    if digits[0] not in _CARD_PREFIXES:
+        return False
+    return _luhn_ok(digits)
+
+
 def _mask_cards(text: str) -> str:
     def repl(m: regex.Match[str]) -> str:
         # str() throughout: the `regex` module ships no type information, so
         # without it every return here is Any and mypy --strict stops checking.
         digits = str(regex.sub(r"\D", "", str(m.group(0))))
-        if 13 <= len(digits) <= 19 and _luhn_ok(digits):
+        if 13 <= len(digits) <= 19 and _looks_like_a_card(digits):
             return "[masked:card]"
         return str(m.group(0))
 

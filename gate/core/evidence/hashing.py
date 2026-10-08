@@ -15,14 +15,20 @@ from gate.core import jcs
 from gate.core.schemas import rfc3339_ms
 
 __all__ = [
+    "PRINCIPAL_DOMAIN",
     "SEPARATOR",
     "genesis_prev_hash",
     "payload_hash",
+    "principal_hash",
     "record_hash",
     "record_hash_bytes",
 ]
 
 SEPARATOR = b"\x1f"
+
+#: Domain separator for principal hashes. Without one, a principal hash and some
+#: other sha256 of the same string would collide across uses.
+PRINCIPAL_DOMAIN = "gate-principal:"
 
 
 def payload_hash(payload: dict[str, object]) -> str:
@@ -75,3 +81,19 @@ def record_hash(
 def genesis_prev_hash(instance_id: str) -> str:
     """``prev_hash`` of record 0. Ties a chain to one instance identity."""
     return hashlib.sha256(f"gate-genesis:{instance_id}".encode()).hexdigest()
+
+
+def principal_hash(subject: str, *, issuer: str = "") -> str:
+    """``principal_hash`` for a human subject (SPEC §10.6).
+
+    Principals appear in the chain only as a hash, so the same person must hash
+    the same way whichever component wrote the record. This is the one place it
+    is computed: the MCP proxy uses it for ``--human`` today, and week 3's token
+    verification uses it for the ``sub`` claim, so a chain written across both
+    attributes to one principal rather than two.
+
+    ``issuer`` is the identity provider. It is part of the input because ``sub``
+    is only unique within an issuer: ``ali@acme.com`` at one IdP and the same
+    string at another are different people, and the hash has to say so.
+    """
+    return hashlib.sha256(f"{PRINCIPAL_DOMAIN}{issuer}:{subject}".encode()).hexdigest()

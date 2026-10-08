@@ -796,8 +796,13 @@ gate/
 Python 3.12+, `ruff` (lint+format) and `mypy --strict` mandatory in CI; `from __future__ import annotations`; no `Any` in `gate.core`; docstrings on public functions; 100% of `gate.core` covered by tests; conventional commits; semver; `CHANGELOG.md` in repo.
 
 ### 20.3 Dependencies (kernel wheel) — MUST NOT exceed without spec update
-`fastapi`, `uvicorn[standard]`, `pydantic>=2`, `authlib` (JWT/JWKS/OAuth), `cryptography`, `typer`, `httpx` (infra/adapters only), `pyyaml`, `mcp` (adapters only), `python-ulid`, `regex`, `keyring`. Optional extras: `[postgres] psycopg[binary]`, `[vault] hvac`, `[aws] boto3`, `[slack] slack-sdk`, `[mitm] mitmproxy`, `[ui] gate-ui` (AGPL, separate wheel). Dev/test only: `pytest`, `pytest-asyncio`, `hypothesis`, `ruff`, `mypy`.
+`fastapi`, `uvicorn[standard]`, `pydantic>=2`, `authlib` (JWT/JWKS/OAuth), `cryptography`, `typer`, `httpx` (infra/adapters only), `pyyaml`, `mcp` (adapters only), `python-ulid`, `regex`, `keyring`. Optional extras: `[postgres] psycopg[binary]`, `[vault] hvac`, `[aws] boto3`, `[slack] slack-sdk`, `[mitm] mitmproxy`, `[ui] gate-ui` (AGPL, separate wheel). Dev/test only: `pytest`, `pytest-asyncio`, `hypothesis`, `ruff`, `mypy`, `jsonschema`.
 `gate-verify`: `cryptography` only.
+
+**Pins and notes (added week 2, per §23 "no new dependency without a §20.3 update"):**
+- `mcp>=2.3,<3`. The 2.0 SDK replaced the decorator-based `lowlevel.Server` with `on_list_tools` / `on_call_tool` callbacks, which `gate/adapters/mcp/proxy.py` uses. A 1.x resolution does not import.
+- `jsonschema` is **dev/test only** and validates the OSCAL export against the NIST schema vendored in `tests/oscal/`. §10.8 permits JSON Schema in place of `oscal-cli`; `oscal-cli` would put a JVM in CI for one check. Note that the NIST schema uses ES2018 Unicode property escapes (`\p{L}`), which CPython's `re` cannot compile, so the test supplies `regex` as the pattern engine — see `tests/oscal/__init__.py`.
+- `mcp` pulls `httpx2` transitively as of 2.3. It is a transport dependency of the SDK, not a direct import of `gate`, and `httpx` is already permitted above for infra and adapters.
 
 ### 20.4 Packaging
 PyPI `valqore-gate` (CLI `gate`), `gate-verify`; container `ghcr.io/valqore/gate` (distroless, non-root, cosign); Homebrew tap `valqore/tap` with single-file binary (PyInstaller via `pyoxidizer`/`nuitka` evaluated in week 5; fallback: brew formula depending on python@3.12); Helm OCI chart.

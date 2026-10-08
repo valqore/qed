@@ -273,9 +273,34 @@ class TestExportAndVerify:
         assert len(rows) == 9
 
     def test_an_unsupported_export_format_is_refused(self, gate_dir: Path) -> None:
-        result = runner.invoke(app, ["export", "--dir", str(gate_dir), "--format", "oscal"])
+        result = runner.invoke(app, ["export", "--dir", str(gate_dir), "--format", "sarif"])
         assert result.exit_code == ERROR_EXIT
-        assert "week 2" in result.output
+        assert "jsonl, csv or oscal" in result.output
+
+    def test_oscal_export_is_a_parseable_assessment_results_document(
+        self, gate_dir: Path, tmp_path: Path
+    ) -> None:
+        self._decide(gate_dir, tmp_path)
+        result = runner.invoke(app, ["export", "--dir", str(gate_dir), "--format", "oscal"])
+        assert result.exit_code == 0, result.output
+        document = json.loads(result.output)["assessment-results"]
+        assert document["metadata"]["oscal-version"] == "1.1.2"
+        assert len(document["results"][0]["observations"]) == 8
+        assert document["results"][0]["findings"]
+
+    def test_oscal_export_is_byte_identical_when_repeated(
+        self, gate_dir: Path, tmp_path: Path
+    ) -> None:
+        """Derived UUIDs, so two auditors with two copies agree (SPEC 10.8)."""
+        self._decide(gate_dir, tmp_path)
+        first = runner.invoke(app, ["export", "--dir", str(gate_dir), "--format", "oscal"])
+        second = runner.invoke(app, ["export", "--dir", str(gate_dir), "--format", "oscal"])
+        one = json.loads(first.output)["assessment-results"]
+        two = json.loads(second.output)["assessment-results"]
+        # `last-modified` is the one value taken from the clock.
+        one["metadata"].pop("last-modified")
+        two["metadata"].pop("last-modified")
+        assert json.dumps(one, sort_keys=True) == json.dumps(two, sort_keys=True)
 
     def test_status_reports_the_chain_and_the_policy(self, gate_dir: Path, tmp_path: Path) -> None:
         self._decide(gate_dir, tmp_path)

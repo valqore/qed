@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valqore-gate"
-version = "0.1.0.dev1"
+version = "0.1.0"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
 requires-python = ">=3.12"
 # NOTE: `license` is deliberately absent and no LICENSE file is in this tree.
@@ -25,14 +25,27 @@ dependencies = [
     "pyyaml>=6",
     "python-ulid>=2",
     "regex>=2024.0.0",
+    # Week 2. All four are in SPEC 20.3's allowed set for the kernel wheel.
+    # `mcp` is pinned to 2.x: the 2.0 SDK replaced the decorator-based
+    # low-level server with the `on_*` callbacks gate/adapters/mcp/proxy.py
+    # uses, so a 1.x resolution would not import.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "mcp>=2.3,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "pytest-asyncio>=0.24",
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML",
+    # Validates the OSCAL export against the vendored NIST schema
+    # (tests/oscal/). Test-only; SPEC 10.8 allows JSON Schema in place of
+    # oscal-cli, which would add a JVM to CI.
+    "jsonschema>=4.22",
 ]
 
 [project.scripts]
@@ -73,3 +86,5 @@ ignore_missing_imports = true
 testpaths = ["tests", "packages/gate-verify/tests"]
 pythonpath = [".", "packages/gate-verify"]
 filterwarnings = ["error"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"

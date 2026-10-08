@@ -137,16 +137,35 @@ class SqliteStore:
         self._conn.execute("COMMIT")
 
     def iter_evidence(
-        self, from_seq: int = 0, to_seq: int | None = None
+        self,
+        from_seq: int = 0,
+        to_seq: int | None = None,
+        types: Sequence[str] | None = None,
     ) -> Iterator[EvidenceRecord]:
+        """Records in ``seq`` order.
+
+        ``types`` filters for reporting (``GET /v1/evidence?type=``). Note that
+        a filtered export is **not** verifiable on its own: ``gate-verify``
+        needs contiguous sequence numbers to check the linkage. The API says so
+        in its response headers and the CLI refuses to combine the two.
+        """
         sql = f"SELECT {_EVIDENCE_COLUMNS} FROM evidence WHERE seq >= ?"
         params: list[object] = [from_seq]
         if to_seq is not None:
             sql += " AND seq <= ?"
             params.append(to_seq)
+        if types:
+            sql += f" AND type IN ({','.join('?' * len(types))})"
+            params.extend(types)
         sql += " ORDER BY seq"
         for row in self._conn.execute(sql, params):
             yield _row_to_record(row)
+
+    def evidence_at(self, seq: int) -> EvidenceRecord | None:
+        row = self._conn.execute(
+            f"SELECT {_EVIDENCE_COLUMNS} FROM evidence WHERE seq = ?", (seq,)
+        ).fetchone()
+        return None if row is None else _row_to_record(row)
 
     def count_evidence(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) AS c FROM evidence").fetchone()
@@ -241,6 +260,20 @@ class SqliteStore:
     def proposal_exists(self, proposal_id: str) -> bool:
         row = self._conn.execute("SELECT 1 FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
         return row is not None
+
+    def get_proposal(self, proposal_id: str) -> tuple[str, str] | None:
+        """The stored ``(proposal_json, verdict_json)`` pair, or ``None``.
+
+        Both are the canonical (JCS) forms that were hashed into the chain, so
+        what ``GET /v1/proposals/{id}`` returns is byte-identical to what was
+        signed -- not a re-serialisation that might differ in key order.
+        """
+        row = self._conn.execute(
+            "SELECT proposal_json, verdict_json FROM proposals WHERE id = ?", (proposal_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["proposal_json"]), str(row["verdict_json"])
 
     # ----------------------------------------------------------- policy bundle
 
