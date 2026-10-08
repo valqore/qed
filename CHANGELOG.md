@@ -6,6 +6,54 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — delegation (SPEC §6), week 3
+
+- **`POST /v1/token`** (RFC 8693): an IdP token in, a narrower budgeted gate
+  token out. Scope is intersected with what the subject's groups hold, budget
+  is capped per axis, lifetime is the smallest of the request, an hour, the
+  parent's remaining life and the mandate's. `refused_scope` comes back so a
+  misconfigured agent fails at the exchange rather than at its first action.
+- **`gate login`** (RFC 8628 device flow) and **`gate token`**. Both were
+  already in SPEC §14's list of 18, so no spec update was needed. The refresh
+  token goes to the OS keychain, or a 0600 file with a warning where there is
+  none.
+- **`GET /.well-known/jwks.json`**, outside `/v1` on purpose: every `/v1` route
+  refuses an unsigned request and that test has no exemption list.
+- `gate/core/delegation/` (pure) and `gate/infra/{tokens,jwks}.py` (I/O).
+- `deploy/keycloak/`: a real Keycloak with the realm imported, and `demo.sh`,
+  which runs the week-3 exit criterion end to end.
+- `docs/delegation.md`.
+
+### Fixed — three things only a real identity provider showed
+
+Found by running the demo against Keycloak 26 instead of a fixture. All three
+were invisible to the synthetic tests, because those built claims the way the
+gate itself writes them.
+
+- **`scope` is a space-delimited string** (RFC 6749 §3.3), not a list. Both
+  forms are accepted now.
+- **A token could declare its own kind.** `TokenClaims.token_type` defaulted to
+  `"gate"`, so an IdP token — which carries no such claim — arrived looking
+  gate-issued and was handed to the narrowing check as its own parent, failing
+  every exchange. Whether a token is gate-issued is decided by *which key
+  verified it*; the field is gone and a test asserts nothing reads it again.
+  This is the same rule as never reading `alg` from the token.
+- **A narrowing violation during mint escaped as a 500.** It is a caller asking
+  for more than the subject token holds, so it is a 400.
+
+### Fixed — `--config` on the commands that open a session
+
+`export`, `status`, `checkpoint` and `verify` opened a session without a config
+path, so they read the default `instance_id` and refused to touch a chain
+written by any deployment that had set one. The demo hit it on its first
+complete run.
+
+### Changed — Keycloak realm requests the `basic` client scope
+
+Keycloak 26 omits `sub` from the access token without it. A token with no
+subject cannot name a principal, so the gate refuses it — correctly, but the
+shipped realm should not produce one.
+
 ### Added — budget ledger (SPEC §8), week 3
 
 - **Budgets are persisted and charged.** `check_proposal` previously passed an

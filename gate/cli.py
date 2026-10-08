@@ -262,6 +262,7 @@ def export(
     export_format: Annotated[str, typer.Option("--format", help="jsonl, csv or oscal.")] = "jsonl",
     from_seq: Annotated[int, typer.Option("--from", help="First seq to include.")] = 0,
     to_seq: Annotated[int | None, typer.Option("--to", help="Last seq to include.")] = None,
+    config: ConfigOption = None,
 ) -> None:
     """Export the evidence chain. JSONL is what `gate-verify` reads.
 
@@ -271,7 +272,7 @@ def export(
     """
     if export_format not in {"jsonl", "csv", "oscal"}:
         _fail("--format must be jsonl, csv or oscal")
-    session = open_session(directory=directory, strict_policy=False)
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
     records = list(session.store.iter_evidence(from_seq, to_seq))
     if export_format == "oscal":
         if not records:
@@ -303,11 +304,165 @@ def export(
 
 
 @app.command()
-def status(directory: DirOption = DEFAULT_DIR) -> None:
+def status(
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+) -> None:
     """Chain and policy posture."""
-    session = open_session(directory=directory, strict_policy=False)
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
     typer.echo(json.dumps(chain_status(session), indent=2))
     session.close()
+
+
+@app.command()
+def login(
+    issuer: Annotated[str, typer.Option("--issuer", help="OIDC issuer URL")],
+    client_id: Annotated[str, typer.Option("--client-id", help="Public client id")],
+    scope: Annotated[
+        str, typer.Option("--scope", help="Scopes to request from the identity provider")
+    ] = "openid profile email offline_access",
+    no_keyring: Annotated[
+        bool, typer.Option("--no-keyring", help="Skip the OS keychain and use a 0600 file")
+    ] = False,
+) -> None:
+    """Sign in to an identity provider (RFC 8628 device flow).
+
+    Prints a URL and a short code. Open the URL anywhere you have a browser --
+    it does not have to be this machine -- approve, and the refresh token is
+    stored in the OS keychain.
+    """
+    from gate.infra.credentials import CredentialStore, StoredLogin
+    from gate.infra.device_flow import (
+        DeviceFlowError,
+        discover_endpoints,
+        poll_for_token,
+        start_device_authorization,
+    )
+
+    try:
+        endpoints = discover_endpoints(issuer)
+        authorization = start_device_authorization(
+            endpoints["device_authorization_endpoint"], client_id=client_id, scope=scope
+        )
+    except DeviceFlowError as exc:
+        _fail(str(exc))
+        return
+
+    typer.echo("")
+    if authorization.verification_uri_complete:
+        typer.echo(f"  Open:  {authorization.verification_uri_complete}")
+        typer.echo(f"  Code:  {authorization.user_code}   (already filled in on that link)")
+    else:
+        typer.echo(f"  Open:  {authorization.verification_uri}")
+        typer.echo(f"  Code:  {authorization.user_code}")
+    typer.echo("")
+    typer.echo("  Waiting for approval. Ctrl-C to give up.")
+
+    try:
+        token = poll_for_token(endpoints["token_endpoint"], authorization, client_id=client_id)
+    except DeviceFlowError as exc:
+        _fail(str(exc))
+        return
+    if token.refresh_token is None:
+        _fail(
+            "the identity provider returned no refresh token; request the "
+            "`offline_access` scope, or the login cannot be reused"
+        )
+        return
+
+    store = CredentialStore(use_keyring=not no_keyring)
+    store.save(StoredLogin(issuer=issuer, client_id=client_id, refresh_token=token.refresh_token))
+    typer.echo(f"  Signed in. Credential stored in the {store.backend}.")
+
+
+@app.command()
+def token(
+    issuer: Annotated[str, typer.Option("--issuer", help="The issuer you logged in to")],
+    gate_url: Annotated[
+        str, typer.Option("--gate-url", help="Base URL of the gate API")
+    ] = "http://127.0.0.1:8710",
+    scope: Annotated[str, typer.Option("--scope", help="Scopes to request")] = "",
+    adapter: Annotated[str, typer.Option("--adapter", help="Adapter id for signing")] = "",
+    secret_env: Annotated[
+        str, typer.Option("--secret-env", help="Env var holding the adapter secret")
+    ] = "GATE_ADAPTER_SECRET",
+    raw: Annotated[bool, typer.Option("--raw", help="Print only the token")] = False,
+) -> None:
+    """Exchange the stored login for a budgeted gate token (SPEC §6.2).
+
+    Adapters call this transparently when their cached token is close to
+    expiry; a person runs it to get a token for a one-off command.
+    """
+    import os
+
+    import httpx
+
+    from gate.api.auth import canonical_string, sign
+    from gate.core.schemas import rfc3339_ms
+    from gate.infra.credentials import CredentialStore
+    from gate.infra.device_flow import DeviceFlowError, discover_endpoints, refresh_access_token
+
+    stored = CredentialStore().load(issuer)
+    if stored is None:
+        _fail(f"not signed in to {issuer}; run `gate login --issuer {issuer} --client-id ...`")
+        return
+
+    try:
+        endpoints = discover_endpoints(issuer)
+        refreshed = refresh_access_token(
+            endpoints["token_endpoint"], stored.refresh_token, client_id=stored.client_id
+        )
+    except DeviceFlowError as exc:
+        _fail(str(exc))
+        return
+
+    body = json.dumps(
+        {
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "subject_token": refreshed.access_token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "scope": scope,
+        }
+    ).encode("utf-8")
+
+    secret = os.environ.get(secret_env, "")
+    if not adapter or not secret:
+        _fail(
+            "the token endpoint is adapter-authenticated: pass --adapter and put its "
+            f"secret in ${secret_env}. The subject token proves who you are, not which "
+            "deployment is asking on your behalf."
+        )
+        return
+
+    timestamp = rfc3339_ms(utcnow())
+    path = "/v1/token"
+    headers = {
+        "content-type": "application/json",
+        "x-gate-adapter": adapter,
+        "x-gate-timestamp": timestamp,
+        "x-gate-nonce": "",
+        "x-gate-signature": sign(
+            secret,
+            canonical_string(method="POST", path=path, timestamp=timestamp, nonce="", body=body),
+        ),
+    }
+    try:
+        response = httpx.post(
+            f"{gate_url.rstrip('/')}{path}", content=body, headers=headers, timeout=10.0
+        )
+    except httpx.HTTPError as exc:
+        _fail(f"could not reach the gate at {gate_url}: {exc}")
+        return
+
+    if response.status_code != 200:
+        _fail(f"the exchange was refused ({response.status_code}): {response.text}")
+        return
+    payload = response.json()
+    if raw:
+        typer.echo(payload["access_token"])
+    else:
+        typer.echo(json.dumps(payload, indent=2))
 
 
 @app.command()
@@ -316,9 +471,10 @@ def checkpoint(
     force: Annotated[
         bool, typer.Option("--force", help="Checkpoint now, below the normal threshold.")
     ] = False,
+    config: ConfigOption = None,
 ) -> None:
     """Append a Merkle checkpoint over the records since the last one."""
-    session = open_session(directory=directory, strict_policy=False)
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
     record = session.writer.checkpoint(force=force)
     session.close()
     if record is None:
@@ -341,6 +497,7 @@ def verify(
     ] = None,
     directory: DirOption = DEFAULT_DIR,
     as_json: Annotated[bool, typer.Option("--json")] = False,
+    config: ConfigOption = None,
 ) -> None:
     """Verify a chain. A thin wrapper; auditors should run `gate-verify` itself."""
     try:
@@ -352,7 +509,7 @@ def verify(
     from gate.infra.keys.file import load_public_keys
 
     if records is None:
-        session = open_session(directory=directory, strict_policy=False)
+        session = open_session(directory=directory, config_path=config, strict_policy=False)
         text = to_jsonl(session.store.iter_evidence())
         instance_id = session.config.instance_id
         session.close()

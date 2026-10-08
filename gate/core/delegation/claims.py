@@ -13,9 +13,9 @@ I/O. :mod:`gate.infra.tokens` does that and then calls in here.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Annotated
 
-from pydantic import ConfigDict, Field
+from pydantic import BeforeValidator, ConfigDict, Field
 
 from gate.core.evidence.hashing import principal_hash
 from gate.core.schemas import Budget, Environment, Frozen, Principal, Timestamp
@@ -51,6 +51,23 @@ DEFAULT_SKEW = timedelta(seconds=60)
 SERVICE_PREFIX = "svc:"
 
 AUDIENCE = "gate"
+
+
+def _space_delimited(value: object) -> object:
+    """RFC 6749 §3.3: `scope` is a space-delimited string, not a list.
+
+    Every real identity provider sends the string; the gate's own tokens carry
+    a list because that is what the rest of the code works with. Both are
+    accepted, because refusing the standard form would mean refusing every
+    token Keycloak, Okta and Entra actually issue -- which is how this was
+    found, against a real Keycloak rather than a fixture.
+    """
+    if isinstance(value, str):
+        return value.split()
+    return value
+
+
+Scope = Annotated[list[str], BeforeValidator(_space_delimited)]
 
 
 class DelegationError(Exception):
@@ -101,13 +118,12 @@ class TokenClaims(Frozen):
     jti: str
     nbf: Timestamp | None = None
     act: ActorClaim | None = None
-    scope: list[str] = Field(default_factory=list)
+    scope: Scope = Field(default_factory=list)
     budget: Budget = Budget()
     environments: list[Environment] = Field(default_factory=list)
     mandate_id: str | None = None
     parent_jti: str | None = None
     agent_id: str | None = None
-    token_type: Literal["gate", "idp"] = "gate"
 
     model_config = ConfigDict(frozen=True, extra="allow")
 

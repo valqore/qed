@@ -139,7 +139,7 @@ async def exchange(request: Request) -> JSONResponse:
 
     now = utcnow()
     try:
-        claims, principal = state.verify_subject_token(subject_token, now=now)
+        claims, principal, gate_issued = state.verify_subject_token(subject_token, now=now)
     except JwksError as exc:
         # The identity provider is unreachable and nothing is cached. That is
         # an upstream failure, not a bad request, and the distinction decides
@@ -164,7 +164,7 @@ async def exchange(request: Request) -> JSONResponse:
         ceiling=ceiling,
         requested_lifetime=timedelta(seconds=requested_seconds),
         default_lifetime=timedelta(seconds=delegation.token_ttl_default_seconds),
-        parent_expires_in=claims.exp - now if claims.token_type == "gate" else None,
+        parent_expires_in=claims.exp - now if gate_issued else None,
     )
     if granted.lifetime <= timedelta(0):
         raise _oauth_error(
@@ -175,19 +175,25 @@ async def exchange(request: Request) -> JSONResponse:
 
     jti = str(ULID())
     issuer = state.token_issuer
-    token, minted = issuer.mint(
-        subject=claims.sub,
-        jti=jti,
-        now=now,
-        lifetime=granted.lifetime,
-        scope=granted.scope,
-        budget=granted.budget,
-        environments=[str(e) for e in claims.environments] or None,
-        agent_id=_string(body.get("agent_id")),
-        mandate_id=_string(body.get("mandate_id")) or claims.mandate_id,
-        parent=claims if claims.token_type == "gate" else None,
-        actor=_string(body.get("agent_id")),
-    )
+    try:
+        token, minted = issuer.mint(
+            subject=claims.sub,
+            jti=jti,
+            now=now,
+            lifetime=granted.lifetime,
+            scope=granted.scope,
+            budget=granted.budget,
+            environments=[str(e) for e in claims.environments] or None,
+            agent_id=_string(body.get("agent_id")),
+            mandate_id=_string(body.get("mandate_id")) or claims.mandate_id,
+            parent=claims if gate_issued else None,
+            actor=_string(body.get("agent_id")),
+        )
+    except DelegationError as exc:
+        # Narrowing is enforced at mint time as well as here, and a violation
+        # is the caller asking for more than the subject token holds -- a bad
+        # request, not a server fault.
+        raise _oauth_error("invalid_scope", str(exc)) from exc
 
     # The caps go into the ledger before the token is handed out: a token whose
     # budget was never recorded would be treated as uncapped by the first
@@ -206,7 +212,7 @@ async def exchange(request: Request) -> JSONResponse:
             "refused_scope": granted.refused_scope,
             "budget": granted.budget.model_dump(mode="json"),
             "expires_at": minted.exp.isoformat(),
-            "parent_jti": claims.jti if claims.token_type == "gate" else None,
+            "parent_jti": claims.jti if gate_issued else None,
             "mandate_id": minted.mandate_id,
         },
         mode=session.config.mode,

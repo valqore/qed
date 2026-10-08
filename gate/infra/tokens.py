@@ -209,7 +209,6 @@ class TokenIssuer:
             "scope": list(scope or []),
             "budget": (budget or Budget()).model_dump(mode="json"),
             "environments": list(environments or []),
-            "token_type": "gate",
         }
         if agent_id is not None:
             payload["agent_id"] = agent_id

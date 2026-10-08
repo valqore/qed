@@ -1,0 +1,38 @@
+# Keycloak for the week-3 delegation demo (SPEC §6, §22).
+#
+# Development mode on purpose: `start-dev` runs HTTP-only with an in-memory
+# database, which is what you want for a demo you throw away and the opposite
+# of what you want in production. Nothing here is a deployment example.
+#
+#   docker compose -f deploy/keycloak/docker-compose.yml up -d
+#   ./deploy/keycloak/demo.sh
+#
+# The realm is imported at start from realm-gate-demo.json, so the container
+# comes up with the client, the user and the groups already in place and the
+# demo needs no clicking.
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: gate-keycloak
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./realm-gate-demo.json:/opt/keycloak/data/import/realm-gate-demo.json:ro
+    healthcheck:
+      # Keycloak 26 serves health on the management port, and the image has no
+      # curl, so this asks the JVM itself rather than adding a package.
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\nHost: localhost\\nConnection: close\\n\\n' >&3 && cat <&3 | grep -q UP",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s

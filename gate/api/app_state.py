@@ -57,8 +57,13 @@ class GateState:
             )
         return self.session
 
-    def verify_subject_token(self, token: str, *, now: datetime) -> tuple[TokenClaims, Principal]:
+    def verify_subject_token(
+        self, token: str, *, now: datetime
+    ) -> tuple[TokenClaims, Principal, bool]:
         """Verify a subject token from any configured source (SPEC §6.1 step 1).
+
+        Returns ``(claims, principal, gate_issued)``. The third value says which
+        key verified the token, not what the token claims about itself.
 
         The `kid` selects among the keys of a *configured* issuer; it never
         names a URL. A token able to point at its own key server would be a
@@ -70,13 +75,18 @@ class GateState:
         kid = header.get("kid")
 
         if self.token_issuer is not None and kid == self.token_issuer.kid:
-            return verify_token(
+            # Gate-issued, because *our key* verified it -- not because the
+            # token said so. A token able to declare its own kind could ask to
+            # be treated as its own parent, which is the same class of mistake
+            # as reading `alg` out of the token.
+            claims, principal = verify_token(
                 token,
                 keys=self.token_issuer.key,
                 now=now,
                 issuers=frozenset({delegation.self_issuer}),
                 algorithms=(GATE_ALG,),
             )
+            return claims, principal, True
 
         if self.jwks is None or not delegation.issuers:
             raise TokenVerificationError(
@@ -90,7 +100,7 @@ class GateState:
             wanted = kid if isinstance(kid, str) else None
             keyset = self.jwks.get(configured.issuer, uri, kid=wanted)
             try:
-                return verify_token(
+                claims, principal = verify_token(
                     token,
                     keys=keyset,
                     now=now,
@@ -99,6 +109,8 @@ class GateState:
                 )
             except TokenVerificationError as exc:
                 last = exc
+            else:
+                return claims, principal, False
         raise last or TokenVerificationError("no configured issuer accepted this token")
 
     def _jwks_uri(self, configured: IssuerConfig) -> str:
