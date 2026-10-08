@@ -175,6 +175,29 @@ def test_checkpoint_merkle_root_verifies(chain, tmp_path: Path) -> None:
     assert report.checkpoints == 1
 
 
+def test_a_checkpoint_root_survives_masking(chain, tmp_path: Path) -> None:
+    """The flake that made this file go red on about one push in a hundred.
+
+    Masking runs before ``payload_hash``, so a rewritten ``merkle_root`` still
+    produced a record that verified against its own hash -- and a checkpoint
+    nobody could ever verify again. The digest below is a real one that
+    reproduced it: it contains the Luhn-passing run ``2928422540476``.
+
+    Written against the writer rather than against a generated root, because
+    whether a run like that turns up is a one-in-four-hundred accident and a
+    test that waits for it is not a test.
+    """
+    _, writer, _ = chain
+    poison = "0ed7e112a9844e97c2928422540476bbfda268f8060f061ffdf8d165b7fb5e0b"
+    record = writer.append(
+        type_=EvidenceType.checkpoint,
+        assurance=Assurance.kernel,
+        payload={"from_seq": 0, "to_seq": 4, "merkle_root": poison, "records": 5},
+    )
+    assert record.payload is not None
+    assert record.payload["merkle_root"] == poison
+
+
 def test_a_tampered_checkpoint_root_is_detected(chain, tmp_path: Path) -> None:
     store, writer, _ = chain
     writer.checkpoint(force=True)

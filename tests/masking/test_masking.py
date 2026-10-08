@@ -124,6 +124,76 @@ class TestLuhnAloneIsNotEnough:
         assert "[masked:card]" not in mask_text("ref 1234567812345670 ok")
 
 
+class TestADigestIsNotContent:
+    """A redactor must not rewrite a value the kernel generated.
+
+    This cost a red CI run before it was understood, and the shape of the
+    failure is the reason it is worth this many tests: about one sha256 digest
+    in four hundred contains a 13-to-19 digit run that starts with 2-6 and
+    passes Luhn. Masking happens *before* ``payload_hash``, so the record
+    still verified against its own hash and nothing reported a problem -- the
+    checkpoint simply became impossible for anyone to verify, for ever.
+
+    ``params_hash`` and ``policy_hash`` were exposed at the same rate.
+    """
+
+    #: A real digest that reproduces it. The run is `2928422540476`.
+    POISON = "0ed7e112a9844e97c2928422540476bbfda268f8060f061ffdf8d165b7fb5e0b"
+
+    def test_the_digest_that_broke_a_checkpoint_survives(self) -> None:
+        assert mask_text(self.POISON) == self.POISON
+
+    def test_it_survives_as_a_merkle_root_in_a_payload(self) -> None:
+        payload = {"from_seq": 0, "to_seq": 5, "merkle_root": self.POISON, "records": 6}
+        assert mask_payload(payload)["merkle_root"] == self.POISON
+
+    @pytest.mark.parametrize(
+        "key", ["params_hash", "policy_hash", "prev_hash", "payload_hash", "hash"]
+    )
+    def test_every_digest_field_survives(self, key: str) -> None:
+        assert mask_payload({key: self.POISON})[key] == self.POISON
+
+    def test_a_digit_run_glued_to_hex_letters_is_never_a_card(self) -> None:
+        """The general fix, independent of which key it sits under: a card
+        number in a payload is delimited by whitespace, a quote, a comma or a
+        colon, never by a hex letter."""
+        assert mask_text("a4111111111111111b") == "a4111111111111111b"
+
+    def test_no_randomly_generated_digest_is_altered(self) -> None:
+        """A property test, because the bug was a 1-in-400 accident and a
+        fixed example would have been chosen to pass."""
+        import secrets
+
+        altered = [
+            digest
+            for digest in (secrets.token_hex(32) for _ in range(20000))
+            if mask_text(digest) != digest
+        ]
+        assert not altered, altered[:3]
+
+    def test_a_card_number_under_a_digest_key_is_still_masked(self) -> None:
+        """The exemption is not a hole. A card number is pure digits, and an
+        exempt value has to contain a letter, so no amount of putting one
+        under a key called `params_hash` gets it into the chain."""
+        assert mask_payload({"params_hash": "4111111111111111"}) == {"params_hash": "[masked:card]"}
+
+    def test_an_email_under_a_digest_key_is_still_masked(self) -> None:
+        assert mask_payload({"human_hash": "ali@acme.com"}) == {"human_hash": "[masked:email]"}
+
+    def test_a_key_the_kernel_does_not_own_is_not_exempt(self) -> None:
+        """`params_redacted` carries whatever the adapter sent, and the
+        exemption is by key name, so the names have to stay kernel-owned."""
+        assert mask_payload({"note": "ali@acme.com"}) == {"note": "[masked:email]"}
+
+    def test_a_sequence_number_passes_through(self) -> None:
+        assert mask_payload({"seq": 7, "from_seq": 0}) == {"seq": 7, "from_seq": 0}
+
+    def test_a_key_id_keeps_its_prefix(self) -> None:
+        assert mask_payload({"key_id": "ed25519:7fbb6319282f9912"}) == {
+            "key_id": "ed25519:7fbb6319282f9912"
+        }
+
+
 def test_ordinary_text_is_untouched() -> None:
     text = "restart the worker pool in staging, then re-run the migration"
     assert mask_text(text) == text

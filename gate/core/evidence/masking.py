@@ -5,6 +5,21 @@ raw value and no later purge is needed to remove it. Because masking happens
 *before* ``payload_hash``, changing this module changes record hashes — treat
 the pattern set as part of the evidence format.
 
+What it must never touch
+------------------------
+
+A redactor that rewrites a *kernel-generated identifier* does damage that
+nothing reports: the record still verifies against its own hash, so the chain
+looks intact, and the identifier has simply stopped referring to anything.
+A masked ``merkle_root`` makes a checkpoint permanently unverifiable; a masked
+``params_hash`` breaks the one guarantee that field carries. So
+:data:`_STRUCTURAL_KEYS` is exempt, under the conditions in
+:func:`_is_structural`.
+
+Old chains are unaffected by changes here. ``gate-verify`` recomputes
+``payload_hash`` from the payload as stored, and never re-runs masking, so a
+record written under an earlier pattern set still verifies.
+
 Patterns run through the ``regex`` module with an evaluation timeout (SPEC §17).
 If a pattern times out the whole string is replaced rather than passed through:
 failing closed is the only safe direction for a redactor.
@@ -61,7 +76,10 @@ _STRICT_RULES: list[tuple[regex.Pattern[str], str]] = [
     (_p(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"), "[masked:base64_blob]"),
 ]
 
-_CARD = _p(r"(?<![\d-])(?:\d[ -]?){12,18}\d(?![\d-])")
+#: A card number in a payload is delimited by whitespace, a quote, a comma or
+#: a colon -- never by a hex letter. The lookarounds reject a digit run glued
+#: to letters, which is what a run inside a sha256 digest always is.
+_CARD = _p(r"(?<![0-9A-Za-z-])(?:\d[ -]?){12,18}\d(?![0-9A-Za-z-])")
 
 #: First digit of every live card range: Mastercard's 2221-2720, Amex 34/37,
 #: Visa 4, Mastercard 51-55, Discover/JCB/UnionPay/Maestro 6x.
@@ -115,6 +133,64 @@ def _mask_cards(text: str) -> str:
     return str(_CARD.sub(repl, text, timeout=_TIMEOUT))
 
 
+#: Keys whose value the *kernel* writes: digests, sequence numbers, key ids,
+#: the identifiers the chain is addressed by. A redactor has no business
+#: rewriting any of them, and when it does the damage is silent and permanent
+#: -- the record still verifies against its own hash, so nothing reports a
+#: problem, and the identifier simply no longer refers to anything.
+#:
+#: That is not hypothetical twice over. ``_looks_like_a_card`` below documents
+#: a ULID ``token_jti`` being rewritten. The second case was a ``merkle_root``:
+#: about one sha256 digest in four hundred contains a 13-to-19 digit run that
+#: starts with 2-6 and passes Luhn, and a checkpoint whose root was masked can
+#: never be verified again by anybody. ``params_hash`` and ``policy_hash`` were
+#: exposed to exactly the same accident at exactly the same rate.
+_STRUCTURAL_KEYS = frozenset(
+    {
+        "bundle_hash",
+        "chain_format",
+        "engine_version",
+        "from_seq",
+        "hash",
+        "human_hash",
+        "instance_id",
+        "key_id",
+        "merkle_root",
+        "params_hash",
+        "payload_hash",
+        "policy_hash",
+        "prev_hash",
+        "principal_hash",
+        "schema_version",
+        "seq",
+        "sig",
+        "signature",
+        "to_seq",
+    }
+)
+
+#: What an exempt value is allowed to look like. No ``@``, no whitespace, no
+#: punctuation beyond what a digest, a ULID or ``ed25519:<id>`` needs.
+_IDENTIFIER = _p(r"[0-9A-Za-z][0-9A-Za-z_:.+/=-]{0,255}")
+
+
+def _is_structural(key: object, value: object) -> bool:
+    """Whether this key/value pair is a kernel identifier and not content.
+
+    Both halves have to hold. The key has to be one the kernel owns, *and*
+    the value has to look like an identifier with at least one letter in it.
+    That second condition is what keeps the exemption from becoming a hole:
+    a card number, a phone number and a national id are all pure digits, so
+    none of them can ever be exempted by putting one under a key called
+    ``params_hash``.
+    """
+    if str(key) not in _STRUCTURAL_KEYS:
+        return False
+    if not isinstance(value, str):
+        return True  # a sequence number or a boolean; nothing to redact
+    return bool(_IDENTIFIER.fullmatch(value)) and any(c.isalpha() for c in value)
+
+
 def mask_text(text: str, profile: MaskingProfile = "default") -> str:
     """Mask secrets and personal data in a single string."""
     rules = _RULES + _STRICT_RULES if profile == "strict" else _RULES
@@ -135,7 +211,9 @@ def mask_payload(value: object, profile: MaskingProfile = "default", _depth: int
         return mask_text(value, profile)
     if isinstance(value, dict):
         return {
-            mask_text(str(k), profile): mask_payload(v, profile, _depth + 1)
+            mask_text(str(k), profile): (
+                v if _is_structural(k, v) else mask_payload(v, profile, _depth + 1)
+            )
             for k, v in value.items()
         }
     if isinstance(value, list | tuple):
