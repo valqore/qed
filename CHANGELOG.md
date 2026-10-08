@@ -6,6 +6,34 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `gate policy test` (SPEC §14)
+
+- Runs cases you write against the rules you have loaded. Touches nothing: no
+  chain, no store, no network. Exit 0 all passed, 1 a case failed.
+- `expect.rules` is the **exact** set of rule ids and is required, not
+  optional. A case that checks only the decision passes when the right answer
+  arrives from the wrong rule, which is worse than no case because it reads
+  like coverage. Pinning the exact set means a case fails both when a rule
+  stops firing and when an unrelated one starts -- the second is what catches
+  a rule widened by accident.
+- Every case is evaluated twice, the second time against a reshuffled bundle.
+  ADR-002.2 says a decision must not depend on rule load order and this is the
+  only thing that shows it; rule authors get the check on their own rules for
+  free. `--no-order-check` opts out while iterating.
+- `--coverage` lists loaded rules no case mentions.
+- A case whose proposal does not validate is a failing case, not an exception,
+  so one malformed entry does not hide every case after it.
+- `docs/policy-testing.md`.
+
+### Changed — the golden suite and the CLI share one comparison
+
+`tests/policy/test_golden.py` now compares through `gate.core.policy.cases`,
+the same code `gate policy test` uses. Two comparison routines would drift and
+the one that drifted would be the user's; ours is the one with a CI job behind
+it. The 74 golden cases still each run twice -- the shuffle moved inside
+`run_case` rather than being a separate parametrized test, which is why the
+total test count falls while coverage does not.
+
 ### Added — mandate lifecycle (SPEC §6.5)
 
 - `gate mandate sign | list | revoke`, completing §6. Mandates were already

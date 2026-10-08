@@ -254,6 +254,84 @@ def policy_explain(
     typer.echo(json.dumps(explain_proposal(proposal, result.bundle, budget, ctx), indent=2))
 
 
+@policy_app.command("test")
+def policy_test(
+    cases_file: Annotated[Path, typer.Argument(help="Case file (YAML or JSON).")],
+    policy: PolicyOption = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+    no_order_check: Annotated[
+        bool,
+        typer.Option("--no-order-check", help="Skip the rule-order independence check."),
+    ] = False,
+    coverage: Annotated[
+        bool, typer.Option("--coverage", help="Also list rules no case mentions.")
+    ] = False,
+) -> None:
+    """Run policy cases against your rules. Writes nothing to the chain.
+
+    A case is a proposal plus the verdict it should get. `expect.rules` is the
+    exact set of rule ids, not a subset, so a case fails both when a rule stops
+    firing and when an unrelated one starts -- the second is what catches a
+    rule widened by accident.
+
+    Every case is also evaluated against a reshuffled copy of the bundle: a
+    decision must not depend on the order rules load in (ADR-002.2).
+
+    Exit codes: 0 all passed, 1 a case failed or the file is unusable.
+    """
+    import yaml
+
+    from gate.core.policy.cases import CaseError, load_cases, run_cases, uncovered_rules
+    from gate.core.schemas import utcnow
+
+    try:
+        document = yaml.safe_load(cases_file.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        _fail(f"{cases_file} is not readable: {exc}")
+        return
+    try:
+        case_file = load_cases(document)
+    except CaseError as exc:
+        _fail(f"{cases_file}: {exc}")
+        return
+
+    paths = [baseline_pack_dir(), *(policy or [])]
+    result = load_bundle([p for p in paths if p.exists()])
+    if not result.ok:
+        for finding in result.errors:
+            typer.echo(finding.format(), err=True)
+        _fail("the policy bundle has errors; fix those before testing against it")
+        return
+
+    results = run_cases(case_file, result.bundle, now=utcnow(), check_order=not no_order_check)
+    failed = [r for r in results if not r.passed]
+    missing = uncovered_rules(case_file, result.bundle) if coverage else []
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "total": len(results),
+                    "passed": len(results) - len(failed),
+                    "failed": [{"id": r.case_id, "failures": r.failures} for r in failed],
+                    **({"uncovered_rules": missing} if coverage else {}),
+                },
+                indent=2,
+            )
+        )
+    else:
+        for case_result in failed:
+            typer.echo(f"FAIL  {case_result.case_id}")
+            for failure in case_result.failures:
+                typer.echo(f"        {failure}")
+        typer.echo(f"{len(results) - len(failed)}/{len(results)} cases passed")
+        if coverage and missing:
+            typer.echo(f"rules with no case: {', '.join(missing)}")
+
+    if failed:
+        raise typer.Exit(code=1)
+
+
 # -------------------------------------------------------------------- export
 
 

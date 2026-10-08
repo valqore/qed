@@ -4,28 +4,25 @@ Each case in ``golden/cases.yaml`` is run twice: once against the bundle as
 loaded, and once against the same rules shuffled. ADR-002.2 requires the result
 to be independent of rule order, and the second pass is the only thing that
 actually proves it.
+
+The comparison itself lives in ``gate.core.policy.cases`` and is shared with
+``gate policy test``. Two comparison routines would drift, and the one that
+drifted would be the user's -- ours is the one with a CI job behind it.
 """
 
 from __future__ import annotations
 
-import random
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from gate.core.policy.cases import CaseFile, run_case, uncovered_rules
 from gate.core.policy.engine import evaluate
 from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import (
-    ActionProposal,
-    BudgetState,
-    Decision,
-    EvalContext,
-    Mandate,
-    Verdict,
-)
-from tests.conftest import NOW, make_proposal
+from gate.core.schemas import ActionProposal, BudgetState, EvalContext, Mandate
+from tests.conftest import BASE_PROPOSAL, NOW, make_proposal
 
 CASES_FILE = Path(__file__).parent / "golden" / "cases.yaml"
 CASES: list[dict[str, Any]] = yaml.safe_load(CASES_FILE.read_text(encoding="utf-8"))
@@ -71,60 +68,34 @@ def _build(case: dict[str, Any]) -> tuple[ActionProposal, BudgetState, EvalConte
     return proposal, budget, EvalContext(now=NOW, mandate=mandate)
 
 
-def _assert_expected(case: dict[str, Any], verdict: Verdict) -> None:
-    expected = case["expect"]
-    label = case["id"]
-    hit_ids = [h.rule_id for h in verdict.hits]
-
-    assert hit_ids == sorted(hit_ids), f"{label}: hits are not sorted by rule_id"
-    assert hit_ids == sorted(expected["rules"]), (
-        f"{label}: expected rules {sorted(expected['rules'])}, got {hit_ids}"
-    )
-    assert verdict.decision is Decision(expected["decision"]), (
-        f"{label}: expected {expected['decision']}, got {verdict.decision.value}"
-    )
-    if "would" in expected:
-        assert verdict.would_decision is Decision(expected["would"]), (
-            f"{label}: expected would_decision {expected['would']}, "
-            f"got {verdict.would_decision.value}"
-        )
-    if "blast_radius" in expected:
-        assert verdict.blast_radius == expected["blast_radius"], (
-            f"{label}: expected blast radius {expected['blast_radius']}, got {verdict.blast_radius}"
-        )
-    if "default_applied" in expected:
-        assert verdict.default_applied is expected["default_applied"], label
+CASE_FILE = CaseFile(base=BASE_PROPOSAL, cases=CASES, mandates=MANDATES)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
 def test_golden_case(case: dict[str, Any], baseline_bundle: PolicyBundle) -> None:
-    proposal, budget, ctx = _build(case)
-    _assert_expected(case, evaluate(proposal, baseline_bundle, budget, ctx))
+    """Runs the shuffle check too: `run_case` does both by default."""
+    result = run_case(case, CASE_FILE, baseline_bundle, now=NOW)
+    assert result.passed, f"{case['id']}: " + "; ".join(result.failures)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
-def test_golden_case_is_order_independent(
-    case: dict[str, Any], baseline_bundle: PolicyBundle
+def test_the_shared_runner_builds_the_same_inputs_the_engine_sees(
+    baseline_bundle: PolicyBundle,
 ) -> None:
-    shuffled = list(baseline_bundle.rules)
-    random.Random(case["id"]).shuffle(shuffled)
-    bundle = baseline_bundle.model_copy(update={"rules": shuffled})
-
+    """Guards the refactor above: the shared builder must produce the same
+    verdict as building the inputs by hand, or the golden suite would be
+    testing something other than what `gate check` does."""
+    case = next(c for c in CASES if c["id"] == "def-001-plain-read-allows")
     proposal, budget, ctx = _build(case)
-    first = evaluate(proposal, baseline_bundle, budget, ctx)
-    second = evaluate(proposal, bundle, budget, ctx)
-    assert first.model_dump_json() == second.model_dump_json(), (
-        f"{case['id']}: verdict changed when the rule list was reordered"
-    )
+    by_hand = evaluate(proposal, baseline_bundle, budget, ctx)
+    shared = run_case(case, CASE_FILE, baseline_bundle, now=NOW, check_order=False)
+    assert shared.verdict is not None
+    assert shared.verdict.model_dump_json() == by_hand.model_dump_json()
 
 
 def test_every_shipped_rule_is_exercised(baseline_bundle: PolicyBundle) -> None:
     """A rule nobody has a golden case for is a rule nobody has tested."""
-    covered: set[str] = set()
-    for case in CASES:
-        covered.update(case["expect"]["rules"])
-    missing = {r.rule_id for r in baseline_bundle.rules} - covered
-    assert not missing, f"baseline rules with no golden case: {sorted(missing)}"
+    missing = uncovered_rules(CASE_FILE, baseline_bundle)
+    assert not missing, f"baseline rules with no golden case: {missing}"
 
 
 def test_case_count_meets_the_week_one_bar() -> None:
