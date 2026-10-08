@@ -874,6 +874,90 @@
     decision: BLOCK
     rules: [AG-DAT-012]
 
+- id: dat-013-instance-metadata-service
+  # The HTTP forward proxy is the first adapter that can see this. One
+  # unauthenticated GET to a link-local address returns the instance role's
+  # keys, so there is no approval path: an agent has no legitimate reason to
+  # go here.
+  patch:
+    action:
+      kind: http
+      name: "GET /latest/meta-data/iam/security-credentials/"
+      target: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-003, AG-DAT-013]
+
+- id: dat-013-metadata-through-a-tunnel
+  # host_path mode cannot see inside a CONNECT, but it can see where the
+  # tunnel is going, and that is enough for this rule.
+  #
+  # AG-DAT-003 deliberately does *not* fire here: its allow list passes
+  # `*.internal*`, which is reasonable for an egress list and is exactly why
+  # this rule has to exist on its own rather than as another entry on that
+  # list. The golden suite caught the first version of this case asserting
+  # both.
+  patch:
+    action:
+      kind: http
+      name: "CONNECT metadata.google.internal"
+      target: "https://metadata.google.internal"
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-013]
+
+- id: dat-013-an-ordinary-host-is-not-metadata
+  patch:
+    action:
+      kind: http
+      name: "GET /user"
+      target: "https://api.github.com/user"
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+# The first version of AG-DAT-013 wrote the IPv6 metadata address as the glob
+# `*://[fd00:ec2::254]*`, and fnmatch read the brackets as a character class:
+# any host starting with f, d, 0, 2, 4, 5, c, e or `:`. The live run of
+# `gate proxy` was refused a CONNECT to example.com because of it, and the
+# `api.github.com` case above passed the whole time -- `a` was not in the
+# accidental set. So the hosts below are chosen for their first letter, one
+# per character the class contained.
+- id: dat-013-a-host-starting-with-e-is-not-metadata
+  # AG-DAT-003 fires -- example.com is not on its allow list -- but it ships
+  # in `mode: shadow`, so it lands in `would` rather than in the decision.
+  # What matters here is that AG-DAT-013 is not in the list.
+  patch:
+    action: { kind: http, name: "CONNECT example.com", target: "https://example.com" }
+  expect:
+    decision: ALLOW
+    would: REQUIRE_APPROVAL
+    rules: [AG-DEF-001, AG-DAT-003]
+
+- id: dat-013-a-host-starting-with-f-is-not-metadata
+  patch:
+    action: { kind: http, name: "GET /", target: "https://files.acme.internal/x" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+- id: dat-013-a-host-starting-with-c-is-not-metadata
+  patch:
+    action: { kind: http, name: "GET /", target: "https://cdn.acme.internal/x" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+- id: dat-013-the-ipv6-metadata-address-is-still-caught
+  patch:
+    action:
+      kind: http
+      name: "GET /latest/meta-data/"
+      target: "http://[fd00:ec2::254]/latest/meta-data/"
+  expect:
+    decision: BLOCK
+    rules: [AG-DAT-003, AG-DAT-013]
+
 # ------------------------------------------------------------- identity (2nd)
 - id: idn-002-chain-of-three-is-recorded
   patch:

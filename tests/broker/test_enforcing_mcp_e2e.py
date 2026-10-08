@@ -224,3 +224,33 @@ async def test_without_a_broker_the_flag_still_decides(gate_dir: Path, tmp_path:
     config = write_config(tmp_path, with_upstreams=False)
     await call_one(gate_dir, config)
     assert all(value == "enforcing" for value in enforcement_in_chain(gate_dir))
+
+
+async def test_the_result_records_the_same_enforcement_as_the_proposal(
+    gate_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same bug the HTTP proxy's first live run exposed, in this adapter.
+
+    The proposal recorded the derived answer and the `execution_result`
+    beside it recorded the operator's flag, so a chain could hold one call
+    making two different claims about whether the gate held the credential.
+    """
+    monkeypatch.delenv("BROKER_TEST_URL", raising=False)
+    config = write_config(tmp_path, with_upstreams=True)
+    await call_one(gate_dir, config)
+
+    from gate.infra.storage.sqlite import SqliteStore
+
+    with SqliteStore(gate_dir / "gate.db") as store:
+        recorded = {
+            record.type.value: (
+                record.enforcement.value if record.enforcement else None,
+                record.assurance.value,
+            )
+            for record in store.iter_evidence()
+            if record.type.value in {"proposal", "execution_result"}
+        }
+    assert recorded["proposal"][0] == "advisory"
+    assert recorded["execution_result"][0] == "advisory"
+    # ADR-007.1: an advisory adapter's report is the agent's testimony.
+    assert recorded["execution_result"][1] == "self"

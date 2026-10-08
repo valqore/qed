@@ -149,27 +149,36 @@ class TestNoSilentFallbackOnTheDecisionPath:
             f"{offenders}. Let it raise, or catch ImportError and say so out loud."
         )
 
-    def test_a_caught_kernel_failure_is_always_recorded_or_refused(self) -> None:
-        """Every broad ``except`` in the proxy must log, record or refuse.
+    @pytest.mark.parametrize("adapter", ["mcp/proxy.py", "http_proxy/proxy.py"])
+    def test_a_caught_kernel_failure_is_always_recorded_or_refused(self, adapter: str) -> None:
+        """Every broad ``except`` in a proxy must log, record or refuse.
 
         A handler whose body only assigns a default is the exact bug. This
         checks the weaker, mechanical property: that each handler does
         *something observable*.
         """
-        path = ADAPTERS / "mcp" / "proxy.py"
+        path = ADAPTERS / Path(adapter)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         silent: list[int] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.ExceptHandler) or not _is_broad(node):
                 continue
             if not _mentions_any(
-                node, {"logger", "_record_ungated", "_record_result", "_tool_error"}
+                node,
+                {
+                    "logger",
+                    "_record_ungated",
+                    "_record_result",
+                    "_tool_error",
+                    "response",
+                    "_send",
+                },
             ):
                 silent.append(node.lineno)
         assert not silent, (
-            f"broad except at lines {silent} neither logs, records nor refuses. A caught "
-            "failure that only sets a default is invisible, and in shadow mode nothing "
-            "would ever reveal it."
+            f"broad except at lines {silent} in {adapter} neither logs, records nor "
+            "refuses. A caught failure that only sets a default is invisible, and in "
+            "shadow mode nothing would ever reveal it."
         )
 
 

@@ -175,3 +175,50 @@
     - { framework: eu_ai_act, control: "Art. 15" }
     - { framework: owasp_llm, control: "LLM02" }
     - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-DAT-013
+  name: Request to a cloud instance metadata service
+  severity: CRITICAL
+  mode: enforce
+  # The HTTP forward proxy (SPEC 12.3) is the first adapter that can see this
+  # at all, which is why the rule arrives with it. The metadata service is how
+  # an agent with network access turns "can make HTTP requests" into "has the
+  # instance's cloud credentials": one unauthenticated GET to a link-local
+  # address returns a role's keys.
+  #
+  # BLOCK rather than REQUIRE_APPROVAL, and no approval path, because there is
+  # no legitimate reason for an agent's own traffic to go here. The workload's
+  # SDK reads the metadata service directly, in the workload, not through a
+  # governed egress path -- so blocking it costs nothing that works today.
+  applies_to:
+    kinds: [http]
+  when:
+    any:
+      # IMDS on AWS, Azure and OpenStack; GCP and Alibaba use the same
+      # link-local address. Alibaba uses 100.100.100.200.
+      - field: action.target
+        glob:
+          - "*://169.254.169.254*"
+          - "*://100.100.100.200*"
+          - "*://metadata.google.internal*"
+          - "*://metadata.goog*"
+      # `contains`, not `glob`, for the IPv6 form. A glob's `[` opens a
+      # character class, so `*://[fd00:ec2::254]*` matches any target whose
+      # host starts with one of f, d, 0, 2, 4, 5, c, e or `:` -- which is most
+      # of the internet. The first live run of `gate proxy` was refused a
+      # CONNECT to example.com by this rule, because `e` is in that set.
+      - field: action.target
+        contains: "[fd00:ec2::254]"
+      - field: action.params_redacted.host
+        equals: "169.254.169.254"
+      - field: action.params_redacted.host
+        equals: "fd00:ec2::254"
+  verdict: BLOCK
+  message: "This request targets the cloud instance metadata service, which hands out the instance's own credentials."
+  fix: "An agent does not need instance credentials. Give it a scoped credential through the gate's broker instead."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_agentic, control: "ASI02" }
+    - { framework: owasp_llm, control: "LLM06" }
+    - { framework: nist_csf, control: "PR.AC-4" }
+    - { framework: soc2, control: "CC6.1" }

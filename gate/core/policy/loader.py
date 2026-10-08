@@ -39,6 +39,12 @@ __all__ = ["LoadResult", "bundle_hash", "load_bundle", "read_entries"]
 
 _SOFTENING_ORDER = {Decision.BLOCK: 2, Decision.REQUIRE_APPROVAL: 1, Decision.ALLOW: 0}
 
+#: Predicate findings that are warnings rather than errors. The rule loads and
+#: evaluates; it just probably does not mean what its author thinks. An error
+#: here would refuse the whole bundle, and a character class is a legal glob
+#: feature -- rarely the intended one, but not something to forbid.
+_PREDICATE_WARNINGS = frozenset({"suspicious_glob"})
+
 
 class LoadResult(Frozen):
     bundle: PolicyBundle
@@ -130,7 +136,10 @@ def _lint_rule(rule: Rule) -> list[LintFinding]:
             )
         )
     if rule.when is not None:
-        findings += [finding(code, message) for code, message in validate_predicate(rule.when)]
+        findings += [
+            finding(code, message, "warning" if code in _PREDICATE_WARNINGS else "error")
+            for code, message in validate_predicate(rule.when)
+        ]
     if rule.verdict is Decision.REQUIRE_APPROVAL and (
         rule.approval is None or not rule.approval.approvers
     ):

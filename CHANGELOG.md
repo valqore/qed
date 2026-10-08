@@ -6,6 +6,151 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - HTTP forward proxy (`gate proxy`) (SPEC 12.3, week 5)
+
+Point an agent's `HTTPS_PROXY` at the gate and every outbound call gets a
+verdict from the same `check_proposal` the MCP proxy and `gate check` use.
+`docs/http-proxy.md` has the whole picture; the parts worth stating here:
+
+- **Every CONNECT tunnel is recorded as `advisory`, whatever the command line
+  asks for.** The gate decides whether the connection may be opened, which is
+  real and the refusal is real, but once open it carries ciphertext: no
+  method, no path, no body, and no way to replace the credential inside. An
+  adapter recording `enforcing` there would put a control in the evidence that
+  the transport does not allow. The reason travels with the record, and the
+  `execution_result` says `visibility: host only` in the row rather than only
+  in the documentation.
+- A tunnel's evidence is byte counts and a duration. Thin, labelled as thin,
+  and still the difference between "an agent moved 41 MB to pastebin.example
+  at 02:14" and no record at all.
+- **Plain HTTP starts honest too.** Enforcing needs a `kind: http` upstream
+  whose credential resolves; with none, the session is advisory and says so at
+  startup. The MCP proxy keeps the operator's flag in that case because
+  deployments existed before the broker did. This adapter has no such history,
+  so it does not inherit the dishonesty. `--enforcement` is a ceiling: it can
+  ask for less than the broker holds, never for more.
+- `action.target` is a URL. Not cosmetic: `match_upstream` finds a host glob
+  by splitting the target on `://`, and the shipped `AG-DAT-003` egress rule
+  matches `action.target` against `*://*`. A target in another shape would
+  leave both matching nothing, and an egress rule that never fires is
+  invisible.
+- The query string stays out of the target and goes into the parameters. It
+  carries tokens and its order varies between calls that mean the same thing;
+  either would make a policy glob leaky or useless.
+- The body is not read in `host_path` mode, so `params_hash` covers the
+  request line and the headers that describe the body. Stated rather than
+  implied; a rule that needs the body needs `mitm` mode, which is post-v1.
+- `X-Gate-Intent` is the HTTP counterpart of MCP's `_meta.intent`, and is
+  stripped before forwarding: it is for the gate, not the upstream.
+- Refusals are a `403` whose body carries the rule ids, because an agent that
+  only logs the status still logs the body with it. `502` upstream, `503`
+  kernel-failed-and-closed, `501` for what this build will not forward.
+- **Strict request framing.** Both `Content-Length` and `Transfer-Encoding`,
+  two disagreeing `Content-Length`s, an obs-fold line, a non-token header
+  name, a `CONNECT` without a port, userinfo in a proxied URL: all refused
+  with a status rather than resolved. A proxy that resolves an ambiguity can
+  be made to disagree with its upstream about where a request ends, and the
+  smuggled half would be the half the gate never decided. One request per
+  connection, for the same reason.
+- Binding anything but loopback needs `--allow-non-loopback`. A forward proxy
+  on a reachable interface is an open relay, and the chain would attribute
+  every request through it to this session's `--human`.
+- `inject: {type: env}` on an `http` upstream is refused at startup rather
+  than silently dropped per request.
+- New rule **AG-DAT-013**: a request to a cloud instance metadata service is
+  BLOCKed with no approval path. One unauthenticated GET to a link-local
+  address returns the instance role's keys, the workload's own SDK reads it
+  in-process rather than through a governed egress path, and this adapter is
+  the first one that can see the attempt at all. 46 rules.
+
+### Fixed - a result claimed an enforcement its own proposal denied
+
+The first live run of `gate proxy` put this in one chain, two records apart,
+about the same call: the `proposal` recorded `advisory`, correctly, because no
+upstream was configured -- and the `execution_result` beside it recorded
+`enforcing`, with `assurance: adapter`, because the recording path read the
+operator's command-line flag instead of the answer that had just been derived.
+
+**Both proxies had it.** The MCP adapter's `execution_result` was written the
+same way, so the fix that arrived with enforcing MCP was half a fix: the
+proposal told the truth and the record of what happened did not.
+
+The derived enforcement now travels from the proposal down to the recording
+site in both adapters, and falls back to the option only on the fail-open
+path, where nothing was decided and so nothing was derived. `assurance`
+follows it, so an advisory call is recorded as `self` -- the agent's own
+testimony, per ADR-007.1 -- rather than as the adapter's.
+
+### Added - the linter catches a glob that is secretly a character class
+
+`fnmatch` reads `[` as the start of a character class, so
+`*://[fd00:ec2::254]*` does not look for that IPv6 literal: it matches any
+target whose host begins with one of `f d 0 2 4 5 c e :`. A rule written that
+way reads correct and fires on traffic nobody meant it to, in the direction
+that blocks real work.
+
+AG-DAT-013 shipped with exactly that mistake, and the first live `gate proxy`
+run was refused a CONNECT to example.com by the instance-metadata rule --
+`e` was in the accidental set. The golden case written beside the rule used
+`api.github.com` and passed the whole time, because `a` was not.
+
+`suspicious_glob` is a **warning**, not an error: a character class is a legal
+glob feature, rarely the intended one but not something to forbid. The message
+names both the escape (`[[]`) and the predicate the author probably wanted
+(`contains`). The golden table now also carries one host per character the
+accidental class contained.
+
+### Fixed - masking was rewriting the chain's own identifiers
+
+About **one sha256 digest in four hundred** contains a 13-to-19 digit run that
+starts with 2-6 and passes Luhn, so the card-number redactor replaced it with
+`[masked:card]`. Masking runs *before* `payload_hash`, so the record still
+verified against its own hash and nothing reported a problem -- the
+`merkle_root` was simply wrong, and the checkpoint became impossible for
+anyone to verify, for ever. `params_hash` and `policy_hash` were exposed at
+the same rate.
+
+It surfaced as `tests/evidence/test_chain.py` going red on roughly one push in
+a hundred, on whichever runner happened to generate an unlucky signing key.
+
+Two fixes, each sound on its own:
+
+- A digit run flanked by letters is not a card number. The pattern now
+  requires a non-alphanumeric boundary, which is what a real card number in a
+  payload always has -- whitespace, a quote, a comma, a colon.
+- `_STRUCTURAL_KEYS` (`merkle_root`, `params_hash`, `policy_hash`,
+  `prev_hash`, `key_id`, `human_hash`, …) are exempt from masking, because a
+  redactor has no business rewriting a value the kernel generated. The
+  exemption is conditional: the value must look like an identifier *and*
+  contain a letter, so a card number, a phone number or a national id -- all
+  pure digits -- can never be exempted by sitting under one of those keys.
+
+Old chains are unaffected. `gate-verify` recomputes `payload_hash` from the
+payload as stored and never re-runs masking, so a record written under the
+earlier pattern set still verifies.
+
+### Fixed - a host glob stopped matching when the target had a port
+
+`host_globs` is documented as matching the host and not the string, but
+`_host_of` left the port on. The HTTP proxy found it: it writes
+`http://127.0.0.1:8431/v1/orders` whenever the port is not the default, a glob
+of `127.0.0.1` then matched nothing, the upstream went unmatched, and the
+request ran advisory while the config said enforcing. `target_globs` still
+sees the whole string for an operator who does want to distinguish ports.
+
+### Fixed - `gate/adapters/http/` shadowed the standard library
+
+The proxy arrived as `gate/adapters/http/` with tests in
+`tests/adapters/http/`, and every test that runs
+`python tests/adapters/upstream_server.py` as a subprocess started failing
+with `ModuleNotFoundError: No module named 'http.client'` -- three imports
+deep inside Starlette, nowhere near the directory that caused it. Running a
+file puts its own directory at the front of `sys.path`. Both packages are now
+`http_proxy`, and `tests/test_no_stdlib_shadowing.py` catches the next
+plausible name (`json`, `types`, `select`, `email`) when the directory is
+created rather than a week later.
+
+
 ### Added - enforcing MCP (SPEC 7.2, week 5)
 
 - **`context.enforcement` is derived per action, not asserted by a flag.**

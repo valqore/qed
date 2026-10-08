@@ -100,6 +100,48 @@ class TestMatching:
         )
         assert match_upstream(proposal, UpstreamSet(upstreams=[AWS])) is None
 
+    def test_a_port_does_not_stop_a_host_glob_matching(self) -> None:
+        """`host_globs` matches the host, not the string.
+
+        The HTTP forward proxy found this. It writes a target of
+        `http://127.0.0.1:8431/v1/orders` whenever the port is not the
+        default, a glob of `127.0.0.1` then matched nothing, the upstream went
+        unmatched, and the request silently ran advisory while the config said
+        it was enforcing.
+        """
+        local = upstream(id="local", kind="http", match={"host_globs": ["127.0.0.1"]})
+        proposal = make_proposal(
+            {"action": {"kind": "http", "target": "http://127.0.0.1:8431/v1/orders"}}
+        )
+        assert match_upstream(proposal, UpstreamSet(upstreams=[local])) is local
+
+    def test_an_ipv6_literal_keeps_the_colons_inside_its_brackets(self) -> None:
+        local = upstream(id="local", kind="http", match={"host_globs": ["::1"]})
+        with_port = make_proposal({"action": {"kind": "http", "target": "http://[::1]:8431/x"}})
+        without = make_proposal({"action": {"kind": "http", "target": "http://[::1]/x"}})
+        pool = UpstreamSet(upstreams=[local])
+        assert match_upstream(with_port, pool) is local
+        assert match_upstream(without, pool) is local
+
+    def test_a_target_glob_still_sees_the_port(self) -> None:
+        """An operator who does want to distinguish ports has `target_globs`,
+        which matches the whole string."""
+        pinned = upstream(
+            id="pinned", kind="http", match={"target_globs": ["http://127.0.0.1:8431/*"]}
+        )
+        pool = UpstreamSet(upstreams=[pinned])
+        right = make_proposal({"action": {"kind": "http", "target": "http://127.0.0.1:8431/x"}})
+        wrong = make_proposal({"action": {"kind": "http", "target": "http://127.0.0.1:9999/x"}})
+        assert match_upstream(right, pool) is pinned
+        assert match_upstream(wrong, pool) is None
+
+    def test_a_non_url_target_is_left_alone(self) -> None:
+        """`db:prod/orders` has a colon and no port; splitting on the last one
+        would turn the host into `db`."""
+        db = upstream(id="db", match={"host_globs": ["db:prod"]})
+        proposal = make_proposal({"action": {"target": "db:prod/orders"}})
+        assert match_upstream(proposal, UpstreamSet(upstreams=[db])) is db
+
     def test_first_match_wins_in_file_order(self) -> None:
         """Not "most specific": specificity between a host glob and an
         environment list is not something anyone can rank, and an order

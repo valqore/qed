@@ -30,17 +30,19 @@ hardware, including air-gapped.
 | Evidence ledger on SQLite | `gate/infra/storage/sqlite.py` |
 | Policy loader, linter, predicates, engine | `gate/core/policy/` |
 | Deterministic blast-radius score (0–100) | `gate/core/policy/blast_radius.py` |
-| Baseline pack, 45 rules | `gate/core/policy/packs/agent-baseline/` |
+| Baseline pack, 46 rules | `gate/core/policy/packs/agent-baseline/` |
 | Standalone verifier | `packages/gate-verify/` |
 | **MCP proxy** (stdio and Streamable HTTP), shadow mode | `gate/adapters/mcp/` |
+| **HTTP forward proxy** (`CONNECT` and plain HTTP) | `gate/adapters/http_proxy/` |
+| **Credential broker** (env, file, Vault) | `gate/core/broker/`, `gate/infra/secrets/` |
 | **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `gate/api/` |
 | **OSCAL 1.1.2 `assessment-results` export** | `gate/core/evidence/export/oscal.py` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
-| CLI: `keys init`, `check`, `policy lint/explain`, `export`, `verify`, `serve`, `mcp` | `gate/cli.py` |
+| CLI: `keys init`, `check`, `policy lint/explain/test`, `export`, `verify`, `serve`, `mcp`, `proxy`, `login`, `token`, `mandate`, `approve`, `doctor` | `gate/cli.py` |
 
-Not built yet (weeks 3+): delegation and token exchange, budget ledger,
-credential broker, approval service, coding-agent hooks, HTTP forward proxy,
-compliance packs, live UI.
+Not built yet: coding-agent hooks (`gate install claude-code`), the Python
+SDK, `mode: mitm` for the HTTP proxy, compliance packs beyond the baseline,
+the live UI.
 
 ## Quick start
 
@@ -74,6 +76,23 @@ gate export --dir .gate --format oscal --out assessment.json
 
 `--human` or `--mandate` is required. See `docs/mcp-proxy.md` for why.
 
+### Put it in front of everything else
+
+```bash
+gate proxy --human you@example.com --env prod
+HTTPS_PROXY=http://127.0.0.1:8888 HTTP_PROXY=http://127.0.0.1:8888 your-agent
+```
+
+The MCP proxy governs the tools an agent was given; this governs the rest --
+the `curl` in a shell step, the SDK call in a script, the request an agent
+makes because something in its context told it to.
+
+Read `docs/http-proxy.md` before relying on it, for one reason: **a `CONNECT`
+tunnel is always recorded as advisory.** The gate decides whether the
+connection may be opened, but the request inside it is encrypted, so it cannot
+replace the credential and the agent is using its own. Plain HTTP is fully
+visible and fully brokered.
+
 ### Run the API
 
 ```bash
@@ -92,7 +111,9 @@ adapters (SPEC §17). Adapters sign each request; see `docs/api.md`.
 2. `DESIGN_DECISIONS.md` — ADR-001…008, accepted.
 3. `docs/adr/` — decisions made while implementing, where the spec was silent.
 4. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
-5. `docs/mcp-proxy.md`, `docs/api.md`, `docs/oscal.md`, `docs/assurance-classes.md`.
+5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/credential-broker.md`,
+   `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
+   `docs/assurance-classes.md`, `docs/policy-testing.md`.
 
 `ARCHITECTURE_PLAN.md` is **superseded**; only its §16 (Valqore site/README
 fixes) is still live, and that work belongs to the Valqore repos, not here.
@@ -110,6 +131,9 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 | Ed25519 only — no HMAC path exists anywhere | `tests/evidence/test_no_hmac.py` |
 | The CLI and `POST /v1/proposals` decide identically | `tests/api/test_proposals.py` |
 | Every `/v1` route refuses an unsigned request | `tests/api/test_auth.py` |
+| Masking never rewrites a kernel-generated identifier | `tests/masking/test_masking.py` |
+| No package shadows a standard-library module | `tests/test_no_stdlib_shadowing.py` |
+| An adapter's `execution_result` records the enforcement its proposal did | `tests/adapters/http_proxy/test_proxy_e2e.py` |
 | The OSCAL export validates against the NIST schema | `tests/evidence/test_oscal_schema.py` |
 | Tool-call classification imports nothing that can fail | `tests/adapters/test_import_boundary.py` |
 | A destructive payload under a mild tool name still routes to approval | `tests/policy/test_golden_mcp.py` |

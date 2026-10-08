@@ -144,9 +144,22 @@ def _host_of(target: str) -> str:
     Targets are not URLs in general (`db:prod/orders`, `repo:acme/payments`),
     so this is best effort and returns the whole string when there is nothing
     URL-shaped to take.
+
+    The **port is removed**, because `host_globs` matches the host and not the
+    string. The HTTP forward proxy is what found this: it writes a target of
+    `http://127.0.0.1:8431/v1/orders` when the port is not the default, and a
+    glob of `127.0.0.1` then matched nothing, so the upstream went unmatched
+    and the request silently ran advisory. An operator who wants to
+    distinguish ports has `target_globs`, which matches the whole string.
     """
     rest = target.split("://", 1)[-1]
-    return rest.split("/", 1)[0].split("@")[-1]
+    authority = rest.split("/", 1)[0].split("@")[-1]
+    if authority.startswith("["):
+        # IPv6 literal: the colons inside the brackets are part of the address.
+        host, _, remainder = authority.partition("]")
+        return host.lstrip("[") if remainder.startswith(":") or not remainder else authority
+    host, separator, port = authority.rpartition(":")
+    return host if separator and port.isdigit() else authority
 
 
 def _matches(upstream: Upstream, proposal: ActionProposal) -> bool:

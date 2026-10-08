@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from gate.core.policy.loader import bundle_hash, load_bundle
+from gate.core.policy.predicates import validate_predicate
 from gate.core.schemas import Decision
 
 GOOD: dict[str, Any] = {
@@ -292,12 +293,61 @@ def test_a_mapping_file_with_a_rules_key_is_accepted(tmp_path: Path) -> None:
     assert result.ok and len(result.bundle.rules) == 1
 
 
+class TestASuspiciousGlob:
+    """``fnmatch`` reads ``[`` as a character class, not a literal bracket.
+
+    ``*://[fd00:ec2::254]*`` does not look for that IPv6 literal. It matches
+    any target whose host starts with one of ``f d 0 2 4 5 c e :``, which is
+    most of the internet -- and a rule written that way reads correct while
+    firing on traffic nobody meant it to, in the direction that blocks real
+    work. The first live run of ``gate proxy`` was refused a CONNECT to
+    example.com by exactly this.
+    """
+
+    def test_a_bracket_in_a_glob_is_reported(self) -> None:
+        findings = validate_predicate({"field": "action.target", "glob": "*://[fd00::254]*"})
+        assert [code for code, _ in findings] == ["suspicious_glob"]
+
+    def test_the_message_names_the_escape_and_the_alternative(self) -> None:
+        _, message = validate_predicate(
+            {"field": "action.target", "glob": "*://[fd00::254]*"}
+        )[0]
+        assert "[[]" in message
+        assert "contains" in message
+
+    def test_an_escaped_bracket_is_accepted(self) -> None:
+        """A literal bracket is still expressible, so the finding names the
+        escape rather than forbidding the character."""
+        assert validate_predicate({"field": "action.target", "glob": "*[[]fd00::254[]]*"}) == []
+
+    def test_a_list_of_globs_is_checked_element_by_element(self) -> None:
+        findings = validate_predicate(
+            {"field": "action.target", "glob": ["*.amazonaws.com*", "*://[fd00::254]*"]}
+        )
+        assert len(findings) == 1
+
+    def test_an_ordinary_glob_is_quiet(self) -> None:
+        assert validate_predicate({"field": "action.target", "glob": "*.amazonaws.com*"}) == []
+
+    def test_it_is_a_warning_and_not_an_error(self, tmp_path: Path) -> None:
+        """A character class is a legal glob feature. Refusing the bundle
+        would forbid it; the rule loads and the author is told."""
+        pack = tmp_path / "p.yaml"
+        rule = dict(GOOD)
+        rule["when"] = {"field": "action.target", "glob": "*://[fd00::254]*"}
+        pack.write_text(yaml.safe_dump([rule]), encoding="utf-8")
+        result = load_bundle([pack])
+        assert [f.code for f in result.findings] == ["suspicious_glob"]
+        assert [f.severity for f in result.findings] == ["warning"]
+        assert len(result.bundle.rules) == 1
+
+
 def test_the_shipped_baseline_pack_lints_clean() -> None:
     from gate.core.policy.loader import baseline_pack_dir
 
     result = load_bundle([baseline_pack_dir()])
     assert result.findings == [], [f.format() for f in result.findings]
-    assert len(result.bundle.rules) == 45
+    assert len(result.bundle.rules) == 46
 
 
 @pytest.mark.parametrize("rule_id", ["AG", "ag-blr-001", "AG_BLR_001", "A-1"])

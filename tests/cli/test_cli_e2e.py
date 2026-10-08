@@ -192,7 +192,7 @@ class TestPolicy:
     def test_lint_passes_on_the_shipped_pack(self) -> None:
         result = runner.invoke(app, ["policy", "lint"])
         assert result.exit_code == 0, result.output
-        assert "45 rules (45 active)" in result.output
+        assert "46 rules (46 active)" in result.output
         assert "ok" in result.output
 
     def test_lint_fails_on_a_broken_rule(self, tmp_path: Path) -> None:
@@ -310,7 +310,7 @@ class TestExportAndVerify:
         result = runner.invoke(app, ["status", "--dir", str(gate_dir)])
         payload = json.loads(result.output)
         assert payload["records"] == 8
-        assert payload["rules_active"] == 45
+        assert payload["rules_active"] == 46
         assert payload["mode"] == "shadow"
         assert payload["key_id"].startswith("ed25519:")
 

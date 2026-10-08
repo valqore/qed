@@ -81,6 +81,15 @@ class Injection:
         """Revealed, for one outgoing request. Call at send only."""
         return {name: secret.reveal() for name, secret in self.headers.items()}
 
+    def query_values(self) -> dict[str, str]:
+        """Revealed, for one outgoing URL. Call at send only.
+
+        A credential in a query string is worse than one in a header -- it
+        lands in access logs on both ends -- but some APIs take nothing else,
+        and the gate holding it is still better than the agent holding it.
+        """
+        return {name: secret.reveal() for name, secret in self.query.items()}
+
 
 def strip_agent_credentials(headers: dict[str, str]) -> tuple[dict[str, str], list[str]]:
     """Remove anything the agent supplied that looks like a credential.

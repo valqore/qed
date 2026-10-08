@@ -322,7 +322,12 @@ class _Proxy:
             return _tool_error(_approval_message(outcome))
 
         self.stats.allowed += 1
-        return await self._forward(tool, arguments, proposal_id=proposal.id)
+        return await self._forward(
+            tool,
+            arguments,
+            proposal_id=proposal.id,
+            enforcement=proposal.context.enforcement,
+        )
 
     # ------------------------------------------------- resources and prompts
 
@@ -423,9 +428,20 @@ class _Proxy:
             self.stats.errors += 1
 
     async def _forward(
-        self, tool: str, arguments: dict[str, object], *, proposal_id: str | None
+        self,
+        tool: str,
+        arguments: dict[str, object],
+        *,
+        proposal_id: str | None,
+        enforcement: Enforcement | None = None,
     ) -> mcp_types.CallToolResult:
-        """Call the upstream and record what came back."""
+        """Call the upstream and record what came back.
+
+        ``enforcement`` is the value the broker derived for *this* call, taken
+        off the proposal that was just decided. It is passed down rather than
+        read from the options at the recording site, because the options hold
+        the operator's flag and the flag is the thing that was wrong.
+        """
         started = time.monotonic()
         try:
             result = await self.client.call_tool(
@@ -437,6 +453,7 @@ class _Proxy:
                 status="error",
                 error=f"{type(exc).__name__}: {exc}",
                 elapsed=time.monotonic() - started,
+                enforcement=enforcement,
             )
             self.stats.errors += 1
             return _tool_error(f"[gate] the upstream server failed: {type(exc).__name__}: {exc}")
@@ -451,6 +468,7 @@ class _Proxy:
                 error=None,
                 elapsed=time.monotonic() - started,
                 detail=type(result).__name__,
+                enforcement=enforcement,
             )
             return mcp_types.CallToolResult(
                 content=[
@@ -471,6 +489,7 @@ class _Proxy:
             status="error" if result.is_error else "ok",
             error=None,
             elapsed=time.monotonic() - started,
+            enforcement=enforcement,
         )
         return result
 
@@ -482,13 +501,22 @@ class _Proxy:
         error: str | None,
         elapsed: float,
         detail: str | None = None,
+        enforcement: Enforcement | None = None,
     ) -> None:
         """Append ``execution_result`` (SPEC §3.5, assurance per ADR-007.1).
 
         ``adapter`` when the proxy was enforcing, ``self`` when it was advisory.
         An advisory adapter is one the agent could have gone around, so its
         report is the agent's testimony and the chain says so.
+
+        ``enforcement`` is the answer the broker derived for this call. It
+        falls back to the option only where there is no proposal to take it
+        from -- the fail-open path, where nothing was decided and nothing was
+        derived. A live run of the HTTP proxy is what found this: the proposal
+        recorded ``advisory`` and the result beside it recorded ``enforcing``,
+        from the flag, two records apart in the same chain.
         """
+        effective = self.options.enforcement if enforcement is None else enforcement
         payload: dict[str, object] = {
             "proposal_id": proposal_id,
             "status": status,
@@ -498,18 +526,14 @@ class _Proxy:
             payload["error"] = error
         if detail is not None:
             payload["detail"] = detail
-        assurance = (
-            Assurance.adapter
-            if self.options.enforcement is Enforcement.enforcing
-            else Assurance.self_
-        )
+        assurance = Assurance.adapter if effective is Enforcement.enforcing else Assurance.self_
         try:
             self.session.writer.append(
                 type_=EvidenceType.execution_result,
                 assurance=assurance,
                 payload=payload,
                 mode=self.session.config.mode,
-                enforcement=self.options.enforcement,
+                enforcement=effective,
                 proposal_id=proposal_id,
             )
         except Exception as exc:  # pragma: no cover - disk level failure

@@ -1,10 +1,9 @@
 """`gate` command line (SPEC §14).
 
-Week 2 ships 7 of the 18 commands: ``keys``, ``check``, ``policy``, ``export``,
-``verify``, ``serve`` and ``mcp``. SPEC §14 forbids adding a top-level command
-without a spec update, so the missing ones are absent rather than stubbed -- a
-command that prints "not implemented" is worse than one that does not exist,
-because it ends up in somebody's script.
+SPEC §14 forbids adding a top-level command without a spec update, so the
+missing ones are absent rather than stubbed -- a command that prints "not
+implemented" is worse than one that does not exist, because it ends up in
+somebody's script.
 
 ``check`` exit codes: 0 ALLOW, 2 REQUIRE_APPROVAL, 3 BLOCK, 1 error. In shadow
 mode the decision is recorded and the exit code is 0 (ADR-003).
@@ -49,6 +48,7 @@ from gate.runtime import (
 if TYPE_CHECKING:  # `gate mcp` imports the MCP SDK lazily: it is an
     # adapters-only dependency (SPEC 20.3) and `gate check` should not pay for
     # importing it on every invocation.
+    from gate.adapters.http_proxy.proxy import HttpProxyStats
     from gate.adapters.mcp.proxy import ProxyStats
 
 app = typer.Typer(
@@ -1284,6 +1284,239 @@ def _print_stats(stats: ProxyStats) -> None:
             "recorded, but the gate was not holding the credential.",
             fg=typer.colors.YELLOW,
             err=True,
+        )
+
+
+# ---------------------------------------------------------------------- proxy
+
+
+@app.command()
+def proxy(
+    directory: DirOption = DEFAULT_DIR,
+    policy: PolicyOption = None,
+    config: ConfigOption = None,
+    host: Annotated[
+        str, typer.Option("--host", help="Interface to listen on. Loopback by default.")
+    ] = "127.0.0.1",
+    port: Annotated[
+        int, typer.Option("--port", help="Port to listen on. 0 picks a free one.")
+    ] = 8888,
+    allow_non_loopback: Annotated[
+        bool,
+        typer.Option(
+            "--allow-non-loopback",
+            help="Required to bind anything but loopback. An open forward proxy is a relay.",
+        ),
+    ] = False,
+    environment: Annotated[
+        str, typer.Option("--env", help="dev, staging or prod. Scores the blast radius.")
+    ] = "dev",
+    enforcement: Annotated[
+        str,
+        typer.Option(
+            "--enforcement",
+            help="A ceiling: advisory forces advisory, enforcing allows it where the "
+            "broker holds the credential.",
+        ),
+    ] = "enforcing",
+    fail_mode: Annotated[
+        str,
+        typer.Option("--fail-mode", help="closed or open, when the kernel itself fails."),
+    ] = "closed",
+    adapter_id: Annotated[
+        str, typer.Option("--adapter-id", help="Registered adapter id (SPEC 12.6).")
+    ] = "adp_http_local",
+    token_jti: Annotated[
+        str, typer.Option("--token-jti", help="Token id to attribute requests to.")
+    ] = "http-proxy-local",
+    human: Annotated[
+        str | None,
+        typer.Option("--human", help="Who this session acts for. Hashed into principal_hash."),
+    ] = None,
+    issuer: Annotated[
+        str, typer.Option("--issuer", help="Identity provider that `--human` belongs to.")
+    ] = "local",
+    mandate_file: Annotated[
+        Path | None,
+        typer.Option("--mandate", help="Mandate as JSON, for an unattended agent."),
+    ] = None,
+) -> None:
+    """Run an HTTP forward proxy that decides every outbound request.
+
+        gate proxy --human you@acme.com
+        HTTPS_PROXY=http://127.0.0.1:8888 your-agent
+
+    Plain HTTP is decided on method, path and query, and the broker's
+    credential replaces whatever the agent supplied. A CONNECT tunnel is
+    decided on the host alone and is always recorded as ADVISORY: the gate can
+    refuse to open it, but the request inside it is encrypted, so the agent is
+    using its own credential and the evidence says so.
+
+    `--human` or `--mandate` is required. Without one, every proposal has no
+    principal and no delegated authority, the engine answers with a synthetic
+    AG-IDN-007 identity BLOCK before any rule is evaluated, and the chain
+    fills with identical verdicts that say nothing about your policy.
+    """
+    import anyio
+
+    from gate.adapters.http_proxy.proxy import (
+        HttpProxyOptions,
+        HttpProxyStats,
+        http_upstreams,
+        injection_problems,
+        run_http_proxy,
+    )
+    from gate.core.evidence.hashing import principal_hash
+
+    if environment not in {"dev", "staging", "prod"}:
+        _fail("--env must be dev, staging or prod")
+        return
+    if enforcement not in {"advisory", "enforcing"}:
+        _fail("--enforcement must be advisory or enforcing")
+        return
+    if fail_mode not in {"closed", "open"}:
+        _fail("--fail-mode must be closed or open")
+        return
+    if human is None and mandate_file is None:
+        _fail(
+            "give --human <who you are> or --mandate <file>. Without either, every verdict "
+            "is a synthetic AG-IDN-007 identity BLOCK and no policy rule is evaluated."
+        )
+        return
+    if host not in {"127.0.0.1", "::1", "localhost"} and not allow_non_loopback:
+        # A forward proxy reachable from the network is an open relay: anything
+        # that can see the port gets to make requests that the chain then
+        # attributes to this session's principal. Loopback is the access
+        # control in v1, so leaving it takes a deliberate flag.
+        _fail(
+            f"refusing to bind {host}: a forward proxy on a reachable interface is an open "
+            "relay, and every request through it would be recorded against --human. Pass "
+            "--allow-non-loopback if you have put your own access control in front of it."
+        )
+        return
+
+    mandate = None
+    if mandate_file is not None:
+        try:
+            mandate = Mandate.model_validate_json(mandate_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            _fail(f"cannot read mandate: {exc}")
+            return
+
+    try:
+        session = open_session(directory=directory, policy_paths=policy, config_path=config)
+    except MissingSigningKey as exc:
+        _fail(f"{exc}. Run `gate keys init` first: an unsigned decision is not evidence.")
+        return
+    except PolicyErrors as exc:
+        for finding in exc.findings:
+            typer.secho(f"  {finding.format()}", fg=typer.colors.RED, err=True)
+        _fail("the policy bundle has errors; refusing to proxy against a broken bundle")
+        return
+
+    from gate.infra.secrets.broker import CredentialBroker
+    from gate.infra.secrets.resolver import CredentialResolver
+    from gate.infra.upstreams import load_upstreams
+
+    upstreams = http_upstreams(load_upstreams(session.config, base=config))
+    problems = injection_problems(upstreams)
+    if problems:
+        for problem in problems:
+            typer.secho(f"  {problem}", fg=typer.colors.RED, err=True)
+        session.close()
+        _fail("fix the upstream configuration; a credential that cannot be injected is not held")
+        return
+    broker = (
+        CredentialBroker(
+            upstreams=upstreams,
+            resolver=CredentialResolver(ttl_seconds=session.config.broker.ttl_seconds),
+        )
+        if upstreams.upstreams
+        else None
+    )
+
+    options = HttpProxyOptions(
+        environment=cast(Environment, environment),
+        enforcement=Enforcement(enforcement),
+        token_jti=token_jti,
+        human_hash=None if human is None else principal_hash(human, issuer=issuer),
+        mandate=mandate,
+        adapter_id=adapter_id,
+        identity_note=None if human is None else f"adapter-asserted:--human:{issuer}",
+        fail_mode="closed" if fail_mode == "closed" else "open",
+    )
+    stats = HttpProxyStats()
+    mode = session.config.mode.value
+    typer.secho(
+        f"gate: forward proxy on {host}:{port} in {mode} mode, env {environment}",
+        fg=typer.colors.CYAN,
+    )
+    typer.secho(
+        f"gate: point your agent at it with  HTTPS_PROXY=http://{host}:{port} "
+        f"HTTP_PROXY=http://{host}:{port}",
+        fg=typer.colors.CYAN,
+    )
+    typer.secho(
+        "gate: every CONNECT tunnel is ADVISORY -- the gate decides whether the connection "
+        "may be opened, but the request inside it is encrypted, so it cannot replace the "
+        "credential and the agent is using its own.",
+        fg=typer.colors.YELLOW,
+    )
+    if broker is None:
+        typer.secho(
+            "gate: no `kind: http` upstream is configured, so plain HTTP is advisory too -- "
+            "decided and recorded, with the agent's own credentials. `gate doctor` says the "
+            "same thing at more length.",
+            fg=typer.colors.YELLOW,
+        )
+    if mode == "shadow":
+        typer.secho(
+            "gate: shadow mode. Every request is decided and recorded; nothing is stopped.",
+            fg=typer.colors.YELLOW,
+        )
+
+    try:
+        anyio.run(
+            lambda: run_http_proxy(
+                session=session,
+                options=options,
+                host=host,
+                port=port,
+                stats=stats,
+                broker=broker,
+            )
+        )
+    except KeyboardInterrupt:  # pragma: no cover - interactive
+        pass
+    finally:
+        session.close()
+        _print_http_stats(stats)
+
+
+def _print_http_stats(stats: HttpProxyStats) -> None:
+    typer.secho(
+        f"gate: {stats.calls} request(s); {stats.requests} plain, {stats.tunnels} tunnel(s); "
+        f"{stats.allowed} forwarded, {stats.refused} refused, {stats.would_block} would BLOCK, "
+        f"{stats.would_require_approval} would need approval, {stats.malformed} malformed, "
+        f"{stats.ungated} ungated, {stats.errors} error(s)",
+        fg=typer.colors.CYAN,
+    )
+    typer.secho(
+        f"gate: {stats.bytes_to_upstream} bytes out, {stats.bytes_to_client} bytes in",
+        fg=typer.colors.CYAN,
+    )
+    if stats.stripped:
+        typer.secho(
+            f"gate: removed {len(stats.stripped)} agent-supplied credential header(s): "
+            f"{', '.join(sorted(set(stats.stripped)))}. Something is wiring a token into the "
+            "agent; it is being ignored.",
+            fg=typer.colors.YELLOW,
+        )
+    if stats.advisory:
+        typer.secho(
+            f"gate: {stats.advisory} of those request(s) were ADVISORY -- decided and "
+            "recorded, but the gate was not holding the credential.",
+            fg=typer.colors.YELLOW,
         )
 
 

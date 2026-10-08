@@ -19,7 +19,7 @@ $ gate doctor
 
 instance   : gate-prod  (mode enforce)
 signing key: ed25519:7fbb6319282f9912
-policy     : 45 rules
+policy     : 46 rules
 
 UPSTREAM             MODE       INJECT   CREDENTIAL
 github               ENFORCING  header   resolved (30 chars)

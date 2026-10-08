@@ -265,8 +265,45 @@ def validate_predicate(node: object, path: str = "when", depth: int = 0) -> list
                 regex.compile(operand)
             except regex.error as exc:
                 errors.append(("invalid_regex", f"{path}: invalid regex {operand!r}: {exc}"))
+    if op == "glob":
+        errors += _lint_glob(node[op], path)
     if op in {"in", "not_in"} and not isinstance(node[op], list):
         errors.append(("invalid_predicate", f"{path}: '{op}' operand must be a list"))
     if op == "exists" and not isinstance(node[op], bool):
         errors.append(("invalid_predicate", f"{path}: 'exists' operand must be true or false"))
+    return errors
+
+
+def _lint_glob(operand: object, path: str) -> list[tuple[str, str]]:
+    """An unescaped ``[`` in a glob is almost always a mistake.
+
+    ``fnmatch`` reads ``[`` as the start of a character class, so the pattern
+    ``*://[fd00:ec2::254]*`` does not look for that IPv6 literal -- it matches
+    any target whose host begins with one of ``f d 0 2 4 5 c e :``, which is
+    most of the internet. A rule written that way fires on traffic nobody
+    meant it to, in the direction that blocks real work, and it reads correct.
+
+    This is not hypothetical: the first live run of ``gate proxy`` was refused
+    a CONNECT to ``example.com`` by the instance-metadata rule, because ``e``
+    was in that accidental class.
+
+    A literal bracket is still expressible, as ``[[]`` and ``[]]``, so the
+    finding names the escape rather than forbidding the character. ``contains``
+    is usually what the author actually wanted.
+    """
+    patterns = operand if isinstance(operand, list) else [operand]
+    errors: list[tuple[str, str]] = []
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            errors.append(("invalid_predicate", f"{path}: a glob operand must be a string"))
+            continue
+        if "[" in pattern and "[[]" not in pattern:
+            errors.append(
+                (
+                    "suspicious_glob",
+                    f"{path}: the glob {pattern!r} contains '[', which fnmatch reads as a "
+                    "character class rather than a literal bracket. Use `contains` for a "
+                    "substring, or write the bracket as '[[]'.",
+                )
+            )
     return errors
