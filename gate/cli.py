@@ -690,6 +690,92 @@ def approvals(
 
 
 @app.command()
+def doctor(
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    offline: Annotated[
+        bool, typer.Option("--offline", help="Skip anything that needs the network.")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Report posture: what this instance can actually enforce (SPEC §7.2).
+
+    The question it answers is the uncomfortable one. For every upstream:
+    does the gate hold the credential, or is the agent carrying its own? An
+    adapter in the second case still gets a verdict and still writes
+    evidence, but it could be bypassed entirely, and an operator deserves to
+    be told which of their upstreams are which.
+    """
+    from gate.core.broker.model import Enforcement, describe
+    from gate.infra.secrets.resolver import CredentialResolver, SecretResolutionError
+    from gate.infra.upstreams import load_upstreams
+
+    report: dict[str, object] = {}
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        report["instance_id"] = session.config.instance_id
+        report["mode"] = session.config.mode.value
+        report["signing_key"] = session.signer.key_id
+        report["policy_rules"] = len(session.bundle.rules)
+        report["delegation"] = {
+            "issuers": [i.issuer for i in session.config.delegation.issuers],
+            "offline": session.config.delegation.offline,
+        }
+        upstreams = load_upstreams(session.config, base=config)
+        resolver = CredentialResolver(ttl_seconds=session.config.broker.ttl_seconds)
+
+        rows: list[dict[str, object]] = []
+        for upstream in upstreams.upstreams:
+            row = describe(upstream)
+            if upstream.credential is None:
+                row["credential"] = "not configured"
+            elif offline and upstream.credential.source == "vault":
+                row["credential"] = "not checked (offline)"
+            else:
+                try:
+                    secret = resolver.resolve(upstream.credential)
+                except SecretResolutionError as exc:
+                    # The reference and the reason, never the value. Both are
+                    # already in the operator's own config file.
+                    row["credential"] = f"unavailable: {exc}"
+                    row["enforcement"] = Enforcement.advisory.value
+                else:
+                    row["credential"] = f"resolved ({len(secret)} chars)"
+            rows.append(row)
+        report["upstreams"] = rows
+        report["enforcing"] = sum(1 for r in rows if r["enforcement"] == "enforcing")
+        report["advisory"] = sum(1 for r in rows if r["enforcement"] == "advisory")
+    finally:
+        session.close()
+
+    if as_json:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.echo(f"instance   : {report['instance_id']}  (mode {report['mode']})")
+    typer.echo(f"signing key: {report['signing_key']}")
+    typer.echo(f"policy     : {report['policy_rules']} rules")
+    rows_out = cast("list[dict[str, object]]", report["upstreams"])
+    if not rows_out:
+        typer.echo("")
+        typer.echo(
+            "upstreams  : none configured, so every adapter is ADVISORY -- the gate "
+            "decides and records, but the agent holds its own credentials and could "
+            "go around it."
+        )
+        return
+    typer.echo("")
+    typer.echo(f"{'UPSTREAM':<20} {'MODE':<10} {'INJECT':<8} CREDENTIAL")
+    for row in rows_out:
+        typer.echo(
+            f"{row['id']!s:<20} {str(row['enforcement']).upper():<10} "
+            f"{row['inject'] or '-'!s:<8} {row['credential']}"
+        )
+    typer.echo("")
+    typer.echo(f"{report['enforcing']} enforcing, {report['advisory']} advisory")
+
+
+@app.command()
 def status(
     directory: DirOption = DEFAULT_DIR,
     config: ConfigOption = None,

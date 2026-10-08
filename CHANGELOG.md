@@ -6,6 +6,41 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — credential broker: matching, resolution, posture (SPEC §7, week 5)
+
+- `gate/core/broker/` (pure) matches an action to an upstream;
+  `gate/infra/secrets/` resolves `env`, `file` and `vault` references behind a
+  TTL cache; `gate/infra/upstreams.py` loads `upstreams.yaml`.
+- **`Secret` makes a leak something you have to write on purpose.** `str`,
+  `repr`, f-strings, `%`-formatting and `pprint` all render `<redacted>`;
+  `json.dumps` refuses outright rather than serialising; `reveal()` is the
+  only way to the bytes and is deliberately awkward to type. Sixteen tests,
+  each one a different accident -- a log line, a traceback that formats its
+  locals, a value nested in a dict being pretty printed.
+- `len()` and `bool()` still work, because "set but empty" is something a
+  health check needs to say without printing anything.
+- **An upstream with no resolvable credential is advisory, whatever the
+  config claims.** Config that promises more than it can deliver is worse
+  than config that admits the gap, because the claim ends up in the evidence.
+- `gate doctor` reports the uncomfortable question per upstream: does the
+  gate hold the credential, or is the agent carrying its own? With nothing
+  configured it says every adapter is advisory, in those words.
+- First match wins, in file order. Not "most specific": specificity between a
+  host glob and an environment list is not rankable, and an order nobody can
+  predict is worse than one they can read top to bottom.
+- `host_globs` matches the host, not the string, so `*.amazonaws.com` does
+  not match `ec2.amazonaws.com.evil.test`.
+- A missing or malformed `upstreams.yaml` is an error, not an empty set.
+  Carrying on would quietly turn every enforcing adapter advisory, and the
+  symptom is one nobody notices until it matters.
+- An env var that is set but empty is an error: a deployment slip essentially
+  every time, and failing loudly beats injecting nothing.
+- `broker` leaves `UNIMPLEMENTED_SECTIONS`.
+- `docs/credential-broker.md`.
+
+Still to come in week 5: enforcing MCP and the HTTP forward proxy, the parts
+that strip an agent-supplied `Authorization` and attach the broker's own.
+
 ### Added — approval service, core and CLI (SPEC §9, week 4)
 
 - A `REQUIRE_APPROVAL` verdict now resolves against what a human has already

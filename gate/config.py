@@ -38,7 +38,6 @@ DEFAULT_DIR = Path(".gate")
 #: `delegation` was never on it.
 UNIMPLEMENTED_SECTIONS = (
     "identity",
-    "broker",
     "remote",
     "observability",
     "ui",
@@ -138,6 +137,15 @@ class ApprovalsConfig(Frozen):
         return list(self.groups_by_email.get(email, ()))
 
 
+class BrokerConfig(Frozen):
+    """Credential broker (SPEC §7). Empty means every adapter is advisory."""
+
+    #: Path to `upstreams.yaml`, relative to the config file or absolute.
+    upstreams_file: str | None = None
+    #: Seconds a resolved credential is reused before the source is re-read.
+    ttl_seconds: float = 60.0
+
+
 class GateConfig(Frozen):
     instance_id: str = "gate-local"
     mode: Mode = Mode.shadow
@@ -149,6 +157,7 @@ class GateConfig(Frozen):
     adapters: list[AdapterCredential] = Field(default_factory=list)
     delegation: DelegationConfig = DelegationConfig()
     approvals: ApprovalsConfig = ApprovalsConfig()
+    broker: BrokerConfig = BrokerConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
