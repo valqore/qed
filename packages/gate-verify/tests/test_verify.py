@@ -52,7 +52,7 @@ def sign(private: Ed25519PrivateKey, digest_hex: str) -> str:
 
 
 def make_chain(private: Ed25519PrivateKey, count: int = 3) -> list[dict[str, Any]]:
-    prev = hashlib.sha256(f"gate-genesis:{INSTANCE}".encode()).hexdigest()
+    prev = hashlib.sha256(f"evidence-chain/1:genesis:{INSTANCE}".encode()).hexdigest()
     records: list[dict[str, Any]] = []
     for seq in range(count):
         payload: dict[str, Any] = {

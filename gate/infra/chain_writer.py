@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from gate.core.evidence import hashing
+from gate.core.evidence.format import CHAIN_FORMAT
 from gate.core.evidence.masking import MaskingProfile
 from gate.core.evidence.merkle import merkle_root
 from gate.core.evidence.record import build_record
@@ -76,7 +77,7 @@ class ChainWriter:
             assurance=Assurance.kernel,
             payload={
                 "instance_id": self.instance_id,
-                "chain_format": "gate-evidence/1.0",
+                "chain_format": CHAIN_FORMAT,
             },
         )
 

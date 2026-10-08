@@ -4,6 +4,25 @@ All notable changes to this project. Format: [Keep a Changelog]. Versioning:
 semver, with `schema_version` of `ActionProposal` / `EvidenceRecord` tracked
 independently (SPEC §25.6).
 
+## [Unreleased]
+
+### Changed — evidence format
+
+- **Breaking, pre-release.** The hash domain separators no longer carry the
+  product name (ADR-0006). `"gate-genesis:"` becomes
+  `"evidence-chain/1:genesis:"`, `"gate-principal:"` becomes
+  `"evidence-chain/1:principal:"`, and `chain_format` / `chain-format` becomes
+  `evidence-chain/1`. Genesis hashes and principal hashes therefore change.
+  Nothing outside the test suite has written a chain, so there is nothing to
+  migrate; doing this after a design partner runs the kernel would have meant
+  either invalidating their evidence or shipping a retired name in the format
+  forever. SPEC §24.1's "the name is a placeholder, a rename is a single
+  refactor" is true after this change and was not true before it.
+- `gate/core/evidence/format.py` is the single definition. `gate-verify` keeps
+  its own copy, as SPEC §10.7 requires, and `tests/evidence/test_format_constants.py`
+  checks the two agree, pins the exact bytes against digests recorded outside
+  the package, and fails if a candidate product name appears in a hash input.
+
 ## [0.1.0] — 2026-10-07
 
 Weeks 1 and 2 of the SPEC §22 build order.

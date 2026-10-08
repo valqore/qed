@@ -11,7 +11,7 @@ Checks, in order:
 
 1. ``seq`` starts at 0 and is contiguous.
 2. ``prev_hash`` of record *n* equals ``hash`` of record *n-1*; record 0's
-   ``prev_hash`` matches ``sha256("gate-genesis:" + instance_id)`` when the
+   ``prev_hash`` matches ``sha256(GENESIS_DOMAIN + instance_id)`` when the
    instance id is known.
 3. ``hash`` recomputes from the record's own fields. Uses ``payload_hash``, not
    the payload, so a record whose payload was purged under retention still
@@ -36,9 +36,18 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from gate_verify import jcs
 
-__all__ = ["Problem", "Report", "verify_records"]
+__all__ = ["CHAIN_FORMAT", "GENESIS_DOMAIN", "Problem", "Report", "verify_records"]
 
 SEPARATOR = b"\x1f"
+
+#: Format constants, spelled out here rather than imported from ``gate``: this
+#: package verifies the written format, and sharing the constant with the
+#: producer would mean a typo in the producer verifies cleanly. ADR-0006 explains
+#: why the product name is deliberately absent from them;
+#: ``tests/evidence/test_format_constants.py`` in the kernel repo checks that the
+#: two copies still agree.
+CHAIN_FORMAT = "evidence-chain/1"
+GENESIS_DOMAIN = f"{CHAIN_FORMAT}:genesis:"
 
 
 @dataclass(frozen=True)
@@ -121,7 +130,7 @@ def _merkle_root(leaves: Sequence[str]) -> str:
 
 
 def _genesis_prev_hash(instance_id: str) -> str:
-    return hashlib.sha256(f"gate-genesis:{instance_id}".encode()).hexdigest()
+    return hashlib.sha256(f"{GENESIS_DOMAIN}{instance_id}".encode()).hexdigest()
 
 
 def verify_records(

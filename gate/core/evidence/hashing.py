@@ -12,6 +12,7 @@ import hashlib
 from datetime import datetime
 
 from gate.core import jcs
+from gate.core.evidence.format import GENESIS_DOMAIN, PRINCIPAL_DOMAIN
 from gate.core.schemas import rfc3339_ms
 
 __all__ = [
@@ -25,10 +26,6 @@ __all__ = [
 ]
 
 SEPARATOR = b"\x1f"
-
-#: Domain separator for principal hashes. Without one, a principal hash and some
-#: other sha256 of the same string would collide across uses.
-PRINCIPAL_DOMAIN = "gate-principal:"
 
 
 def payload_hash(payload: dict[str, object]) -> str:
@@ -80,7 +77,7 @@ def record_hash(
 
 def genesis_prev_hash(instance_id: str) -> str:
     """``prev_hash`` of record 0. Ties a chain to one instance identity."""
-    return hashlib.sha256(f"gate-genesis:{instance_id}".encode()).hexdigest()
+    return hashlib.sha256(f"{GENESIS_DOMAIN}{instance_id}".encode()).hexdigest()
 
 
 def principal_hash(subject: str, *, issuer: str = "") -> str:

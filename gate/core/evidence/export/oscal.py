@@ -44,6 +44,7 @@ from typing import Final
 
 import regex
 
+from gate.core.evidence.format import CHAIN_FORMAT
 from gate.core.schemas import (
     ENGINE_VERSION,
     Assurance,
@@ -147,7 +148,7 @@ def to_oscal(
         "props": _props(
             {
                 "instance-id": instance_id,
-                "chain-format": "gate-evidence/1.0",
+                "chain-format": CHAIN_FORMAT,
                 "engine-version": ENGINE_VERSION,
                 "policy-hash": policy_hash,
                 "first-seq": str(first.seq),

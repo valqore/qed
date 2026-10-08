@@ -62,9 +62,19 @@ two hashes are hex, and `ts` is machine-formatted.
 The hash covers `payload_hash`, **not** the payload. That is what lets a purged
 record verify forever.
 
-Genesis: `seq = 0`, `prev_hash = sha256("gate-genesis:" + instance_id)`. The
-chain is therefore bound to one instance identity, and two instances cannot
-splice their chains together.
+Genesis: `seq = 0`,
+`prev_hash = sha256("evidence-chain/1:genesis:" + instance_id)`. The chain is
+therefore bound to one instance identity, and two instances cannot splice their
+chains together.
+
+Principals: `principal_hash = sha256("evidence-chain/1:principal:" + issuer +
+":" + subject)`.
+
+Those two prefixes, and the `chain_format` value `evidence-chain/1` in the
+genesis payload, are the whole of the format's fixed vocabulary. They carry no
+product name on purpose — the name is still open (SPEC §24.1) and a brand inside
+a hash input would make renaming the product break every existing chain. See
+ADR-0006; `tests/evidence/test_format_constants.py` pins the bytes.
 
 ## Reserved payload keys
 

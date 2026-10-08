@@ -15,7 +15,7 @@ from gate.infra.keys.file import FileSigner
 def test_genesis_prev_hash_binds_the_chain_to_one_instance() -> None:
     assert (
         hashing.genesis_prev_hash("acme-prod")
-        == hashlib.sha256(b"gate-genesis:acme-prod").hexdigest()
+        == hashlib.sha256(b"evidence-chain/1:genesis:acme-prod").hexdigest()
     )
     assert hashing.genesis_prev_hash("acme-prod") != hashing.genesis_prev_hash("acme-dev")
 
