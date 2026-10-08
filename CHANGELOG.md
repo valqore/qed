@@ -6,6 +6,39 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — licence applied, name settled (SPEC §24.1, §24.2)
+
+- **Apache-2.0 is applied.** `LICENSE` (verbatim, 202 lines) and `NOTICE` at
+  the root, and the same two files copied into `packages/gate-verify/` —
+  copied, not referenced, because PEP 639 `license-files` globs cannot escape
+  a project directory. CI asserts the two licence texts stay byte-identical,
+  since a verifier shipped under a stale licence text is the kind of detail an
+  auditor is paid to notice.
+- `license = "Apache-2.0"` in both `pyproject.toml` files as an **SPDX
+  expression**, not the `{text = ...}` table: setuptools 77 deprecated the
+  table and now treats a `License ::` classifier next to the expression as an
+  error, so there is no such classifier.
+- The `Private :: Do Not Upload` classifier is gone from both projects. A PyPI
+  upload is no longer refused by its own metadata.
+- `PATENT-AND-LICENCE-GATE.md` is deleted. **SPEC §24.2 closed on 2026-10-08:
+  Valqore holds no patent filings and has nothing pending**, so the
+  irrevocable Apache-2.0 §3 grant transfers nothing. It was answered before
+  distribution, which was the entire purpose of withholding the licence.
+- The CI job *No LICENSE file until SPEC 24.2 closes* now asserts the
+  opposite: both licence files present, both projects declaring Apache-2.0,
+  the guard-rail classifier not back, and the gate-verify copy identical.
+- **SPEC §24.1 closed: the product is "Valqore Gate".** `gate` stays the
+  command, the import package and the repository name. Zero refactor — the
+  evidence format already carries no product name (ADR-0006), so nothing in a
+  chain written today depends on this choice.
+
+### Still not public
+
+The remote stays private until the PyPI, npm, GHCR, Homebrew-tap, domain and
+EUIPO/USPTO reservations are in place (`REPO-AND-PUBLICATION-PLAN.md` §5).
+Applying a licence is reversible for as long as nobody has received the code;
+publishing is not.
+
 ### Changed — evidence format
 
 - **Breaking, pre-release.** The hash domain separators no longer carry the
@@ -28,10 +61,10 @@ independently (SPEC §25.6).
 Weeks 1 and 2 of the SPEC §22 build order.
 
 > **Tagged locally, not published.** SPEC §22 week 2 also makes the repository
-> public as `v0.1.0`. That step waits on the three pre-repo decisions — patent
-> scope, product name, licence timing — and the CI job *No LICENSE file until
-> SPEC 24.2 closes* enforces the wait. See `PATENT-AND-LICENCE-GATE.md` and
-> `REPO-AND-PUBLICATION-PLAN.md`.
+> public as `v0.1.0`. At this tag that step was waiting on the three pre-repo
+> decisions — patent scope, product name, licence timing. All three closed on
+> 2026-10-08; see [Unreleased]. The public push now waits only on the name
+> reservations in `REPO-AND-PUBLICATION-PLAN.md` §5.
 
 ### Added — week 2 (SPEC §22)
 
@@ -172,9 +205,10 @@ Weeks 1 and 2 of the SPEC §22 build order.
 
 ### Deliberately not added
 
-- No `LICENSE` file and no `license` metadata. See
-  `PATENT-AND-LICENCE-GATE.md` — SPEC §24.2 (patent scope) must close first
-  because the Apache-2.0 patent grant is irrevocable once distributed.
+- No `LICENSE` file and no `license` metadata, because SPEC §24.2 (patent
+  scope) had to close first — the Apache-2.0 patent grant is irrevocable once
+  distributed. Lifted in [Unreleased] on 2026-10-08, when §24.2 came back
+  clean.
 
 ### Changed from the spec
 

@@ -1,7 +1,7 @@
 # gate — Implementation Specification v0.3.1
 
 **Status:** Ready for implementation · 4 Oct 2026 (consistency review applied)
-**Codename:** `gate` (final name pending trademark/patent check; treat as placeholder in package names)
+**Name:** product **Valqore Gate**; `gate` is the command, the import package and the repository (§24.1, closed 2026-10-08 — no longer a placeholder)
 **Supersedes:** ARCHITECTURE_PLAN.md v0.2 (plan), incorporates DESIGN_DECISIONS.md ADR-001…008 (all ACCEPTED)
 **Language:** Python 3.12+ · **License:** Apache-2.0 (kernel), AGPL-3.0 (UI), proprietary (cloud)
 
@@ -863,8 +863,8 @@ Parallel every week: 2 customer/auditor conversations; weekly changelog; **no co
 ---
 
 ## 24. Open items waiting on business input (do not block weeks 1–3)
-1. Final product name and domain → affects package/CLI names (use `gate` placeholder; rename is a single refactor).
-2. Valqore patent scope (I5) → confirm no conflict with broker+mandate+chain composition; adjust naming/claims if needed.
+1. ~~Final product name and domain~~ → **closed 2026-10-08. The product is "Valqore Gate"; `gate` stays the command, the import package and the repository name.** No refactor needed: ADR-0006 already removed the product name from the evidence format. Domain and the PyPI/npm/GHCR/Homebrew/EUIPO/USPTO reservations are a separate, still-open task and gate the first *public* push, not the build.
+2. ~~Valqore patent scope (I5)~~ → **closed 2026-10-08: no filings, nothing pending.** The broker+mandate+chain composition practises no claim Valqore holds, so the irrevocable Apache-2.0 §3 grant transfers nothing. Apache-2.0 is now applied (`LICENSE`, `NOTICE`, SPDX `license` in both `pyproject.toml` files).
 3. Existing Valqore agent-gate users (I1/B9) → migration note or none.
 4. KMS choice for design partner #2 (AWS KMS forces ECDSA P-256 variant).
 5. Auditor candidates (3) and design partners (2 of 5) confirmed.

@@ -41,10 +41,12 @@ RUN python -m pip install --prefix=/install . ./packages/gate-verify
 # what an auditor verifies is what ran.
 FROM gcr.io/distroless/python3-debian12:nonroot AS runtime
 
-LABEL org.opencontainers.image.title="gate" \
+LABEL org.opencontainers.image.title="Valqore Gate" \
       org.opencontainers.image.description="Policy and evidence kernel for AI-agent actions" \
       org.opencontainers.image.source="https://github.com/valqore/gate" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.version="0.1.0" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.vendor="Valqore"
 
 COPY --from=builder /install /usr/local
 

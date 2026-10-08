@@ -76,3 +76,16 @@ hash comes from `instance_id`, as before.
   superseded by this ADR. Both are kept unedited as the original record.
 - Nothing predates this change: the only chains in existence are built by the
   test suite on each run.
+
+## Outcome (2026-10-08)
+
+SPEC §24.1 closed: the product is **Valqore Gate** and `gate` stays the
+command, the import package and the repository name. This ADR is the reason
+that answer cost nothing. The context above is kept as written, including its
+description of §24.1 as open, because that was the state when the decision was
+taken.
+
+The property this ADR protects still has to hold — the test asserts no
+candidate product name appears in a hash input, and "Valqore Gate" being the
+settled name does not make it safe to put in one. A future rename remains a
+packaging change.

@@ -7,9 +7,12 @@ name = "gate-verify"
 version = "0.1.0.dev1"
 description = "Independent verifier for gate evidence chains"
 requires-python = ">=3.12"
-# See ../../PATENT-AND-LICENCE-GATE.md. Intended licence is Apache-2.0; not
-# applied until SPEC §24.2 (patent scope) closes.
-classifiers = ["Private :: Do Not Upload"]
+# `license-files` globs are resolved inside this project directory, so the
+# root LICENSE and NOTICE are copied here rather than referenced upwards. CI
+# asserts the copies are byte-identical to the originals.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+classifiers = ["Programming Language :: Python :: 3.12"]
 # One dependency, on purpose: an auditor must be able to install this on a
 # machine that is not allowed to reach the internet twice.
 dependencies = ["cryptography>=42"]

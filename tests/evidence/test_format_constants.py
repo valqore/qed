@@ -9,9 +9,10 @@ written yesterday would stop verifying. If one of these fails, the evidence
 format changed. That is allowed, but it is a format version bump with a
 migration note, never a side effect of a rename.
 
-**No product name.** SPEC §24.1 is open: `gate` is a placeholder. A brand inside
-a hash domain separator would make choosing the final name an
-evidence-compatibility decision instead of a marketing one, so the constants are
+**No product name.** SPEC §24.1 closed on 2026-10-08 — the product is "Valqore
+Gate" — and that changes nothing here. A brand inside a hash domain separator
+would make a rename an evidence-compatibility decision instead of a packaging
+one, whether or not the brand is settled today. The constants stay
 format-scoped and brand-free, and this file is what keeps them that way.
 """
 
@@ -64,8 +65,8 @@ def test_verifier_carries_the_same_constants() -> None:
 def test_no_product_name_inside_a_hash_input(constant: str) -> None:
     """Guards the reason these constants were moved out of `hashing.py`.
 
-    The names checked are the ones under consideration in SPEC §24.1, including
-    the current placeholder. A rename must be a packaging change; if one of these
+    The names checked are the settled name's two words plus the candidate that
+    lost (SPEC §24.1). A rename must stay a packaging change; if one of these
     words lands in a hash input, it stops being one.
     """
     for name in ("gate", "valqore", "lictor"):

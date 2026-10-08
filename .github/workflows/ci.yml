@@ -299,13 +299,34 @@ jobs:
           grep -q "signing key" ci-readyz-nokeys.json
           echo "ok: no signing key means not ready"
 
-      - name: No LICENSE file until SPEC 24.2 closes
+      # This step used to assert the opposite: no licence file until SPEC 24.2
+      # closed. 24.2 is answered, so the invariant inverts. What can go wrong
+      # now is a licence that quietly disappears from one of the two projects,
+      # the PyPI guard rail coming back and failing a release, or the
+      # gate-verify copy of LICENSE drifting from the original — it is a copy
+      # because PEP 639 `license-files` globs cannot escape a project
+      # directory, and a verifier shipped under a stale licence text is
+      # exactly the kind of detail an auditor checks.
+      - name: Apache-2.0 is applied to both projects, consistently
         shell: bash
         run: |
-          if ls LICENSE* NOTICE* 2>/dev/null | grep -q .; then
-            echo "A licence file appeared. See PATENT-AND-LICENCE-GATE.md:"
-            echo "the Apache-2.0 patent grant is irrevocable once distributed,"
-            echo "and the Valqore patent-scope check (SPEC 24.2) is still open."
-            exit 1
-          fi
-          test -f PATENT-AND-LICENCE-GATE.md
+          set -euo pipefail
+          test -f LICENSE
+          test -f NOTICE
+          test -f packages/gate-verify/NOTICE
+          grep -q "Version 2.0, January 2004" LICENSE
+          cmp LICENSE packages/gate-verify/LICENSE
+
+          for f in pyproject.toml packages/gate-verify/pyproject.toml; do
+            grep -qx 'license = "Apache-2.0"' "$f" || {
+              echo "FAIL: $f does not declare the Apache-2.0 SPDX expression"
+              exit 1
+            }
+            if grep -q "Private :: Do Not Upload" "$f"; then
+              echo "FAIL: the pre-publication PyPI guard rail is back in $f"
+              exit 1
+            fi
+          done
+
+          test ! -f PATENT-AND-LICENCE-GATE.md
+          echo "ok: Apache-2.0, both projects, one licence text"

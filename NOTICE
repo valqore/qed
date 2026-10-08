@@ -1,0 +1,14 @@
+Valqore Gate
+Copyright 2026 Valqore
+
+This product includes software developed at Valqore.
+
+Apache License 2.0 section 6 grants no trademark rights. "Valqore" and
+"Valqore Gate" are trademarks of Valqore. A fork may use this code, and may
+not use the product name or the logo to identify itself. The command name
+`gate` is not covered by that restriction and does not have to be changed in
+a fork.
+
+The evidence format carries no product name by design (docs/adr/0006). A
+record written by this software is verifiable by any implementation of
+`evidence-chain/1`, including one that is not ours.

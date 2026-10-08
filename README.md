@@ -1,4 +1,4 @@
-# gate
+# Valqore Gate
 
 A self-hosted policy and evidence kernel for AI-agent actions.
 
@@ -10,9 +10,13 @@ instance that produced it.
 No LLM in the decision path. No network in the kernel. Runs on your own
 hardware, including air-gapped.
 
-> **Name:** `gate` is a placeholder. See `PATENT-AND-LICENCE-GATE.md`.
-> **Licence:** deliberately not yet applied. See `PATENT-AND-LICENCE-GATE.md`.
-> Do not push this repository to a public remote until that file is resolved.
+> **Name:** the product is **Valqore Gate**. `gate` is the command, the import
+> package and the repository, and stays that way (SPEC §24.1, decided
+> 2026-10-08). Neither is a placeholder any more.
+> **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
+> **Still not public:** the remote stays private until the name reservations in
+> `REPO-AND-PUBLICATION-PLAN.md` §5 are in place. Publishing is distribution,
+> and that is the step that cannot be undone.
 
 ## Status
 

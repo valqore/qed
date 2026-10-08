@@ -1,9 +1,11 @@
 # Security
 
-**This repository is not published yet** (see `PATENT-AND-LICENCE-GATE.md`), so
-there is no public disclosure process to follow. The full process lands with the
-public launch (SPEC §22 week 11). Until then, report anything you find directly
-to the maintainer.
+**This repository is not published yet.** The licence is applied (Apache-2.0),
+but the remote stays private until the name reservations in
+`REPO-AND-PUBLICATION-PLAN.md` §5 are in place. So there is no public
+disclosure process to follow. The full process lands with the public launch
+(SPEC §22 week 11). Until then, report anything you find directly to the
+maintainer.
 
 ## What this software is for
 

@@ -7,15 +7,15 @@ name = "valqore-gate"
 version = "0.1.0"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
 requires-python = ">=3.12"
-# NOTE: `license` is deliberately absent and no LICENSE file is in this tree.
-# SPEC 25.1 fixes Apache-2.0 for this repo, but SPEC 24.2 (Valqore patent scope)
-# is unresolved and an Apache-2.0 patent grant is irrevocable once distributed.
-# See PATENT-AND-LICENCE-GATE.md. Do not add a LICENSE file or publish until that
-# item is closed.
+# SPEC 25.1. An SPDX expression, not the old `{text = ...}` table: setuptools
+# 77 deprecated the table form (PEP 639) and a `License ::` classifier
+# alongside this key is now an error, which is why there is no such classifier
+# below. SPEC 24.2 (Valqore patent scope) closed on 2026-10-08 with no filings
+# and nothing pending, so the Apache-2.0 patent grant in 3 grants nothing
+# Valqore holds.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 classifiers = [
-    # Guard rail: PyPI refuses uploads carrying this classifier. Remove only
-    # together with the license decision above.
-    "Private :: Do Not Upload",
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [

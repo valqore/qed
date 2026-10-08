@@ -43,10 +43,17 @@ Valqore-ported modules arrive as a single commit labelled
 
 ## Licensing
 
-**Currently unresolved and deliberately so.** See `PATENT-AND-LICENCE-GATE.md`.
-The intended licence for this repository is Apache-2.0, but the Apache patent
-grant is irrevocable on distribution and SPEC §24.2 (Valqore patent scope) is
-open. Nothing is published until that closes.
+**Apache-2.0** (SPEC §25.1), applied in full: `LICENSE` and `NOTICE` at the
+root, and `license = "Apache-2.0"` in both `pyproject.toml` files.
+
+SPEC §24.2 — Valqore patent scope — closed on 2026-10-08: no filings, nothing
+pending. That order mattered. The Apache-2.0 §3 patent grant is perpetual and
+irrevocable the moment the code is distributed, so the only way to apply the
+licence as a formality rather than as a decision was to establish first that
+there is nothing to grant.
+
+Apache-2.0 §6 grants no trademark rights. `NOTICE` says what that leaves a
+fork free to do, which is everything except claim the product name.
 
 ## Relationship to Valqore
 
