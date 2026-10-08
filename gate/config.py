@@ -17,7 +17,7 @@ import yaml
 from pydantic import ConfigDict, Field
 
 from gate.core.evidence.masking import MaskingProfile
-from gate.core.schemas import Decision, Frozen, Mode
+from gate.core.schemas import Budget, Decision, Frozen, Mode
 
 __all__ = [
     "DEFAULT_DIR",
@@ -69,6 +69,36 @@ class ApiConfig(Frozen):
     max_clock_skew_seconds: int = 300
 
 
+class IssuerConfig(Frozen):
+    """One identity provider the gate will accept tokens from (SPEC §6.1)."""
+
+    issuer: str
+    #: Left unset, it is resolved once through OIDC discovery. Set it to skip
+    #: discovery entirely, which an air-gapped install has to do.
+    jwks_uri: str | None = None
+    #: What an IdP may sign with. `none` is absent and the list is never read
+    #: from the token, which is where JWT implementations historically go wrong.
+    algorithms: list[str] = Field(default_factory=lambda: ["RS256", "ES256"])
+    #: IdP group -> scopes the group may request (SPEC §6.2).
+    scopes_by_group: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class DelegationConfig(Frozen):
+    """Token exchange (SPEC §6.2). Empty means `/v1/token` is not offered."""
+
+    issuers: list[IssuerConfig] = Field(default_factory=list)
+    #: The `iss` of tokens this gate mints. Not an IdP; its own name.
+    self_issuer: str = "https://gate.local"
+    token_ttl_default_seconds: int = 900
+    #: Ceiling applied to every requested budget, per group. A request is
+    #: granted the minimum of what it asked for and what its group allows.
+    budget_caps: dict[str, Budget] = Field(default_factory=dict)
+    #: Where fetched JWKS sets are cached. Relative to the gate directory.
+    jwks_cache: str = "."
+    #: Never reach for a JWKS over the network; the cache is all there is.
+    offline: bool = False
+
+
 class GateConfig(Frozen):
     instance_id: str = "gate-local"
     mode: Mode = Mode.shadow
@@ -78,6 +108,7 @@ class GateConfig(Frozen):
     evidence: EvidenceConfig = EvidenceConfig()
     api: ApiConfig = ApiConfig()
     adapters: list[AdapterCredential] = Field(default_factory=list)
+    delegation: DelegationConfig = DelegationConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 

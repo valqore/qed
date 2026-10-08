@@ -8,12 +8,17 @@ by a function-local import is a cycle waiting to come back.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Request
 
 from gate.api.auth import AdapterAuth
 from gate.api.problems import Problem
+from gate.core.delegation.claims import TokenClaims, TokenVerificationError
+from gate.core.schemas import Principal
+from gate.infra.jwks import JwksCache, discover_jwks_uri
+from gate.infra.tokens import GATE_ALG, TokenIssuer, decode_unverified_header, verify_token
 from gate.runtime import Session
 
 __all__ = ["GateState", "authenticate", "gate_state", "require_session"]
@@ -27,6 +32,11 @@ class GateState:
     dev: bool
     session: Session | None = None
     auth: AdapterAuth | None = None
+    #: Present only when `delegation.issuers` is configured. `/v1/token`
+    #: answers 501 without it rather than minting tokens nobody asked for.
+    token_issuer: TokenIssuer | None = None
+    jwks: JwksCache | None = None
+    _jwks_uris: dict[str, str] = field(default_factory=dict, repr=False)
     #: Why the service is not ready, if it is not. Empty when it is.
     blockers: list[str] = field(default_factory=list)
 
@@ -45,6 +55,61 @@ class GateState:
                 extra={"blockers": list(self.blockers)},
             )
         return self.session
+
+    def verify_subject_token(self, token: str, *, now: datetime) -> tuple[TokenClaims, Principal]:
+        """Verify a subject token from any configured source (SPEC §6.1 step 1).
+
+        The `kid` selects among the keys of a *configured* issuer; it never
+        names a URL. A token able to point at its own key server would be a
+        token that signs itself.
+        """
+        session = self.require()
+        delegation = session.config.delegation
+        header = decode_unverified_header(token)
+        kid = header.get("kid")
+
+        if self.token_issuer is not None and kid == self.token_issuer.kid:
+            return verify_token(
+                token,
+                keys=self.token_issuer.key,
+                now=now,
+                issuers=frozenset({delegation.self_issuer}),
+                algorithms=(GATE_ALG,),
+            )
+
+        if self.jwks is None or not delegation.issuers:
+            raise TokenVerificationError(
+                "no identity providers are configured, so only tokens this gate "
+                "issued can be exchanged"
+            )
+
+        last: Exception | None = None
+        for configured in delegation.issuers:
+            uri = self._jwks_uri(configured)
+            wanted = kid if isinstance(kid, str) else None
+            keyset = self.jwks.get(configured.issuer, uri, kid=wanted)
+            try:
+                return verify_token(
+                    token,
+                    keys=keyset,
+                    now=now,
+                    issuers=frozenset({configured.issuer}),
+                    algorithms=tuple(configured.algorithms),
+                )
+            except TokenVerificationError as exc:
+                last = exc
+        raise last or TokenVerificationError("no configured issuer accepted this token")
+
+    def _jwks_uri(self, configured: object) -> str:
+        issuer = str(configured.issuer)
+        explicit = getattr(configured, "jwks_uri", None)
+        if explicit:
+            return str(explicit)
+        if issuer not in self._jwks_uris:
+            # Discovery is done once per process. An air-gapped install sets
+            # `jwks_uri` explicitly and never reaches this branch.
+            self._jwks_uris[issuer] = discover_jwks_uri(issuer)
+        return self._jwks_uris[issuer]
 
 
 def gate_state(request: Request) -> GateState:

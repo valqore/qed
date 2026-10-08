@@ -21,9 +21,11 @@ from fastapi import FastAPI
 from gate.api.app_state import GateState
 from gate.api.auth import AdapterAuth
 from gate.api.problems import install_handlers
-from gate.api.routers import evidence, health, proposals
+from gate.api.routers import evidence, health, proposals, token
 from gate.config import DEFAULT_DIR
+from gate.infra.jwks import JwksCache
 from gate.infra.keys.file import MissingSigningKey
+from gate.infra.tokens import TokenIssuer, load_or_create_token_key
 from gate.runtime import PolicyErrors, open_session
 
 __all__ = ["API_VERSION", "create_app"]
@@ -66,6 +68,20 @@ def create_app(
             mode = state.auth.mode
             if not mode.usable:
                 state.blockers.append(f"adapter authentication is unusable: {mode.reason}")
+            # Delegation is optional. A deployment that never exchanges tokens
+            # should not be made to hold a token key, and `/v1/token` answers
+            # 501 rather than pretending the feature is off for some other
+            # reason.
+            delegation = state.session.config.delegation
+            if delegation.issuers:
+                state.token_issuer = TokenIssuer(
+                    load_or_create_token_key(directory),
+                    issuer=delegation.self_issuer,
+                )
+                state.jwks = JwksCache(
+                    directory=directory / delegation.jwks_cache,
+                    offline=delegation.offline,
+                )
         try:
             yield
         finally:
@@ -84,4 +100,6 @@ def create_app(
     app.include_router(health.router)
     app.include_router(proposals.router)
     app.include_router(evidence.router)
+    app.include_router(token.router)
+    app.include_router(token.public_router)
     return app
