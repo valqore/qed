@@ -13,10 +13,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterator, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 
+from gate.core.approval.model import ApprovalDecision, ApprovalRequest, ApprovalStatus
 from gate.core.budget import Charge, apply_charge
 from gate.core.schemas import (
     Budget,
@@ -463,6 +464,143 @@ class SqliteStore:
         self._conn.execute("COMMIT")
         return before, after
 
+    # ------------------------------------------------------------ approvals
+
+    def record_approval(self, request: ApprovalRequest, *, request_json: str) -> None:
+        self._conn.execute(
+            "INSERT INTO approvals (id, proposal_id, dedupe_key, status, approvers, "
+            "created_at, expires_at, escalate_at, escalated, request_json, "
+            "principal_hash, window_max_seconds) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                request.id,
+                request.proposal_id,
+                request.dedupe_key,
+                request.status.value,
+                json.dumps(request.approvers),
+                rfc3339_ms(request.created_at),
+                rfc3339_ms(request.expires_at),
+                None if request.escalate_at is None else rfc3339_ms(request.escalate_at),
+                request.escalated,
+                request_json,
+                request.principal_hash,
+                None if request.window_max is None else int(request.window_max.total_seconds()),
+            ),
+        )
+
+    def load_approval(self, approval_id: str) -> ApprovalRequest | None:
+        row = self._conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        return None if row is None else _row_to_approval(row)
+
+    def pending_for_dedupe(
+        self, key: str, *, now: datetime, window: timedelta
+    ) -> ApprovalRequest | None:
+        """A pending request for the same action, young enough to join.
+
+        SPEC §9.2: a retrying agent should land on the request a human is
+        already looking at rather than filling the queue with copies.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM approvals WHERE dedupe_key = ? AND status = 'pending' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (key,),
+        ).fetchone()
+        if row is None:
+            return None
+        found = _row_to_approval(row)
+        if (now - found.created_at) > window or found.expires_at <= now:
+            return None
+        return found
+
+    def recently_denied(
+        self, key: str, *, now: datetime, window: timedelta
+    ) -> ApprovalRequest | None:
+        """A denial for the same action, young enough to still mean no.
+
+        Without this an agent that is told no simply asks again, and the
+        second request looks exactly like the first to whoever sees it.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM approvals WHERE dedupe_key = ? AND status = 'denied' "
+            "ORDER BY decided_at DESC LIMIT 1",
+            (key,),
+        ).fetchone()
+        if row is None or row["decided_at"] is None:
+            return None
+        decided_at = _parse_ts(str(row["decided_at"]))
+        return _row_to_approval(row) if (now - decided_at) <= window else None
+
+    def apply_decision(self, decision: ApprovalDecision) -> bool:
+        """Record a decision. False when the request was already decided.
+
+        The status check is in the UPDATE rather than around it, so two
+        approvers clicking at the same moment cannot both win.
+        """
+        cursor = self._conn.execute(
+            "UPDATE approvals SET status = ?, decision = ?, approver_hash = ?, "
+            "decided_at = ?, reason = ?, window_until = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (
+                decision.status.value,
+                decision.kind.value,
+                decision.approver_hash,
+                rfc3339_ms(decision.decided_at),
+                decision.reason,
+                None if decision.window_until is None else rfc3339_ms(decision.window_until),
+                decision.approval_id,
+            ),
+        )
+        return cursor.rowcount > 0
+
+    def open_window(self, dedupe_key: str, approval_id: str, until: datetime) -> None:
+        self._conn.execute(
+            "INSERT INTO approval_windows (dedupe_key, approval_id, until) VALUES (?,?,?) "
+            "ON CONFLICT(dedupe_key, approval_id) DO UPDATE SET until = excluded.until",
+            (dedupe_key, approval_id, rfc3339_ms(until)),
+        )
+
+    def active_window(self, dedupe_key: str, *, now: datetime) -> str | None:
+        """The approval id of an unexpired window for this action, if any."""
+        row = self._conn.execute(
+            "SELECT approval_id, until FROM approval_windows WHERE dedupe_key = ? "
+            "ORDER BY until DESC LIMIT 1",
+            (dedupe_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["approval_id"]) if _parse_ts(str(row["until"])) > now else None
+
+    def expire_approvals(self, *, now: datetime) -> list[ApprovalRequest]:
+        """Move every overdue pending request to `expired`, and return them.
+
+        Returned so the caller can write one `approval_expired` record each:
+        a request that simply vanished from the queue is not evidence of
+        anything.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM approvals WHERE status = 'pending' AND expires_at <= ?",
+            (rfc3339_ms(now),),
+        ).fetchall()
+        expired = [_row_to_approval(row) for row in rows]
+        if expired:
+            self._conn.execute(
+                "UPDATE approvals SET status = 'expired' WHERE status = 'pending' "
+                "AND expires_at <= ?",
+                (rfc3339_ms(now),),
+            )
+        return expired
+
+    def list_approvals(
+        self, *, status: str | None = None, limit: int = 50
+    ) -> list[ApprovalRequest]:
+        sql = "SELECT * FROM approvals"
+        params: list[object] = []
+        if status is not None:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        return [_row_to_approval(row) for row in self._conn.execute(sql, params)]
+
     # ------------------------------------------------------------- mandates
 
     def record_mandate(self, mandate: Mandate, *, created_at: datetime) -> None:
@@ -538,6 +676,30 @@ class SqliteStore:
             int(row["tokens_used"]),
             int(row["money_used_cents"]),
         )
+
+
+def _parse_ts(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _row_to_approval(row: sqlite3.Row) -> ApprovalRequest:
+    return ApprovalRequest(
+        id=str(row["id"]),
+        proposal_id=str(row["proposal_id"]),
+        dedupe_key=str(row["dedupe_key"]),
+        status=ApprovalStatus(str(row["status"])),
+        approvers=json.loads(row["approvers"]) if row["approvers"] else [],
+        principal_hash=row["principal_hash"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        escalate_at=row["escalate_at"],
+        escalated=bool(row["escalated"]),
+        window_max=(
+            None
+            if row["window_max_seconds"] is None
+            else timedelta(seconds=int(row["window_max_seconds"]))
+        ),
+    )
 
 
 def _row_to_mandate(row: sqlite3.Row) -> Mandate:

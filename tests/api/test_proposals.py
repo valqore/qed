@@ -102,7 +102,14 @@ def test_the_api_and_the_cli_agree(
     assert result.exit_code in {0, 2, 3}, result.output
     from_cli = json.loads(result.output)["verdict"]
 
-    assert from_api == from_cli
+    # `approval_id` is per-request state: a REQUIRE_APPROVAL opens a request
+    # in whichever store it ran against, and two independent stores mint two
+    # ids. Everything the decision rests on still has to match byte for byte,
+    # which is what this test exists for.
+    assert (from_api.get("approval_id") is None) == (from_cli.get("approval_id") is None)
+    assert {k: v for k, v in from_api.items() if k != "approval_id"} == {
+        k: v for k, v in from_cli.items() if k != "approval_id"
+    }
 
 
 # --------------------------------------------------------------------------

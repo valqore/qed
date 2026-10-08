@@ -526,6 +526,170 @@ def mandate_revoke(
 
 
 @app.command()
+def approve(
+    approval_id: Annotated[str, typer.Argument(help="Approval request id.")],
+    by: Annotated[str, typer.Option("--by", help="Your subject, e.g. you@example.com")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    deny: Annotated[bool, typer.Option("--deny", help="Refuse it instead.")] = False,
+    window: Annotated[
+        str | None,
+        typer.Option("--window", help="Approve for a period, e.g. 15m, instead of once."),
+    ] = None,
+    reason: Annotated[str, typer.Option("--reason", help="Why.")] = "",
+    groups: Annotated[
+        str, typer.Option("--groups", help="Comma-separated groups you belong to.")
+    ] = "",
+) -> None:
+    """Decide a pending approval (SPEC §9.3).
+
+    Separation of duties is enforced here, not reported: you cannot approve
+    your own action, a service identity cannot approve anything, and you have
+    to be in the group the rule named.
+
+    `--window 15m` grants every identical action for that period rather than
+    this one. Windows are not extendable; when one runs out the next action
+    opens a fresh request.
+    """
+    from gate.core.approval.model import (
+        DecisionKind,
+        SoDViolation,
+        decide,
+        parse_duration,
+    )
+    from gate.core.evidence.hashing import principal_hash
+    from gate.core.schemas import Assurance, EvidenceType
+
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        request = session.store.load_approval(approval_id)
+        if request is None:
+            _fail(f"no approval {approval_id}")
+            return
+
+        kind = (
+            DecisionKind.deny
+            if deny
+            else (DecisionKind.approve_window if window else DecisionKind.approve_once)
+        )
+        now = utcnow()
+        try:
+            decision = decide(
+                request,
+                kind=kind,
+                approver_hash=principal_hash(by),
+                approver_subject=by,
+                approver_groups=[g.strip() for g in groups.split(",") if g.strip()],
+                now=now,
+                reason=reason,
+                requested_window=parse_duration(window),
+            )
+        except SoDViolation as violation:
+            # Recorded, not just refused: an attempt to approve one's own
+            # action is exactly the thing an auditor wants to find later.
+            session.writer.append(
+                type_=EvidenceType.approval_decided,
+                assurance=Assurance.kernel,
+                payload={
+                    "approval_id": approval_id,
+                    "refused": violation.rule_id,
+                    "detail": str(violation),
+                    "attempted_by_hash": principal_hash(by),
+                },
+                approval_id=approval_id,
+                ts=now,
+            )
+            _fail(f"{violation.rule_id}: {violation}")
+            return
+        except ValueError as exc:
+            _fail(str(exc))
+            return
+
+        if not session.store.apply_decision(decision):
+            _fail(f"approval {approval_id} was decided by someone else first")
+            return
+        if decision.window_until is not None:
+            session.store.open_window(request.dedupe_key, request.id, decision.window_until)
+
+        session.writer.append(
+            type_=EvidenceType.approval_decided,
+            assurance=Assurance.kernel,
+            payload={
+                "approval_id": approval_id,
+                "decision": decision.kind.value,
+                "approver_hash": decision.approver_hash,
+                "reason": decision.reason,
+                "window_until": (
+                    None if decision.window_until is None else decision.window_until.isoformat()
+                ),
+            },
+            approval_id=approval_id,
+            principal_hash=decision.approver_hash,
+            ts=now,
+        )
+    finally:
+        session.close()
+
+    if decision.window_until is not None:
+        typer.echo(f"{decision.kind.value} until {decision.window_until.isoformat()}")
+    else:
+        typer.echo(decision.kind.value)
+
+
+@app.command()
+def approvals(
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    status_filter: Annotated[
+        str | None, typer.Option("--status", help="pending | approved | denied | expired")
+    ] = None,
+    expire: Annotated[
+        bool, typer.Option("--expire", help="First move overdue requests to expired.")
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List approval requests.
+
+    `--expire` runs the timeout sweep (SPEC §9.4) and writes one
+    `approval_expired` record per request. A request that simply vanished
+    from the queue would not be evidence of anything.
+    """
+    from gate.core.schemas import Assurance, EvidenceType
+
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        now = utcnow()
+        if expire:
+            for stale in session.store.expire_approvals(now=now):
+                session.writer.append(
+                    type_=EvidenceType.approval_expired,
+                    assurance=Assurance.kernel,
+                    payload={
+                        "approval_id": stale.id,
+                        "expired_at": stale.expires_at.isoformat(),
+                        "approvers": stale.approvers,
+                    },
+                    approval_id=stale.id,
+                    ts=now,
+                )
+        found = session.store.list_approvals(status=status_filter)
+    finally:
+        session.close()
+
+    if as_json:
+        typer.echo(json.dumps([json.loads(r.model_dump_json()) for r in found], indent=2))
+        return
+    if not found:
+        typer.echo("no approvals")
+        return
+    for item in found:
+        typer.echo(
+            f"{item.id}  {item.status.value:<10}  expires {item.expires_at.isoformat()}  "
+            f"{', '.join(item.approvers) or '(nobody named)'}"
+        )
+
+
+@app.command()
 def status(
     directory: DirOption = DEFAULT_DIR,
     config: ConfigOption = None,

@@ -6,6 +6,43 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — approval service, core and CLI (SPEC §9, week 4)
+
+- A `REQUIRE_APPROVAL` verdict now resolves against what a human has already
+  said about that exact action: an open window makes it ALLOW, a recent
+  denial makes it BLOCK, a pending request links to it, and otherwise a
+  request is opened. All four happen before the verdict is written, so the
+  chain records the decision that was acted on.
+- **Separation of duties is enforced, not reported.** The approver may not be
+  the principal (`AG-SOD-001`), may not be a service identity, and must be in
+  the group the rule named (`AG-SOD-002`). A refused attempt is written to the
+  chain: somebody trying to approve their own production delete is exactly
+  what an auditor wants to find later, and a refusal that leaves no trace is
+  indistinguishable from an attempt that never happened.
+- Dedupe on `sha256(principal | name | target | params_hash)`. Parameters are
+  in, because an approval for `DROP TABLE orders_archive` must not cover
+  `DROP TABLE orders`. Environment and time are out, because two identical
+  actions a minute apart are one question and an approver should see one
+  request, not forty.
+- `--window` grants every identical action for a period, keyed on the dedupe
+  key so it covers *that action* rather than that person or that rule.
+  Windows are not extendable. The length is the smallest of the request, the
+  rule ceiling and the service ceiling; an approver cannot widen a rule's own
+  bound by asking.
+- The rule's timeout, approvers and window ceiling are copied onto the
+  request at creation, not looked up at decision time. The bundle can be
+  reloaded in between, and an approver should be bounded by the rule in force
+  when the action was proposed. Where rules disagree the tighter one wins.
+- `gate approve` and `gate approvals [--expire]`; `approval_requested`,
+  `approval_decided` and `approval_expired` reach the chain.
+- `0004_approvals.sql` adds `principal_hash` and `window_max_seconds`.
+  Without the principal on the row, "the approver is not the principal"
+  cannot be checked at decision time -- only claimed.
+- `docs/approvals.md`.
+
+Not yet: Slack Block Kit, `/events` SSE, the web approval page. The decision
+path they would call is finished and is the one `gate approve` uses.
+
 ### Added — baseline pack, 15 rules to 45 (SPEC §22 week 3)
 
 Thirty new rules across the five existing families: blast radius 10, budget 7,

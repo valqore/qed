@@ -9,11 +9,19 @@ the server cannot drift into deciding things differently.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+from ulid import ULID
 
 from gate.config import DEFAULT_DIR, GateConfig, LoadedConfig, load_config
 from gate.core import jcs
+from gate.core.approval.model import (
+    DEFAULT_DEDUPE_WINDOW,
+    ApprovalRequest,
+    dedupe_key,
+    parse_duration,
+)
 from gate.core.budget import charge_for, newly_exhausted
 from gate.core.policy.engine import evaluate
 from gate.core.policy.loader import LoadResult, baseline_pack_dir, load_bundle
@@ -169,6 +177,11 @@ def _record_bundle_once(session: Session) -> None:
     )
 
 
+#: Used when no rule named a timeout. Long enough for somebody to look, short
+#: enough that an unanswered request stops blocking an agent for a whole shift.
+APPROVAL_TIMEOUT_DEFAULT = timedelta(minutes=15)
+
+
 @dataclass
 class CheckOutcome:
     verdict: Verdict
@@ -187,6 +200,161 @@ class CheckOutcome:
         return {Decision.ALLOW: 0, Decision.REQUIRE_APPROVAL: 2, Decision.BLOCK: 3}[
             self.effective_decision
         ]
+
+
+def _resolve_approval(
+    session: Session,
+    proposal: ActionProposal,
+    verdict: Verdict,
+    *,
+    key: str,
+    now: datetime,
+) -> tuple[Verdict, list[EvidenceRecord]]:
+    """Turn a REQUIRE_APPROVAL into whatever it actually is (SPEC §9.2).
+
+    Four outcomes, in the order they are checked:
+
+    * an open window for this exact action -> ALLOW, `via_approval` set;
+    * a recent denial -> BLOCK, because an agent told no should not be able to
+      ask again and have the second request look fresh to whoever sees it;
+    * a pending request for the same action -> link to it rather than filing a
+      copy, so the human sees one request instead of forty;
+    * otherwise -> open a new request.
+    """
+    records: list[EvidenceRecord] = []
+    store = session.store
+
+    granted = store.active_window(key, now=now)
+    if granted is not None:
+        return (
+            verdict.model_copy(update={"decision": Decision.ALLOW, "via_approval": granted}),
+            records,
+        )
+
+    denied = store.recently_denied(key, now=now, window=DEFAULT_DEDUPE_WINDOW)
+    if denied is not None:
+        return (
+            verdict.model_copy(update={"decision": Decision.BLOCK, "approval_id": denied.id}),
+            records,
+        )
+
+    existing = store.pending_for_dedupe(key, now=now, window=DEFAULT_DEDUPE_WINDOW)
+    if existing is not None:
+        return verdict.model_copy(update={"approval_id": existing.id}), records
+
+    request = _build_request(proposal, verdict, session.bundle, key=key, now=now)
+    store.record_approval(
+        request, request_json=jcs.dumps(_approver_view(proposal, verdict, request))
+    )
+    records.append(
+        session.writer.append(
+            type_=EvidenceType.approval_requested,
+            assurance=Assurance.kernel,
+            payload={
+                "approval_id": request.id,
+                "dedupe_key": key,
+                "approvers": request.approvers,
+                "expires_at": request.expires_at.isoformat(),
+                "blast_radius": verdict.blast_radius,
+                "hits": [hit.rule_id for hit in verdict.hits],
+            },
+            mode=session.config.mode,
+            enforcement=proposal.context.enforcement,
+            proposal_id=proposal.id,
+            approval_id=request.id,
+            principal_hash=proposal.principal.human_hash,
+            ts=now,
+        )
+    )
+    return verdict.model_copy(update={"approval_id": request.id}), records
+
+
+def _build_request(
+    proposal: ActionProposal,
+    verdict: Verdict,
+    bundle: PolicyBundle,
+    *,
+    key: str,
+    now: datetime,
+) -> ApprovalRequest:
+    """Assemble the request from the rules that asked for it.
+
+    The approver list, the timeout and the window ceiling are read from the
+    rules that actually fired, and they are written onto the request rather
+    than looked up again when somebody decides. The bundle can be reloaded in
+    between, and an approver should be bounded by the rule that was in force
+    when the action was proposed, not by whatever replaced it.
+
+    Where two rules disagree the tighter one wins: the shortest timeout, the
+    smallest window. A rule that asked for a narrow bound should not have it
+    widened by another rule happening to fire at the same time.
+    """
+    by_id = {rule.rule_id: rule for rule in bundle.rules}
+    approvers: list[str] = []
+    timeout = APPROVAL_TIMEOUT_DEFAULT
+    window_max: timedelta | None = None
+    escalate_after: timedelta | None = None
+    for hit in verdict.hits:
+        rule = by_id.get(hit.rule_id)
+        approval = None if rule is None else rule.approval
+        if approval is None:
+            continue
+        for group in approval.approvers:
+            if group not in approvers:
+                approvers.append(group)
+        hit_timeout = parse_duration(approval.timeout)
+        if hit_timeout is not None:
+            timeout = min(timeout, hit_timeout)
+        hit_window = parse_duration(approval.window_max)
+        if hit_window is not None:
+            window_max = hit_window if window_max is None else min(window_max, hit_window)
+        hit_escalate = parse_duration(approval.escalate_after)
+        if hit_escalate is not None:
+            escalate_after = (
+                hit_escalate if escalate_after is None else min(escalate_after, hit_escalate)
+            )
+
+    return ApprovalRequest(
+        id=f"apr_{ULID()}",
+        proposal_id=proposal.id,
+        dedupe_key=key,
+        approvers=approvers,
+        principal_hash=proposal.principal.human_hash,
+        created_at=now,
+        expires_at=now + timeout,
+        escalate_at=None if escalate_after is None else now + escalate_after,
+        window_max=window_max,
+    )
+
+
+def _approver_view(
+    proposal: ActionProposal, verdict: Verdict, request: ApprovalRequest
+) -> dict[str, object]:
+    """What a person sees when deciding (SPEC §9.2).
+
+    Enough to judge the action, and nothing that would make the queue itself
+    a place secrets accumulate: parameters are the already-redacted ones the
+    engine saw, never the raw call.
+    """
+    return {
+        "approval_id": request.id,
+        "summary": proposal.context.summary,
+        "intent": proposal.context.intent,
+        "environment": proposal.context.environment,
+        "agent_chain": proposal.principal.agent_chain,
+        "action": {
+            "kind": proposal.action.kind.value,
+            "name": proposal.action.name,
+            "target": proposal.action.target,
+        },
+        "params_redacted": proposal.action.params_redacted,
+        "blast_radius": verdict.blast_radius,
+        "hits": [{"rule_id": hit.rule_id, "message": hit.message} for hit in verdict.hits],
+        "expires_at": request.expires_at.isoformat(),
+        "window_max_seconds": (
+            None if request.window_max is None else int(request.window_max.total_seconds())
+        ),
+    }
 
 
 def check_proposal(
@@ -233,6 +401,17 @@ def check_proposal(
     )
 
     verdict = evaluate(proposal, session.bundle, state, ctx)
+
+    # An approval already granted turns a REQUIRE_APPROVAL into an ALLOW, and
+    # a REQUIRE_APPROVAL nobody has seen yet opens a request. Both happen
+    # before the verdict is written, so the chain records the decision that
+    # was actually acted on rather than one the next record silently revises.
+    key = dedupe_key(proposal)
+    if verdict.decision is Decision.REQUIRE_APPROVAL:
+        verdict, approval_records = _resolve_approval(
+            session, proposal, verdict, key=key, now=stamp
+        )
+        records.extend(approval_records)
 
     records.append(
         session.writer.append(
