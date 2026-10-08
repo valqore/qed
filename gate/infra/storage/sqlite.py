@@ -22,6 +22,7 @@ from gate.core.schemas import (
     Budget,
     BudgetState,
     EvidenceRecord,
+    Mandate,
     SigningKeyInfo,
     rfc3339_ms,
     utcnow,
@@ -462,6 +463,67 @@ class SqliteStore:
         self._conn.execute("COMMIT")
         return before, after
 
+    # ------------------------------------------------------------- mandates
+
+    def record_mandate(self, mandate: Mandate, *, created_at: datetime) -> None:
+        """Store a signed mandate (SPEC §6.5).
+
+        The document is written whole, as the canonical JSON that was signed.
+        Rebuilding it from columns risks bytes that differ from what the signer
+        produced, and a signature that no longer verifies is indistinguishable
+        from a forged one.
+        """
+        self._conn.execute(
+            "INSERT INTO mandates (id, for_agent, issued_by_hash, purpose, valid_from, "
+            "valid_until, key_id, mandate_json, created_at) VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET mandate_json = excluded.mandate_json, "
+            "key_id = excluded.key_id",
+            (
+                mandate.id,
+                mandate.for_agent,
+                mandate.issued_by_hash,
+                mandate.purpose,
+                rfc3339_ms(mandate.valid.from_),
+                rfc3339_ms(mandate.valid.until),
+                None if mandate.signature is None else mandate.signature.key_id,
+                mandate.model_dump_json(by_alias=True),
+                rfc3339_ms(created_at),
+            ),
+        )
+
+    def load_mandate(self, mandate_id: str) -> Mandate | None:
+        row = self._conn.execute(
+            "SELECT mandate_json, revoked_at FROM mandates WHERE id = ?", (mandate_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_mandate(row)
+
+    def list_mandates(self, *, for_agent: str | None = None) -> list[Mandate]:
+        sql = "SELECT mandate_json, revoked_at FROM mandates"
+        params: list[object] = []
+        if for_agent is not None:
+            sql += " WHERE for_agent = ?"
+            params.append(for_agent)
+        sql += " ORDER BY created_at, id"
+        return [_row_to_mandate(row) for row in self._conn.execute(sql, params)]
+
+    def revoke_mandate(
+        self, mandate_id: str, *, at: datetime, by_hash: str | None, reason: str
+    ) -> bool:
+        """Mark a mandate revoked. Returns False if it was already revoked.
+
+        The stored document is not touched: a revoked mandate has to keep
+        verifying against the signature its issuer produced, or revoking one
+        would destroy the record of who granted it.
+        """
+        cursor = self._conn.execute(
+            "UPDATE mandates SET revoked_at = ?, revoked_by_hash = ?, revoked_reason = ? "
+            "WHERE id = ? AND revoked_at IS NULL",
+            (rfc3339_ms(at), by_hash, reason, mandate_id),
+        )
+        return cursor.rowcount > 0
+
     def daily_usage(self, principal_hash: str, day: str) -> tuple[int, int, int]:
         """``(steps, tokens, money_cents)`` for one principal on one UTC day."""
         row = self._conn.execute(
@@ -476,6 +538,17 @@ class SqliteStore:
             int(row["tokens_used"]),
             int(row["money_used_cents"]),
         )
+
+
+def _row_to_mandate(row: sqlite3.Row) -> Mandate:
+    document = json.loads(str(row["mandate_json"]))
+    if row["revoked_at"] is not None:
+        # Revocation lives in its own column, so it is applied on the way out
+        # rather than written into the signed document. It goes through
+        # validation rather than `model_copy`, which does not validate and
+        # would leave a raw string where every caller expects a datetime.
+        document["revoked_at"] = row["revoked_at"]
+    return Mandate.model_validate(document)
 
 
 def _row_to_budget(row: sqlite3.Row) -> BudgetState:

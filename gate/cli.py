@@ -58,8 +58,10 @@ app = typer.Typer(
 )
 keys_app = typer.Typer(no_args_is_help=True, help="Evidence signing keys.")
 policy_app = typer.Typer(no_args_is_help=True, help="Policy bundle tools.")
+mandate_app = typer.Typer(no_args_is_help=True, help="Mandates for unattended agents.")
 app.add_typer(keys_app, name="keys")
 app.add_typer(policy_app, name="policy")
+app.add_typer(mandate_app, name="mandate")
 
 DirOption = Annotated[Path, typer.Option("--dir", help="gate state directory (keys and chain).")]
 PolicyOption = Annotated[
@@ -301,6 +303,148 @@ def export(
     else:
         out.write_text(text, encoding="utf-8")
         typer.echo(f"{len(records)} record(s) -> {out}")
+
+
+@mandate_app.command("sign")
+def mandate_sign(
+    mandate_file: Annotated[Path, typer.Argument(help="Mandate document as JSON.")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the signed mandate here.")
+    ] = None,
+) -> None:
+    """Sign a mandate and record its issue in the chain (SPEC §6.5).
+
+    The signature covers the whole document except its own `signature` field
+    and `revoked_at`, so a mandate keeps verifying after it is revoked -- the
+    record of who granted the authority has to survive the withdrawal of it.
+    """
+    from gate.core.mandates import MANDATE_ALG, signing_payload
+    from gate.core.schemas import Assurance, EvidenceType, Mandate, MandateSignature
+
+    try:
+        document = Mandate.model_validate_json(mandate_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        _fail(f"{mandate_file} is not a readable mandate: {exc}")
+        return
+
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        signed = document.model_copy(
+            update={
+                "signature": MandateSignature(
+                    key_id=session.signer.key_id,
+                    alg=MANDATE_ALG,
+                    sig=session.signer.sign(signing_payload(document)),
+                )
+            }
+        )
+        now = utcnow()
+        session.store.record_mandate(signed, created_at=now)
+        session.writer.append(
+            type_=EvidenceType.mandate_issued,
+            assurance=Assurance.kernel,
+            payload={
+                "mandate_id": signed.id,
+                "for_agent": signed.for_agent,
+                "purpose": signed.purpose,
+                "issued_by_hash": signed.issued_by_hash,
+                "valid_from": signed.valid.from_.isoformat(),
+                "valid_until": signed.valid.until.isoformat(),
+                "key_id": session.signer.key_id,
+            },
+            principal_hash=signed.issued_by_hash,
+            ts=now,
+        )
+    finally:
+        session.close()
+
+    text = signed.model_dump_json(by_alias=True, indent=2)
+    if out is not None:
+        out.write_text(text + chr(10), encoding="utf-8")
+        typer.echo(f"signed {signed.id} -> {out}")
+    else:
+        typer.echo(text)
+
+
+@mandate_app.command("list")
+def mandate_list(
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    for_agent: Annotated[
+        str | None, typer.Option("--for-agent", help="Only mandates for this subject.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List stored mandates and whether each one is usable right now."""
+    from gate.core.mandates import is_active
+
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        mandates = session.store.list_mandates(for_agent=for_agent)
+    finally:
+        session.close()
+
+    now = utcnow()
+    if as_json:
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        **json.loads(m.model_dump_json(by_alias=True)),
+                        "active": is_active(m, now=now),
+                    }
+                    for m in mandates
+                ],
+                indent=2,
+            )
+        )
+        return
+    if not mandates:
+        typer.echo("no mandates")
+        return
+    for mandate in mandates:
+        state = "active" if is_active(mandate, now=now) else "inactive"
+        if mandate.revoked_at is not None:
+            state = "revoked"
+        typer.echo(f"{mandate.id}  {state:<8}  {mandate.for_agent}  {mandate.purpose}")
+
+
+@mandate_app.command("revoke")
+def mandate_revoke(
+    mandate_id: Annotated[str, typer.Argument(help="Mandate id to revoke.")],
+    reason: Annotated[str, typer.Option("--reason", help="Why it is being revoked.")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    by: Annotated[str, typer.Option("--by", help="principal_hash of the revoker.")] = "",
+) -> None:
+    """Revoke a mandate. Tokens that reference it fail on next use (§6.1 step 5).
+
+    Nothing is deleted. The signed document stays exactly as issued and the
+    revocation is a separate fact, in its own column and in the chain.
+    """
+    from gate.core.schemas import Assurance, EvidenceType
+
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        if session.store.load_mandate(mandate_id) is None:
+            _fail(f"no mandate {mandate_id}")
+            return
+        now = utcnow()
+        if not session.store.revoke_mandate(mandate_id, at=now, by_hash=by or None, reason=reason):
+            _fail(f"mandate {mandate_id} is already revoked")
+            return
+        session.writer.append(
+            type_=EvidenceType.mandate_revoked,
+            assurance=Assurance.kernel,
+            payload={"mandate_id": mandate_id, "reason": reason, "revoked_by_hash": by or None},
+            principal_hash=by or None,
+            ts=now,
+        )
+    finally:
+        session.close()
+    typer.echo(f"revoked {mandate_id}")
 
 
 @app.command()

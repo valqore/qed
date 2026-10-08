@@ -6,6 +6,31 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — mandate lifecycle (SPEC §6.5)
+
+- `gate mandate sign | list | revoke`, completing §6. Mandates were already
+  consumed by `gate check --mandate`, the MCP proxy and the API envelope;
+  there was no way to issue, store or withdraw one.
+- `gate/core/mandates.py` (pure): the signing payload, signature verification
+  and the active/inactive question. Ed25519 only, with no algorithm field read
+  off the document -- the same rule as the token path.
+- **What is signed is the document minus `signature` and minus `revoked_at`.**
+  A signature cannot cover itself; the second exclusion is the one that
+  matters. Revocation is an act of the gate, recorded in the chain, not an
+  edit the signer authorised, so a revoked mandate still verifies against the
+  signature its issuer produced. Including `revoked_at` would mean revoking a
+  mandate destroyed the proof of who granted the authority -- exactly the
+  record an investigation needs.
+- The document is stored whole, as the canonical JSON that was signed.
+  Rebuilding it from columns risks bytes that differ from what the signer
+  produced, and a signature that no longer verifies is indistinguishable from
+  a forged one.
+- `mandate_issued` and `mandate_revoked` reach the evidence chain. Revoking
+  twice is refused rather than recorded twice.
+- An unknown signing key is a failure, not a skip: treating "this instance
+  does not hold that key" as "probably fine" is how an unsigned document gets
+  accepted.
+
 ### Added — delegation (SPEC §6), week 3
 
 - **`POST /v1/token`** (RFC 8693): an IdP token in, a narrower budgeted gate
