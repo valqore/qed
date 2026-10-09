@@ -6,6 +6,204 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - key rotation (SPEC 10.5, week 7)
+
+`qed keys rotate`. The rule it implements has been in `qed-verify` since week 1
+-- a `key_rotated` record must be signed by the *retiring* key -- and nothing
+produced the record, so the only way to change keys was `qed keys init
+--overwrite`, which breaks the chain. ADR-0010 records three decisions:
+
+- **The old private key is destroyed.** Rotation exists because a key might
+  have leaked, and one left on disk reduces nothing. The threat is not editing
+  an existing record -- `hash` covers `payload_hash` and the next `prev_hash`
+  covers `hash` -- it is fabricating a whole alternative history that verifies
+  under a key an auditor still trusts for the period before the rotation.
+- **The record is appended before the key is activated.** Activating first
+  would leave the chain on the old key with the next record signed by the new
+  one and nothing in between saying so: a discontinuity indistinguishable from
+  a forged chain, produced by the correct command.
+- **The writer enforces continuity too**, not only the verifier.
+  `ChainWriter.__init__` raises `KeyDiscontinuity` unless the active key signed
+  the last record or a `key_rotated` at the tip introduced it. The verifier is
+  the authoritative place and the wrong moment: by then the records exist, are
+  immutable, and are unverifiable.
+
+`qed keys export-public` now prints **every** key with an `active`/`retired`
+marker. The old behaviour made "send the auditor your public key" produce a
+file that verifies half the chain and reports `unknown_key` for the rest.
+
+### Added - retention and purge (SPEC 10.6, week 7)
+
+Week 7's exit criterion is "purge-then-verify passes", and it does: `hash`
+recomputes from `payload_hash`, so a record whose payload is gone still
+verifies its linkage and its signature.
+
+The interesting part is what retention refuses to touch. **Five record types
+are structural and can never be purged**, whatever the config says: a
+`checkpoint`'s payload holds its Merkle root, a `key_rotated`'s holds the
+incoming public key, `genesis` and `policy_loaded` hold the chain's identity
+and the rules in force, and `admin_action` is the record of the purges
+themselves. Erasing the record of what was erased is the one thing retention
+must not do.
+
+That exemption is why the plan is an explicit set of sequence numbers rather
+than `seq <= N`: retention is per type, so the expired set is not contiguous,
+and a range would take an exempt checkpoint in the middle of it.
+
+- `apply_retention` appends an `admin_action{action: "retention_purge"}`. A
+  NULL payload with nothing saying why is indistinguishable from data loss.
+- The policy reports ages **as the config wrote them**. `24h` reported back as
+  `1d` is a small lie in a document an auditor reads.
+- `0d` is refused rather than obeyed: it reads like "no retention", means
+  "purge everything now", and is almost certainly a typo for `forever`.
+
+### Added - checkpoint anchors (SPEC 10.4, week 7)
+
+A checkpoint on its own proves the instance was internally consistent when
+somebody read it; an operator who rewrote the chain could recompute every root.
+Publishing puts the root somewhere the instance does not control.
+
+- **file** -- one canonical record per file, named so the set sorts, refusing
+  to overwrite an anchor. Says plainly that a directory on the same disk as the
+  chain anchors nothing.
+- **s3-object-lock** -- the one that actually anchors: compliance mode means
+  nobody can delete the object until the retain-until date, not even the
+  account root. It *asks* whether the bucket has object-lock, because one
+  without it accepts the upload and provides no lock, and reports `ok` with a
+  caveat rather than implying a protection that is not there. `governance` mode
+  logs a warning: a principal with `s3:BypassGovernanceRetention` is the same
+  set of people who could rewrite the chain.
+- **git-tag** -- an annotated tag carrying the record, pushed to a remote
+  somebody else can read. `push: false` is a local tag as rewritable as the
+  chain beside it, and the receipt says so.
+
+**Receipts go in the next checkpoint, never this one.** A receipt describes a
+record that has already been hashed and signed, so writing it back would change
+the hash the receipt is about. `previous_receipts` was a `[]` placeholder from
+week 1 and now carries them.
+
+**A failed publication never stops the chain and never disappears.** It lands
+in the `checkpoints` table, in the next checkpoint's payload, and in
+`qed doctor`.
+
+### Added - the maintenance pass (SPEC 10.4, 10.6)
+
+`qed/infra/maintenance.py`: checkpoint, publish, purge, in that order -- the
+order matters, because purging before the root is anchored would leave a window
+in which the payloads were gone and nothing outside the instance had attested
+to the hashes they produced.
+
+Run from the background loop every 30 seconds and from `qed checkpoint`.
+Nothing was doing any of it: `writer.checkpoint()` was reachable only from the
+CLI, so an instance nobody ran that command against had a chain with no
+anchors, and SPEC 10.4's "every 1,000 records or 3,600 s" was a threshold with
+no clock behind it.
+
+### Added - Prometheus `/metrics` (SPEC 18)
+
+The nine metrics SPEC 18 names, hand-rolled rather than via
+`prometheus_client` -- the set is fixed and small, and a client library
+registers process and GC collectors in a global registry at import, so
+`/metrics` on a policy kernel would start reporting the interpreter's
+internals. The tests **parse** the output, because a nearly-valid metrics
+endpoint is worse than an absent one: Prometheus drops the whole scrape on a
+parse error and reports it in its own logs rather than yours.
+
+Open, like the probes: a scraper is not an adapter and has no signing secret,
+and a bearer token in every Prometheus config is the arrangement that ends with
+monitoring switched off. Labels are bounded by construction -- a metric
+labelled with a proposal's own strings is a cardinality explosion an agent can
+trigger on purpose.
+
+### Added - OCSF events for a SIEM (SPEC 18)
+
+A `verdict` and an `approval_decided` map to **Authorization (3003)**;
+everything else to **API Activity (6003)**. Severity comes from what the
+decision *did*, not from the rule's severity: a CRITICAL rule that fired in
+shadow mode stopped nothing, and paging on it would train people to ignore the
+channel.
+
+Shipped by a bounded queue and one background thread, because a SIEM must never
+be able to slow down or fail a decision. At 10,000 events the **oldest** are
+dropped and counted -- dropping the newest would mean a burst hid itself -- and
+failures are counted rather than retried forever, because a webhook down for an
+hour has lost an hour of events and the operator needs to know.
+
+`observability` has been in `UNIMPLEMENTED_SECTIONS` since week 1, which means
+a config naming it was silently dropped. It is out of that list now.
+
+### Added - the perf suite (SPEC 18, 22 week 7)
+
+**p95 is 4.5 ms on SQLite and 10.6 ms on PostgreSQL**, against a 50 ms target.
+
+SPEC 22 also asks for "1k rps proposals", and a single Python replica does not
+reach it: ~250 decisions/s on SQLite, ~105/s on PostgreSQL. That is written
+down in `docs/performance.md` rather than quietly reinterpreted -- 1,000/s is
+four to ten replicas, which is what the PostgreSQL path exists for, and four
+replicas on one machine reach ~290/s so the scaling is real.
+
+ADR-0009's claim now has a number: one append on PostgreSQL is 4.4 ms direct
+and **1.6 ms deferred**, so the outbox is 2.8x cheaper and "decision latency is
+independent of chain latency" is a measurement rather than an argument.
+
+### Fixed - strict masking was eating two values the chain exists to carry
+
+Found by reasoning about two features built in the same week. The `strict`
+profile masks any hex run of 32+ characters and any base64 run of 40+, which
+ate a `key_rotated`'s `new_public_pem` and a checkpoint receipt's `sha256`.
+
+Masking runs **before** `payload_hash`, so neither is a verification failure:
+the record still verifies against its own hash, `qed-verify` reports OK, and
+the chain is internally consistent while having quietly lost the thing it was
+written to say. Same shape as the bug where masking rewrote sha256 digests and
+broke a checkpoint's Merkle root.
+
+The fix is by record type: `qed.core.schemas.STRUCTURAL_TYPES` is the five
+types whose payloads the kernel writes, and `build_record` does not mask them
+at all -- no agent wrote them, so there is nothing in them to redact. It is
+deliberately the same set retention may not purge, and `NEVER_PURGE` is now an
+alias for it.
+
+### Fixed - the background loop could not touch SQLite
+
+Broadening the loop to run maintenance exposed it. `asyncio.to_thread` uses a
+pool and a `sqlite3` connection may only be used by the thread that created it
+-- the API's was created by the event loop at startup -- so every maintenance
+tick on the default backend died with `ProgrammingError: SQLite objects created
+in a thread can only be used in that same thread`, in a log nobody reads. The
+drain never hit it because the drain only ever ran on PostgreSQL.
+
+The loop now runs on **one dedicated thread with its own session**, and
+`start()` requires the factory that opens it: sharing the caller's session
+works on PostgreSQL and fails on SQLite after the first read, so refusing up
+front is the difference between a mistake that is impossible and one that is
+merely unlikely.
+
+### Added - `evidence.signing_key`
+
+The config field existed since week 1 and was never read. It now names the
+private key wherever it is, which is what a container needs: the chain is on a
+writable volume or in a database, the key arrives from a read-only secret
+mount, and nesting one inside the other to satisfy a fixed filename works until
+a kubelet orders the mounts differently.
+
+### Changed - `qed checkpoint` runs a whole maintenance pass
+
+It checkpoints, publishes the root and applies retention, reporting each. The
+three are together because they have to happen in that order.
+
+### Changed - `qed doctor` reports the chain's housekeeping
+
+Retention (and what it *would* purge on the next pass), the configured anchors
+and the last publication, an interrupted rotation, and the SIEM target reduced
+to scheme, host and port -- that output ends up in support tickets, and a
+webhook URL often carries a token.
+
+`QedGroup.invoke` turns `InstanceMismatch` and `KeyDiscontinuity` into one red
+sentence for every command, on the group rather than in `main()`, because
+`main` is not the only way in: the test runner and anything embedding
+`qed.cli.app` invoke the group directly.
+
 ### Added - the outbox and one chain leader (SPEC 10.3, 15, 104; week 6)
 
 PostgreSQL made it possible to share a chain between replicas. This makes it

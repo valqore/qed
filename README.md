@@ -30,7 +30,7 @@ hardware, including air-gapped.
 
 ## Status
 
-**Weeks 1–6 of the §22 build order are complete.** What works today:
+**Weeks 1–7 of the §22 build order are complete.** What works today:
 
 | Capability | Entry point |
 |---|---|
@@ -54,11 +54,20 @@ hardware, including air-gapped.
 | **`qed check --server`** and `--evidence-out` for CI | `docs/ci.md` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
 | **Helm chart** and a two-replica compose stack | `deploy/helm/qed`, `deploy/docker-compose.yml` |
+| **Key rotation** (`qed keys rotate`), verifiable across the change | `qed/infra/keys/rotation.py` |
+| **Retention and purge**, with purge-then-verify | `qed/core/evidence/retention.py` |
+| **Checkpoint anchors**: file, S3 object-lock, git tag | `qed/infra/publishers/` |
+| **Prometheus `/metrics`** and **OCSF SIEM** events | `qed/api/routers/metrics.py`, `qed/infra/siem.py` |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint` | `qed/cli.py` |
 
 Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
 `mode: mitm` for the HTTP proxy, compliance packs beyond the baseline, and
 SPEC §19's live-stream and budget pages.
+
+**Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
+10.6 ms on PostgreSQL, against SPEC §18's 50 ms target. Throughput is ~250
+decisions/s per replica, so SPEC §22's "1k rps" is four to ten replicas rather
+than one — `docs/performance.md` has the numbers and says so plainly.
 
 ## Quick start
 
@@ -239,8 +248,9 @@ leaves the chain behind as an artifact anyone can check with the public key.
 5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
    `docs/assurance-classes.md`, `docs/policy-testing.md`.
-6. Running it: `docs/deployment.md` (process, container, Helm, HA) and
-   `docs/ci.md` (`qed check` in a pipeline).
+6. Running it: `docs/deployment.md` (process, container, Helm, HA),
+   `docs/ci.md` (`qed check` in a pipeline), `docs/checkpoints.md` (anchors),
+   `docs/siem.md` (OCSF) and `docs/performance.md` (what it actually costs).
 
 `ARCHITECTURE_PLAN.md` is **superseded**; only its §16 (Valqore site/README
 fixes) is still live, and that work belongs to the Valqore repos, not here.
