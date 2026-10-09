@@ -28,7 +28,14 @@
 # instance.
 
 # --------------------------------------------------------------------- build
-FROM python:3.12-slim-bookworm AS builder
+# The builder image, overridable only to point at a *mirror of the same
+# image*. Docker Hub's unauthenticated pull limit is per IP and shared, so CI
+# uses AWS's public mirror (`public.ecr.aws/docker/library/python:...`) and
+# gets identical content without credentials. It is not a knob for choosing a
+# different Python: the runtime copies this interpreter, and `qed` requires
+# 3.12.
+ARG BUILDER_IMAGE=python:3.12-slim-bookworm
+FROM ${BUILDER_IMAGE} AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \

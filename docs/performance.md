@@ -24,6 +24,33 @@ history, the budget and the dedupe window, and on PostgreSQL each is a network
 round trip rather than a local page read. The reason to use it is more than one
 replica, not speed.
 
+### The budget depends on the disk
+
+On a GitHub Actions **Windows** runner the same test reports:
+
+| | p50 | p95 | p99 |
+|---|---|---|---|
+| SQLite, GitHub Windows runner | 20.2 ms | **105.5 ms** | 265 ms |
+
+Four times the budget, with nothing changed but the hardware. The cause is not
+subtle: SQLite's `BEGIN IMMEDIATE` is one `fsync` per append, a decision is two
+appends, and on that runner's virtual disk an `fsync` costs about 10 ms.
+Everything else — hashing, signing, evaluating 46 rules — is under a
+millisecond.
+
+So **the 50 ms budget is a claim about storage, not about Python**, and it is
+worth stating plainly rather than hiding behind a green CI badge:
+
+* on any machine with a real SSD, p95 is ~5 ms and there is a 10x margin;
+* on slow or heavily shared storage it can exceed 50 ms, and the fix is the
+  disk or the PostgreSQL path, not the kernel;
+* `qed_decision_latency_seconds` in `/metrics` is how you find out which you
+  have. It measures the same span this page does.
+
+This is why the timing tests are marked `perf` and excluded from the matrix
+cells (`pytest -m "not slow and not perf"`). A number that four parallel jobs
+on one shared runner produce is a measurement of the runner.
+
 ## Throughput, and a number the spec gets wrong
 
 SPEC §22's week-7 row asks for "1k rps proposals". **A single Python replica
@@ -98,7 +125,9 @@ QED_TEST_POSTGRES_DSN=postgresql://... \
 
 `-s` because the distributions are printed. `pytest -m "not perf"` skips them,
 which is what the main matrix cells do — a timing assertion on four parallel
-jobs on one runner measures the runner.
+jobs on one runner measures the runner. CI runs them once, in the `postgres`
+job, which is the only one with a database and so covers both backends in one
+pass.
 
 The thresholds are deliberately loose: a floor of 80 decisions/s against a
 measured 250, and p95 against 50 ms with a measured 4.5. A test that fails at

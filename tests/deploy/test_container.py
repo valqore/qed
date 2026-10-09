@@ -74,6 +74,14 @@ class TestWhatTheDockerfileSays:
         assert "USER 65532:65532" in text
         assert "USER root" not in text
 
+    def test_the_builder_image_is_pinned_to_a_version(self) -> None:
+        """The `BUILDER_IMAGE` arg exists to point at a *mirror*, not to choose
+        a different Python: the runtime copies this interpreter and `qed`
+        requires 3.12, so a default that did not name the version would make
+        the ABI mismatch this file exists for possible again."""
+        text = dockerfile()
+        assert "ARG BUILDER_IMAGE=python:3.12-" in text
+
     def test_the_build_tools_are_not_in_the_shipped_image(self) -> None:
         """pip and a compiler must not be in the runtime stage."""
         text = dockerfile()
@@ -143,9 +151,24 @@ def image(tmp_path_factory: pytest.TempPathFactory) -> str:
     than a warning -- reported against whichever test happened to be running.
     """
     log = tmp_path_factory.mktemp("docker") / "build.log"
+    # CI points this at AWS's mirror of the same official image, because Docker
+    # Hub's unauthenticated pull limit is per runner IP and shared -- a failure
+    # that looks like ours and is not.
+    mirror = os.environ.get("QED_BUILDER_IMAGE")
+    build_args = ["--build-arg", f"BUILDER_IMAGE={mirror}"] if mirror else []
+    command = [
+        "docker",
+        "build",
+        *build_args,
+        "-f",
+        str(DOCKERFILE),
+        "-t",
+        TAG,
+        str(REPO),
+    ]
     with log.open("wb") as sink:
         build = subprocess.run(
-            ["docker", "build", "-f", str(DOCKERFILE), "-t", TAG, str(REPO)],
+            command,
             stdout=sink,
             stderr=subprocess.STDOUT,
             check=False,
