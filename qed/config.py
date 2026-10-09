@@ -45,9 +45,35 @@ UNIMPLEMENTED_SECTIONS = (
 
 
 class EvidenceConfig(Frozen):
+    #: Where the chain lives. Unset or ``sqlite`` means the file in the state
+    #: directory; a ``postgresql://`` URL means that server (SPEC §15).
+    #:
+    #: A URL here carries a password, so it may instead name an environment
+    #: variable: ``store_env: QED_DATABASE_URL``. A config file is a file
+    #: somebody commits, and the credential-broker reasoning applies to the
+    #: store's own credential too.
     store: str | None = None
+    #: Environment variable holding the connection URL. Wins over `store`.
+    store_env: str | None = None
     signing_key: str | None = None
     masking: MaskingProfile = "default"
+
+    @property
+    def is_postgres(self) -> bool:
+        return (self.resolved_store() or "").startswith(("postgresql://", "postgres://"))
+
+    def resolved_store(self) -> str | None:
+        """The connection URL, from the environment when one is named.
+
+        Returns None for the default SQLite file. Raises nothing: an unset
+        variable is reported by the caller, which can say which key was
+        expected and where it was configured.
+        """
+        import os
+
+        if self.store_env:
+            return os.environ.get(self.store_env) or ""
+        return self.store
 
 
 class AdapterCredential(Frozen):

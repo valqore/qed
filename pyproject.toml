@@ -64,6 +64,13 @@ dev = [
 ui = [
     "qed-ui>=0.1",
 ]
+# SPEC 20.3. Postgres is for more than one replica sharing a chain (SPEC 15);
+# SQLite needs nothing and runs the whole product on one machine, which is why
+# this is an extra and not a dependency. `[binary]` so an install needs no
+# compiler.
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 
 [project.scripts]
 qed = "qed.cli:main"

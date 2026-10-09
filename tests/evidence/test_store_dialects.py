@@ -1,0 +1,170 @@
+"""The dialect seam's own invariants (SPEC §15).
+
+The store writes its SQL with ``?`` and converts it for psycopg on the way to
+the driver. That is a sound trick with exactly one way to go wrong: a literal
+``?`` inside a quoted SQL string would be rewritten into ``%s`` and the
+statement would change meaning. This file holds that line, and a few others
+about the seam that would otherwise be comments nobody checks.
+
+No database needed. These are properties of the source.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+
+import pytest
+
+from qed.infra.storage import dialect as dialect_module
+from qed.infra.storage.dialect import CHAIN_LOCK_KEY, POSTGRES, SQLITE, migrations
+
+STORE = Path(__file__).resolve().parents[2] / "qed" / "infra" / "storage" / "store.py"
+
+
+def sql_literals(path: Path) -> list[tuple[int, str]]:
+    """Every string constant in the module that looks like SQL."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    keywords = re.compile(
+        r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|BEGIN|COMMIT|ROLLBACK)\b",
+        re.IGNORECASE,
+    )
+    return [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and keywords.search(node.value)
+    ]
+
+
+class TestThePlaceholderConversionIsSafe:
+    def test_the_scan_finds_the_sql(self) -> None:
+        """Guards the test below against passing because it found nothing."""
+        found = sql_literals(STORE)
+        assert len(found) > 20, len(found)
+
+    def test_no_sql_string_contains_a_quoted_question_mark(self) -> None:
+        """The one thing that would make ``?`` -> ``%s`` wrong.
+
+        ``WHERE note = 'why?'`` would become ``WHERE note = 'why%s'`` and bind
+        a parameter into the middle of a literal.
+        """
+        offenders = [
+            (line, text)
+            for line, text in sql_literals(STORE)
+            if re.search(r"'[^']*\?[^']*'|\"[^\"]*\?[^\"]*\"", text)
+        ]
+        assert not offenders, offenders
+
+    def test_no_sql_string_already_uses_percent_s(self) -> None:
+        """It would be converted a second time and bind twice."""
+        offenders = [(line, text) for line, text in sql_literals(STORE) if "%s" in text]
+        assert not offenders, offenders
+
+    def test_sqlite_conversion_is_the_identity(self) -> None:
+        sql = "SELECT * FROM evidence WHERE seq = ? AND type = ?"
+        assert SQLITE.convert(sql) == sql
+
+    def test_postgres_conversion_replaces_every_placeholder(self) -> None:
+        sql = "SELECT * FROM evidence WHERE seq = ? AND type = ?"
+        assert POSTGRES.convert(sql) == "SELECT * FROM evidence WHERE seq = %s AND type = %s"
+
+    def test_a_statement_with_no_parameters_is_untouched(self) -> None:
+        sql = "SELECT MAX(seq) AS m FROM evidence"
+        assert POSTGRES.convert(sql) == sql
+
+
+class TestTheMigrationsAreShared:
+    def test_there_is_one_set(self) -> None:
+        """Not one directory per dialect. The week-1 scripts sit in the SQL
+        subset both engines accept, which was replayed against a real
+        PostgreSQL 17 rather than taken on trust."""
+        scripts = migrations()
+        assert [s.name for s in scripts] == [
+            "0001_init.sql",
+            "0002_budget.sql",
+            "0003_mandates.sql",
+            "0004_approvals.sql",
+        ]
+
+    def test_they_are_ordered_by_name(self) -> None:
+        """The ``schema_migrations`` ledger records the file name, so name
+        order is what makes an existing database's ledger still match."""
+        names = [s.name for s in migrations()]
+        assert names == sorted(names)
+
+    @pytest.mark.parametrize("script", migrations(), ids=lambda p: p.name)
+    def test_no_script_uses_a_dialect_only_construct(self, script: Path) -> None:
+        """A short list of the ones that have actually bitten people.
+
+        Not a SQL parser: the point is to make the next author stop and think
+        about the second backend, which a failing test does and a comment at
+        the top of the file demonstrably did not.
+        """
+        text = script.read_text(encoding="utf-8").upper()
+        forbidden = {
+            "AUTOINCREMENT": "SQLite only; Postgres uses GENERATED or a sequence",
+            "SERIAL": "Postgres only",
+            "WITHOUT ROWID": "SQLite only",
+            "INSERT OR ": "SQLite only; both accept ON CONFLICT",
+            "JSONB": "Postgres only",
+            "DATETIME(": "SQLite only",
+            "NOW()": "Postgres only; the store passes timestamps in as TEXT",
+            "CURRENT_TIMESTAMP": "formats differently, and `ts` is hashed",
+        }
+        hits = {token: why for token, why in forbidden.items() if token in text}
+        assert not hits, f"{script.name}: {hits}"
+
+
+class TestTheChainLockKey:
+    def test_it_is_the_value_spec_15_names(self) -> None:
+        assert CHAIN_LOCK_KEY == 0x67617465 == 1734440037
+
+    def test_the_comment_says_what_the_bytes_actually_spell(self) -> None:
+        """They spell "gate", the product's former name.
+
+        The rename pass rewrote the spec's comment to claim "qed", which those
+        bytes are not. The number stayed and the comment was corrected, because
+        changing the lock id is not cosmetic: two replicas on different
+        versions would take two different locks, both would believe they were
+        leader, and both would assign ``seq``.
+        """
+        assert CHAIN_LOCK_KEY.to_bytes(4, "big") == b"gate"
+        source = Path(dialect_module.__file__).read_text(encoding="utf-8")
+        assert '"gate"' in source
+        assert "the lock id must never change" in source
+
+    def test_migrating_uses_a_different_key_from_appending(self) -> None:
+        """Holding one must not imply holding the other: a replica applying a
+        migration is not a replica that may append to the chain."""
+        source = Path(dialect_module.__file__).read_text(encoding="utf-8")
+        del source  # the keys themselves are what matter
+        from qed.infra.storage import postgres
+
+        used = Path(postgres.__file__).read_text(encoding="utf-8")
+        assert "CHAIN_LOCK_KEY + 1" in used
+        assert "pg_advisory_xact_lock" in used
+
+
+class TestTheDialectsDisagreeAboutLittle:
+    def test_both_begin_a_write_somehow(self) -> None:
+        assert SQLITE.begin_write == "BEGIN IMMEDIATE"
+        assert POSTGRES.begin_write == "BEGIN"
+
+    def test_only_postgres_runs_a_script_in_one_call(self) -> None:
+        assert POSTGRES.script_in_one_call is True
+        assert SQLITE.script_in_one_call is False
+
+    def test_the_whole_dialect_is_four_fields(self) -> None:
+        """If this grows, the seam is leaking and the two backends are
+        drifting into two implementations."""
+        from dataclasses import fields
+
+        assert {f.name for f in fields(SQLITE)} == {
+            "name",
+            "placeholder",
+            "begin_write",
+            "script_in_one_call",
+        }

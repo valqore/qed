@@ -92,6 +92,9 @@ jobs:
       - name: Types
         run: mypy
 
+      # No QED_TEST_POSTGRES_DSN here on purpose: these cells prove the
+      # product works with psycopg *not installed*, which is how almost
+      # everyone will run it. The `postgres` job below covers the other half.
       - name: Tests
         run: pytest -q
 
@@ -330,3 +333,77 @@ jobs:
 
           test ! -f PATENT-AND-LICENCE-QED.md
           echo "ok: Apache-2.0, both projects, one licence text"
+
+  # The Postgres backend (SPEC 15). Its own job rather than a matrix cell,
+  # because service containers run only on Linux runners and a conditional
+  # `image:` on the Windows cells would depend on how the runner reads an
+  # unset expression. One job that says what it does is worth more than one
+  # matrix that needs explaining.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: qed-ci
+          POSTGRES_DB: qed_test
+        ports:
+          - 5432:5432
+        # Without the health check the job races the server's startup, and the
+        # first connection fails on a cold image pull.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      QED_TEST_POSTGRES_DSN: postgresql://postgres:qed-ci@127.0.0.1:5432/qed_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install, with the postgres extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]" -e packages/qed-verify
+
+      # The whole suite, not only the cross-backend file: every test that
+      # touches the store now runs its SQLite path with psycopg importable,
+      # which is the combination a Postgres deployment actually has.
+      - name: Tests
+        run: pytest -q
+
+      # A test that skips itself proves nothing, and the DSN plumbing is
+      # exactly the kind of wiring that silently stops working.
+      - name: The Postgres tests really ran
+        run: |
+          set -euo pipefail
+          pytest tests/evidence/test_cross_backend.py -q -p no:cacheprovider | tee /tmp/pg.txt
+          grep -qE "[0-9]+ passed" /tmp/pg.txt
+          if grep -q skipped /tmp/pg.txt; then
+            echo "they skipped: QED_TEST_POSTGRES_DSN is not reaching them" >&2
+            exit 1
+          fi
+
+      # The product, not just the store: decide a proposal against Postgres,
+      # export it, and verify the export with the standalone verifier, which
+      # has never heard of either backend.
+      - name: A chain written to Postgres verifies
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pg-e2e
+          printf 'instance_id: qed-ci-pg\nmode: enforce\nevidence:\n  store_env: QED_DATABASE_URL\n' \
+            > /tmp/pg-e2e/qed.yaml
+          export QED_DATABASE_URL="$QED_TEST_POSTGRES_DSN"
+          qed keys init --dir /tmp/pg-e2e/qed
+          qed check examples/proposals/prod-db-drop.json \
+            --dir /tmp/pg-e2e/qed --config /tmp/pg-e2e/qed.yaml || true
+          qed export --dir /tmp/pg-e2e/qed --config /tmp/pg-e2e/qed.yaml > /tmp/pg-e2e/chain.jsonl
+          test -s /tmp/pg-e2e/chain.jsonl
+          qed-verify /tmp/pg-e2e/chain.jsonl --keys /tmp/pg-e2e/qed/public

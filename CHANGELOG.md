@@ -6,6 +6,76 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - the PostgreSQL backend (SPEC 15, week 6)
+
+```yaml
+evidence:
+  store_env: QED_DATABASE_URL
+```
+
+SQLite stays the default and runs the whole product on one file. Postgres is
+for the one thing SQLite cannot do: more than one replica sharing a chain.
+
+**One store implementation, not two.** The forty repository methods are written
+once and run against either backend. Two classes would be two implementations
+of the chain's append path, and the day they drift is the day the chain behaves
+differently depending on which database somebody deployed. What made that
+practical is that the two drivers already agree about more than expected --
+both expose `execute(sql, params) -> cursor` and both return rows addressable
+by column name -- so `qed/infra/storage/dialect.py` has four fields in it and a
+test asserts it stays that small.
+
+- **The migrations are shared, and that was checked rather than assumed.** The
+  week-1 scripts carry a comment claiming they sit in the SQL subset both
+  engines accept. All four were replayed against a real PostgreSQL 17 before
+  the seam was written, and they do -- so there is one set of files and no
+  per-dialect directory.
+- The SQL is written with `?` and converted for psycopg.
+  `tests/evidence/test_store_dialects.py` asserts no SQL string contains a
+  quoted `?`, which is the one thing that would make the conversion change a
+  statement's meaning.
+- Timestamps stay TEXT on both, in the format the record already carries.
+  `ts` is hashed, so a native timestamp column would let the backend's own
+  precision change the bytes.
+- `pg_try_advisory_lock(1734440037)` for the chain leader, non-blocking, with
+  `try_become_leader` / `holds_leadership` / `resign_leadership`. The lock is
+  session-scoped so a crashed replica releases it, which is the liveness signal
+  a leader election needs; a lease in a table would need a heartbeat, a clock,
+  and a decision about what to do when the clock is wrong.
+- Migrations take a *different* advisory key, transaction-scoped. Two replicas
+  starting together would otherwise both run `0001` and the loser's ledger
+  insert would fail, crashing a replica during an ordinary rollout. Holding one
+  key must not imply holding the other: a replica applying a migration is not a
+  replica that may append.
+- `psycopg` is an optional extra (`[postgres]`) and asking for Postgres without
+  it says what to install. The matrix jobs deliberately run with it *absent*,
+  which is how almost everyone will run the product; a separate `postgres` job
+  installs it and the service container.
+
+### Fixed - genesis was the one record whose clock nothing could pin
+
+`ChainWriter.ensure_genesis()` took `utcnow()` with no way to override it,
+while every other write path accepts a `ts` precisely so a caller can be
+deterministic. Since every later `prev_hash` descends from genesis, that made a
+whole chain irreproducible from its inputs.
+
+`tests/evidence/test_cross_backend.py` is what noticed: the two backends
+produced identical records and different chains, because genesis had taken its
+own clock eight milliseconds apart on the two runs. `ensure_genesis(ts=...)`
+now exists and `append` passes its own `ts` through, so pinning the first
+record pins the genesis before it.
+
+### Changed - `SqliteStore` moved to `qed/infra/storage/store.py`
+
+It gained a sibling, so it lives beside `SqlStore` and `PostgresStore`.
+`qed/infra/storage/sqlite.py` re-exports it: fifteen modules import it from
+that path and renaming them all would have been churn with no reader benefit.
+`ChainWriter` and `Session` are typed on `SqlStore` now rather than the SQLite
+one.
+
+37 new tests. 1,805 with Postgres running, 1,788 with it skipped.
+
+
 ### Added - the Python SDK (SPEC 12.4, week 6)
 
 ```python

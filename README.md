@@ -37,7 +37,7 @@ hardware, including air-gapped.
 | Domain model (`ActionProposal`, `Verdict`, `EvidenceRecord`, mandates, budgets) | `qed/core/schemas.py` |
 | RFC 8785 (JCS) canonical JSON | `qed/core/jcs.py` |
 | Hash chain, Ed25519 signing, Merkle checkpoints | `qed/core/evidence/` |
-| Evidence ledger on SQLite | `qed/infra/storage/sqlite.py` |
+| Evidence ledger on **SQLite or PostgreSQL**, one implementation | `qed/infra/storage/` |
 | Policy loader, linter, predicates, engine | `qed/core/policy/` |
 | Deterministic blast-radius score (0–100) | `qed/core/policy/blast_radius.py` |
 | Baseline pack, 46 rules | `qed/core/policy/packs/agent-baseline/` |
@@ -52,9 +52,9 @@ hardware, including air-gapped.
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint` | `qed/cli.py` |
 
-Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2), Postgres
-and the chain leader/outbox, Helm, `mode: mitm` for the HTTP proxy, compliance
-packs beyond the baseline, and SPEC §19's live-stream and budget pages.
+Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2), the chain
+leader's outbox drain, Helm, `mode: mitm` for the HTTP proxy, compliance packs
+beyond the baseline, and SPEC §19's live-stream and budget pages.
 
 ## Quick start
 
@@ -143,6 +143,35 @@ connection may be opened, but the request inside it is encrypted, so it cannot
 replace the credential and the agent is using its own. Plain HTTP is fully
 visible and fully brokered.
 
+### Run it on Postgres
+
+```yaml
+# qed.yaml
+evidence:
+  store_env: QED_DATABASE_URL     # a URL has a password; name the variable
+```
+
+```bash
+pip install 'valqore-qed[postgres]'
+export QED_DATABASE_URL=postgresql://user:pass@host/qed
+qed keys init && qed serve
+```
+
+SQLite is the default and runs the whole product on one file. Postgres is for
+the case SQLite genuinely cannot serve: **more than one replica sharing a
+chain**, with exactly one of them holding `pg_try_advisory_lock` and appending
+(SPEC §15).
+
+It is **one store implementation, not two.** Forty repository methods are
+written once and run against either backend, because two copies would be two
+implementations of the chain's append path and the day they drifted is the day
+the chain behaved differently depending on which database somebody deployed.
+`tests/evidence/test_cross_backend.py` writes the same records to both and
+asserts every hash, signature and payload matches byte for byte — because if
+they did not, an export from a Postgres deployment would fail verification
+against records written on SQLite, and nobody would notice until an auditor
+did.
+
 ### Run the API
 
 ```bash
@@ -186,6 +215,8 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 | The hook never emits `allow`, and never exits 1 | `tests/adapters/test_claude_code_hook.py` |
 | `import qed.sdk` loads no web framework | `tests/sdk/test_sdk_is_light.py` |
 | One signing implementation, shared by signer and verifier | `tests/sdk/test_sdk_is_light.py` |
+| SQLite and PostgreSQL produce byte-identical chains | `tests/evidence/test_cross_backend.py` |
+| No SQL string breaks the `?` → `%s` conversion | `tests/evidence/test_store_dialects.py` |
 | An adapter's `execution_result` records the enforcement its proposal did | `tests/adapters/http_proxy/test_proxy_e2e.py` |
 | The OSCAL export validates against the NIST schema | `tests/evidence/test_oscal_schema.py` |
 | Tool-call classification imports nothing that can fail | `tests/adapters/test_import_boundary.py` |

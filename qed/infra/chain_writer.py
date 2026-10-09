@@ -29,7 +29,7 @@ from qed.core.schemas import (
     SigningKeyInfo,
     utcnow,
 )
-from qed.infra.storage.sqlite import SqliteStore
+from qed.infra.storage.store import SqlStore
 
 __all__ = ["ChainWriter", "InstanceMismatch", "signer_info"]
 
@@ -44,7 +44,7 @@ class InstanceMismatch(RuntimeError):
 class ChainWriter:
     def __init__(
         self,
-        store: SqliteStore,
+        store: SqlStore,
         signer: Signer,
         *,
         instance_id: str,
@@ -68,8 +68,17 @@ class ChainWriter:
 
     # ------------------------------------------------------------------ append
 
-    def ensure_genesis(self) -> EvidenceRecord | None:
-        """Write record 0 if the chain is empty. Returns it, or None."""
+    def ensure_genesis(self, *, ts: datetime | None = None) -> EvidenceRecord | None:
+        """Write record 0 if the chain is empty. Returns it, or None.
+
+        ``ts`` for the same reason every other write path takes one: so a
+        caller can be deterministic. Without it genesis was the one record
+        whose timestamp nothing could pin, which made a whole chain
+        irreproducible from its inputs -- every later ``prev_hash`` descends
+        from it. `tests/evidence/test_cross_backend.py` is what noticed:
+        the two backends produced identical records and different chains,
+        because genesis had taken its own clock eight milliseconds apart.
+        """
         if self.store.last_seq() is not None:
             return None
         return self._append(
@@ -79,6 +88,7 @@ class ChainWriter:
                 "instance_id": self.instance_id,
                 "chain_format": CHAIN_FORMAT,
             },
+            ts=ts,
         )
 
     def append(
@@ -94,7 +104,10 @@ class ChainWriter:
         principal_hash: str | None = None,
         ts: datetime | None = None,
     ) -> EvidenceRecord:
-        self.ensure_genesis()
+        # The same `ts`, so a caller who pins the first record's clock pins the
+        # genesis before it too. They are two records written in one call and
+        # it would be odd for one to be reproducible and the other not.
+        self.ensure_genesis(ts=ts)
         return self._append(
             type_=type_,
             assurance=assurance,

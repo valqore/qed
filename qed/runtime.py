@@ -43,7 +43,7 @@ from qed.core.schemas import (
 )
 from qed.infra.chain_writer import ChainWriter
 from qed.infra.keys.file import PUBLIC_DIR_NAME, FileSigner, load_signer
-from qed.infra.storage.sqlite import SqliteStore
+from qed.infra.storage.store import SqliteStore, SqlStore
 
 __all__ = [
     "CheckOutcome",
@@ -52,6 +52,7 @@ __all__ = [
     "Session",
     "check_proposal",
     "open_session",
+    "open_store",
 ]
 
 DB_NAME = "qed.db"
@@ -72,7 +73,7 @@ class Session:
     config: QedConfig
     loaded_config: LoadedConfig
     directory: Path
-    store: SqliteStore
+    store: SqlStore
     signer: FileSigner
     writer: ChainWriter
     bundle: PolicyBundle
@@ -84,6 +85,27 @@ class Session:
 
     def close(self) -> None:
         self.store.close()
+
+
+def open_store(config: QedConfig, directory: Path) -> SqlStore:
+    """SQLite by default, Postgres when `evidence.store` names a server.
+
+    SQLite is the default because a product that needs a database server to be
+    tried is a product fewer people try, and the whole decision path works on
+    one file. Postgres is for the case SQLite genuinely cannot serve: more than
+    one replica sharing a chain (SPEC §15).
+    """
+    url = config.evidence.resolved_store()
+    if not url or url == "sqlite":
+        return SqliteStore(directory / DB_NAME)
+    if url.startswith(("postgresql://", "postgres://")):
+        from qed.infra.storage.postgres import PostgresStore
+
+        return PostgresStore(url)
+    raise ValueError(
+        f"`evidence.store` is {url!r}, which is neither `sqlite` nor a postgresql:// URL. "
+        "Leave it unset for the file in the state directory."
+    )
 
 
 def open_session(
@@ -104,7 +126,7 @@ def open_session(
     loaded = load_config(config_path)
     config = loaded.config
 
-    store = SqliteStore(directory / DB_NAME)
+    store = open_store(config, directory)
     # Everything from here on can fail — a missing signing key, a chain that
     # belongs to another instance, a policy error. The store has to be closed on
     # every one of those paths or the CLI leaks a file handle per invocation.
