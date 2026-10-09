@@ -168,3 +168,55 @@ class TestTheDialectsDisagreeAboutLittle:
             "begin_write",
             "script_in_one_call",
         }
+
+
+class TestAskingForPostgresWithoutTheExtra:
+    """The message an operator sees, in the configuration most of them have.
+
+    `psycopg` is an optional extra, so this path fires on any install that did
+    not ask for it -- including most CI cells. Absence is simulated rather than
+    assumed, so the test says the same thing whether or not the extra happens
+    to be installed in the environment running it.
+    """
+
+    def hide_psycopg(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import sys
+
+        # A None in sys.modules makes `import psycopg` raise ImportError,
+        # which is what an install without the extra does.
+        monkeypatch.setitem(sys.modules, "psycopg", None)
+
+    def test_it_says_what_to_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from qed.infra.storage.postgres import PostgresStore, PostgresUnavailable
+
+        self.hide_psycopg(monkeypatch)
+        with pytest.raises(PostgresUnavailable, match=r"valqore-qed\[postgres\]"):
+            PostgresStore("postgresql://user:pass@host/db")
+
+    def test_it_says_sqlite_needs_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """So the reader knows they have a choice, not a blocker."""
+        from qed.infra.storage.postgres import PostgresStore, PostgresUnavailable
+
+        self.hide_psycopg(monkeypatch)
+        with pytest.raises(PostgresUnavailable, match="SQLite needs nothing"):
+            PostgresStore("postgresql://user:pass@host/db")
+
+    def test_it_is_not_a_traceback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """You wrote the connection string and deserve to be told, not shown a
+        missing-module stack."""
+        from qed.infra.storage.postgres import PostgresStore, PostgresUnavailable
+
+        self.hide_psycopg(monkeypatch)
+        with pytest.raises(PostgresUnavailable) as caught:
+            PostgresStore("postgresql://user:pass@host/db")
+        assert not isinstance(caught.value, ImportError)
+
+    def test_the_dsn_is_never_echoed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """It carries a password, and this message lands in logs and in
+        `qed doctor` output."""
+        from qed.infra.storage.postgres import PostgresStore, PostgresUnavailable
+
+        self.hide_psycopg(monkeypatch)
+        with pytest.raises(PostgresUnavailable) as caught:
+            PostgresStore("postgresql://user:sup3rsecret@host/db")
+        assert "sup3rsecret" not in str(caught.value)

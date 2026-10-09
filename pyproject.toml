@@ -106,6 +106,16 @@ mypy_path = "packages/qed-verify"
 module = ["ulid.*", "regex.*", "yaml.*"]
 ignore_missing_imports = true
 
+# `psycopg` is an optional extra, so most CI cells type-check without it
+# installed -- which is the configuration almost every deployment has, and the
+# one those cells exist to prove works. Without this, `mypy` fails there and
+# passes on the one job that happens to have the extra, which is the worst way
+# round. `strict` still applies to everything we wrote; this only says the
+# module may be absent.
+[[tool.mypy.overrides]]
+module = ["psycopg", "psycopg.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/qed-verify/tests"]
 pythonpath = [".", "packages/qed-verify"]
