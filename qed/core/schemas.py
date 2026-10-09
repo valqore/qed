@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import (
     AfterValidator,
@@ -133,6 +133,42 @@ class EvidenceType(StrEnum):
     correction = "correction"
     checkpoint = "checkpoint"
     admin_action = "admin_action"
+
+
+#: Record types whose payload is part of how the chain is *read*, rather than
+#: data the chain happens to carry.
+#:
+#: Each one holds something that cannot be recovered from anywhere else:
+#:
+#: * ``genesis`` -- the chain's identity;
+#: * ``policy_loaded`` -- the rules that were in force, which every verdict's
+#:   ``policy_hash`` refers to;
+#: * ``checkpoint`` -- the Merkle root, and the receipts proving where it was
+#:   published;
+#: * ``key_rotated`` -- the incoming public key, which is how an auditor
+#:   holding only the old one follows the chain across a rotation;
+#: * ``admin_action`` -- the record of what the instance did to itself,
+#:   including which payloads it purged.
+#:
+#: Two consequences follow, and they are deliberately the same set:
+#:
+#: * **retention never purges these payloads** (SPEC §10.6). Clearing a Merkle
+#:   root makes that checkpoint permanently uncheckable, and erasing the record
+#:   of a purge erases the record of what was erased.
+#: * **masking never runs over them** (SPEC §10.9). They are produced by the
+#:   kernel, not by an agent, so there is nothing in them to redact -- and the
+#:   ``strict`` profile's blob patterns would otherwise eat a public key PEM
+#:   and the sha256 in a publication receipt, destroying exactly the values
+#:   those records exist to carry.
+STRUCTURAL_TYPES: Final[frozenset[EvidenceType]] = frozenset(
+    {
+        EvidenceType.genesis,
+        EvidenceType.policy_loaded,
+        EvidenceType.checkpoint,
+        EvidenceType.key_rotated,
+        EvidenceType.admin_action,
+    }
+)
 
 
 Scope = Literal["single_resource", "multi_resource", "account", "global"]

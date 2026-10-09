@@ -19,6 +19,7 @@ from qed.core.evidence.masking import MaskingProfile, mask_payload
 from qed.core.evidence.signing import Signer
 from qed.core.schemas import (
     SCHEMA_VERSION,
+    STRUCTURAL_TYPES,
     Assurance,
     Enforcement,
     EvidenceRecord,
@@ -52,7 +53,17 @@ def build_record(
     if collisions:
         raise ValueError(f"payload may not use reserved keys: {sorted(collisions)}")
 
-    masked = mask_payload(payload, masking)
+    # Structural records are not masked at all. Their payloads are produced by
+    # the kernel rather than by an agent, so there is nothing in them to
+    # redact -- and the `strict` profile would eat the values they exist to
+    # carry: a `key_rotated`'s public key PEM looks like a base64 blob, and a
+    # checkpoint receipt's sha256 looks like a hex blob. Redacting either
+    # leaves a record that still verifies against its own hash and no longer
+    # says the one thing it was written to say.
+    if type_ in STRUCTURAL_TYPES:
+        masked: object = dict(payload)
+    else:
+        masked = mask_payload(payload, masking)
     if not isinstance(masked, dict):  # pragma: no cover - mask_payload preserves dicts
         raise TypeError("masked payload is not a mapping")
 

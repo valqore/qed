@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Final
 
-from qed.core.schemas import EvidenceRecord, EvidenceType
+from qed.core.schemas import STRUCTURAL_TYPES, EvidenceRecord, EvidenceType
 
 __all__ = [
     "NEVER_PURGE",
@@ -49,18 +49,12 @@ __all__ = [
     "purgeable_types",
 ]
 
-#: Record types whose payload is part of how the chain is read, rather than
-#: data the chain happens to carry. See the module docstring: each one has a
-#: specific thing that becomes permanently unknowable without it.
-NEVER_PURGE: Final[frozenset[EvidenceType]] = frozenset(
-    {
-        EvidenceType.genesis,
-        EvidenceType.checkpoint,
-        EvidenceType.key_rotated,
-        EvidenceType.policy_loaded,
-        EvidenceType.admin_action,
-    }
-)
+#: The structural record types, under the name retention cares about. One set,
+#: defined in :data:`qed.core.schemas.STRUCTURAL_TYPES`, because the reason
+#: these payloads may not be purged is the same reason they are not masked:
+#: they are how the chain is read, not data it happens to carry. Two lists
+#: would be two lists to keep in step.
+NEVER_PURGE: Final[frozenset[EvidenceType]] = STRUCTURAL_TYPES
 
 
 @dataclass(frozen=True)
