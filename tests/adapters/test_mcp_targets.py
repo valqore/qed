@@ -1,4 +1,4 @@
-"""Target derivation (``gate/adapters/mcp/targets.py``).
+"""Target derivation (``qed/adapters/mcp/targets.py``).
 
 ``action.target`` is what ``target_globs`` in a policy rule matches on, and the
 values come from tool arguments, which are attacker-influenced. The two things
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.adapters.mcp.targets import (
+from qed.adapters.mcp.targets import (
     DEFAULT_TEMPLATE,
     MISSING,
     TemplateError,
@@ -141,7 +141,7 @@ class TestValidation:
         ["", "   ", "db:{enviroment}", "db:{args}", "db:{", "db:}", "db:{Args.table}"],
     )
     def test_a_bad_template_is_refused_at_startup(self, template: str) -> None:
-        """A typo in gate.yaml must not be found halfway through a session."""
+        """A typo in qed.yaml must not be found halfway through a session."""
         with pytest.raises(TemplateError):
             validate_template(template)
 

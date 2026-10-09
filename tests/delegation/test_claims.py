@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from gate.core.delegation.claims import (
+from qed.core.delegation.claims import (
     ChainTooDeep,
     NarrowingViolation,
     TokenClaims,
@@ -19,7 +19,7 @@ from gate.core.delegation.claims import (
     validate_claims,
     verify,
 )
-from gate.core.schemas import Budget
+from qed.core.schemas import Budget
 
 NOW = datetime.fromisoformat("2026-10-08T12:00:00+00:00")
 ISSUERS = frozenset({"https://idp.example"})
@@ -27,7 +27,7 @@ ISSUERS = frozenset({"https://idp.example"})
 BASE: dict[str, Any] = {
     "iss": "https://idp.example",
     "sub": "ali@example.com",
-    "aud": "gate",
+    "aud": "qed",
     "exp": NOW + timedelta(minutes=30),
     "iat": NOW,
     "jti": "01JB000000000000000000JTI0",
@@ -53,7 +53,7 @@ class TestValidateClaims:
             validate_claims(claims(aud="some-other-api"), now=NOW, issuers=ISSUERS)
 
     def test_an_audience_list_containing_gate_is_accepted(self) -> None:
-        validate_claims(claims(aud=["other", "gate"]), now=NOW, issuers=ISSUERS)
+        validate_claims(claims(aud=["other", "qed"]), now=NOW, issuers=ISSUERS)
 
     def test_an_expired_token_is_refused(self) -> None:
         with pytest.raises(TokenVerificationError, match="expired"):

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from gate.core.budget import Charge, apply_charge, charge_for, newly_exhausted
-from gate.core.schemas import Budget, BudgetState
+from qed.core.budget import Charge, apply_charge, charge_for, newly_exhausted
+from qed.core.schemas import Budget, BudgetState
 from tests.conftest import make_proposal
 
 NOW = datetime.fromisoformat("2026-10-07T12:00:00+00:00")

@@ -1,8 +1,8 @@
-# Valqore Gate
+# Valqore QED
 
 A self-hosted policy and evidence kernel for AI-agent actions.
 
-An agent proposes an action. `gate` decides **ALLOW / BLOCK / REQUIRE_APPROVAL**
+An agent proposes an action. `qed` decides **ALLOW / BLOCK / REQUIRE_APPROVAL**
 with deterministic rules. Every step is written to one Ed25519-signed,
 hash-chained evidence ledger that a third party can verify without trusting the
 instance that produced it.
@@ -10,9 +10,19 @@ instance that produced it.
 No LLM in the decision path. No network in the kernel. Runs on your own
 hardware, including air-gapped.
 
-> **Name:** the product is **Valqore Gate**. `gate` is the command, the import
-> package and the repository, and stays that way (SPEC §24.1, decided
-> 2026-10-08). Neither is a placeholder any more.
+> **Name:** the product is **Valqore QED** — *quod erat demonstrandum*, which
+> is the claim: a third party can verify what happened here without trusting
+> the instance that recorded it. `qed` is the command, the import package and
+> the repository.
+>
+> It was called `gate` until 2026-10-08. The name changed because "gate" is
+> already a commercial product in this exact category, is not registrable for
+> the thing it describes, and named the half of the product every competitor
+> ships rather than the half that is hard to copy. The rename cost one commit
+> and invalidated no evidence, because ADR-0006 had already taken the product
+> name out of the hash domain separators in week 1 — which is why `gate`
+> still appears in `docs/adr/`, `CHANGELOG.md` and two superseded spec
+> literals, and nowhere else.
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
 > **Still not public:** the remote stays private until the name reservations in
 > `REPO-AND-PUBLICATION-PLAN.md` §5 are in place. Publishing is distribution,
@@ -20,27 +30,27 @@ hardware, including air-gapped.
 
 ## Status
 
-**Weeks 1–2 of the §22 build order are complete.** What works today:
+**Weeks 1–5 of the §22 build order are complete**, bar the week-4 web approval page. What works today:
 
 | Capability | Entry point |
 |---|---|
-| Domain model (`ActionProposal`, `Verdict`, `EvidenceRecord`, mandates, budgets) | `gate/core/schemas.py` |
-| RFC 8785 (JCS) canonical JSON | `gate/core/jcs.py` |
-| Hash chain, Ed25519 signing, Merkle checkpoints | `gate/core/evidence/` |
-| Evidence ledger on SQLite | `gate/infra/storage/sqlite.py` |
-| Policy loader, linter, predicates, engine | `gate/core/policy/` |
-| Deterministic blast-radius score (0–100) | `gate/core/policy/blast_radius.py` |
-| Baseline pack, 46 rules | `gate/core/policy/packs/agent-baseline/` |
-| Standalone verifier | `packages/gate-verify/` |
-| **MCP proxy** (stdio and Streamable HTTP), shadow mode | `gate/adapters/mcp/` |
-| **HTTP forward proxy** (`CONNECT` and plain HTTP) | `gate/adapters/http_proxy/` |
-| **Credential broker** (env, file, Vault) | `gate/core/broker/`, `gate/infra/secrets/` |
-| **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `gate/api/` |
-| **OSCAL 1.1.2 `assessment-results` export** | `gate/core/evidence/export/oscal.py` |
+| Domain model (`ActionProposal`, `Verdict`, `EvidenceRecord`, mandates, budgets) | `qed/core/schemas.py` |
+| RFC 8785 (JCS) canonical JSON | `qed/core/jcs.py` |
+| Hash chain, Ed25519 signing, Merkle checkpoints | `qed/core/evidence/` |
+| Evidence ledger on SQLite | `qed/infra/storage/sqlite.py` |
+| Policy loader, linter, predicates, engine | `qed/core/policy/` |
+| Deterministic blast-radius score (0–100) | `qed/core/policy/blast_radius.py` |
+| Baseline pack, 46 rules | `qed/core/policy/packs/agent-baseline/` |
+| Standalone verifier | `packages/qed-verify/` |
+| **MCP proxy** (stdio and Streamable HTTP), shadow mode | `qed/adapters/mcp/` |
+| **HTTP forward proxy** (`CONNECT` and plain HTTP) | `qed/adapters/http_proxy/` |
+| **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
+| **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
+| **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
-| CLI: `keys init`, `check`, `policy lint/explain/test`, `export`, `verify`, `serve`, `mcp`, `proxy`, `login`, `token`, `mandate`, `approve`, `doctor` | `gate/cli.py` |
+| CLI: `keys init`, `check`, `policy lint/explain/test`, `export`, `verify`, `serve`, `mcp`, `proxy`, `login`, `token`, `mandate`, `approve`, `doctor` | `qed/cli.py` |
 
-Not built yet: coding-agent hooks (`gate install claude-code`), the Python
+Not built yet: coding-agent hooks (`qed install claude-code`), the Python
 SDK, `mode: mitm` for the HTTP proxy, compliance packs beyond the baseline,
 the live UI.
 
@@ -48,30 +58,30 @@ the live UI.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev]" -e packages/gate-verify
+pip install -e ".[dev]" -e packages/qed-verify
 
-gate keys init --dir .gate                         # Ed25519 evidence key, 0600
-gate check examples/proposals/prod-db-drop.json --dir .gate
-gate export --dir .gate --out chain.jsonl
-gate-verify chain.jsonl --keys .gate/public
+qed keys init --dir .qed                         # Ed25519 evidence key, 0600
+qed check examples/proposals/prod-db-drop.json --dir .qed
+qed export --dir .qed --out chain.jsonl
+qed-verify chain.jsonl --keys .qed/public
 ```
 
-`gate check` exit codes: `0` ALLOW, `2` REQUIRE_APPROVAL, `3` BLOCK, `1` error.
+`qed check` exit codes: `0` ALLOW, `2` REQUIRE_APPROVAL, `3` BLOCK, `1` error.
 
 ### Put it in front of an MCP server
 
 ```bash
-gate mcp --human you@example.com --env prod \
+qed mcp --human you@example.com --env prod \
          --target-template 'db:{env}/{args.table}' \
          -- npx -y @some/mcp-server
 ```
 
 The default mode is **shadow**: every tool call is decided and recorded, and
-nothing is stopped. Point your agent at `gate mcp` instead of the server, work
+nothing is stopped. Point your agent at `qed mcp` instead of the server, work
 for a week, then read what would have happened:
 
 ```bash
-gate export --dir .gate --format oscal --out assessment.json
+qed export --dir .qed --format oscal --out assessment.json
 ```
 
 `--human` or `--mandate` is required. See `docs/mcp-proxy.md` for why.
@@ -79,7 +89,7 @@ gate export --dir .gate --format oscal --out assessment.json
 ### Put it in front of everything else
 
 ```bash
-gate proxy --human you@example.com --env prod
+qed proxy --human you@example.com --env prod
 HTTPS_PROXY=http://127.0.0.1:8888 HTTP_PROXY=http://127.0.0.1:8888 your-agent
 ```
 
@@ -88,7 +98,7 @@ the `curl` in a shell step, the SDK call in a script, the request an agent
 makes because something in its context told it to.
 
 Read `docs/http-proxy.md` before relying on it, for one reason: **a `CONNECT`
-tunnel is always recorded as advisory.** The gate decides whether the
+tunnel is always recorded as advisory.** QED decides whether the
 connection may be opened, but the request inside it is encrypted, so it cannot
 replace the credential and the agent is using its own. Plain HTTP is fully
 visible and fully brokered.
@@ -96,7 +106,7 @@ visible and fully brokered.
 ### Run the API
 
 ```bash
-gate serve --dir .gate --dev          # --dev skips adapter signatures; local only
+qed serve --dir .qed --dev          # --dev skips adapter signatures; local only
 curl -s localhost:8710/readyz | jq
 ```
 
@@ -105,7 +115,7 @@ adapters (SPEC §17). Adapters sign each request; see `docs/api.md`.
 
 ## Reading order
 
-1. `GATE_SPEC.md` — the implementation specification (v0.3.1). Normative.
+1. `QED_SPEC.md` — the implementation specification (v0.3.1). Normative.
    (SPEC §20.1 calls this file `SPEC.md`; it is left under its original name so
    that links from the planning folder keep working.)
 2. `DESIGN_DECISIONS.md` — ADR-001…008, accepted.
@@ -122,8 +132,8 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 
 | Invariant | Test |
 |---|---|
-| `gate.core` imports no HTTP client and no socket | `tests/core/test_no_network.py` |
-| `gate.core` imports no model SDK | `tests/core/test_no_llm.py` |
+| `qed.core` imports no HTTP client and no socket | `tests/core/test_no_network.py` |
+| `qed.core` imports no model SDK | `tests/core/test_no_llm.py` |
 | Decisions are independent of rule file order | `tests/policy/test_golden.py` |
 | Same inputs produce byte-identical verdicts | `tests/policy/test_determinism.py` |
 | Tamper, delete, reorder in the chain are all detected | `tests/evidence/test_chain.py` |

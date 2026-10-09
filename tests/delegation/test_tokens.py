@@ -12,11 +12,11 @@ import pytest
 from joserfc import jwt
 from joserfc.jwk import KeySet, OctKey, RSAKey
 
-from gate.core.delegation.claims import NarrowingViolation, TokenClaims, TokenVerificationError
-from gate.core.schemas import Budget
-from gate.infra.tokens import (
-    GATE_ALG,
+from qed.core.delegation.claims import NarrowingViolation, TokenClaims, TokenVerificationError
+from qed.core.schemas import Budget
+from qed.infra.tokens import (
     MAX_TOKEN_LIFETIME,
+    QED_ALG,
     TOKEN_KEY_NAME,
     TokenIssuer,
     decode_unverified_header,
@@ -25,7 +25,7 @@ from gate.infra.tokens import (
 )
 
 NOW = datetime.fromisoformat("2026-10-08T12:00:00+00:00")
-ISSUER = "https://gate.internal"
+ISSUER = "https://qed.internal"
 ISSUERS = frozenset({ISSUER})
 
 
@@ -56,7 +56,7 @@ class TestTokenKey:
         """An evidence key signs history and must outlive every token; a token
         key is online, used constantly, and has to be rotatable without
         invalidating a single past record."""
-        from gate.infra.keys.file import PRIVATE_KEY_NAME, init_keys
+        from qed.infra.keys.file import PRIVATE_KEY_NAME, init_keys
 
         init_keys(tmp_path)
         load_or_create_token_key(tmp_path)
@@ -81,7 +81,7 @@ class TestMint:
         """`EdDSA` is deprecated by RFC 9864 and the identifier is baked into
         every token, so it is settled before the first one is issued."""
         token, _ = mint(issuer)
-        assert decode_unverified_header(token)["alg"] == GATE_ALG == "Ed25519"
+        assert decode_unverified_header(token)["alg"] == QED_ALG == "Ed25519"
 
     def test_times_are_numeric_dates(self, issuer: TokenIssuer) -> None:
         """RFC 7519 §2. The evidence chain uses RFC 3339 strings; a token is
@@ -157,7 +157,7 @@ class TestVerifyRejects:
                     {
                         "iss": ISSUER,
                         "sub": "x",
-                        "aud": "gate",
+                        "aud": "qed",
                         "exp": 9999999999,
                         "iat": 1,
                         "jti": claims.jti,
@@ -181,7 +181,7 @@ class TestVerifyRejects:
             {
                 "iss": ISSUER,
                 "sub": "attacker",
-                "aud": "gate",
+                "aud": "qed",
                 "exp": 9999999999,
                 "iat": 1,
                 "jti": "01JB000000000000000000JTIX",
@@ -219,7 +219,7 @@ class TestIdpTokens:
             {
                 "iss": "https://idp.example",
                 "sub": "ali@example.com",
-                "aud": "gate",
+                "aud": "qed",
                 "exp": int((NOW + timedelta(minutes=10)).timestamp()),
                 "iat": int(NOW.timestamp()),
                 "jti": "01JB000000000000000000JTI9",
@@ -238,7 +238,7 @@ class TestIdpTokens:
 
     def test_an_idp_token_is_not_accepted_under_the_gate_algorithm(self) -> None:
         """The accepted algorithms are named by the caller for each key source,
-        so an IdP token cannot be presented as a gate-issued one."""
+        so an IdP token cannot be presented as a qed-issued one."""
         private = RSAKey.generate_key(2048, parameters={"kid": "idp-1"})
         keyset = KeySet([RSAKey.import_key(private.as_dict(private=False))])
         token = jwt.encode(
@@ -246,7 +246,7 @@ class TestIdpTokens:
             {
                 "iss": "https://idp.example",
                 "sub": "x",
-                "aud": "gate",
+                "aud": "qed",
                 "exp": 9999999999,
                 "iat": 1,
                 "jti": "01JB000000000000000000JTI8",
@@ -259,5 +259,5 @@ class TestIdpTokens:
                 keys=keyset,
                 now=NOW,
                 issuers=frozenset({"https://idp.example"}),
-                algorithms=(GATE_ALG,),
+                algorithms=(QED_ALG,),
             )

@@ -1,6 +1,6 @@
 """``/v1/approvals`` (SPEC §9, §13).
 
-The decision path is shared with `gate approve`, so these tests are about the
+The decision path is shared with `qed approve`, so these tests are about the
 HTTP surface: who the approver is taken to be, what a refusal looks like, and
 whether two approvers can both win.
 """
@@ -12,8 +12,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from gate.api.routers.approvals import HEADER_APPROVER, HEADER_APPROVER_GROUPS
-from gate.core.evidence.hashing import principal_hash
+from qed.api.routers.approvals import HEADER_APPROVER, HEADER_APPROVER_GROUPS
+from qed.core.evidence.hashing import principal_hash
 from tests.api.conftest import Signer
 
 ALI = principal_hash("ali@example.com")
@@ -204,13 +204,13 @@ def test_the_api_and_the_cli_share_one_decision_path() -> None:
     would be a channel where separation of duties worked differently."""
     import inspect
 
-    from gate import cli
-    from gate.api.routers import approvals as api
-    from gate.api.routers import slack as slack_router
+    from qed import cli
+    from qed.api.routers import approvals as api
+    from qed.api.routers import slack as slack_router
 
     for module in (cli, api, slack_router):
         source = inspect.getsource(module)
-        assert "from gate.core.approval.model import" in source or "decide(" in source
+        assert "from qed.core.approval.model import" in source or "decide(" in source
     assert "def decide(" not in inspect.getsource(api)
     assert "def decide(" not in inspect.getsource(slack_router)
     assert json  # keeps the import meaningful for the json-shaped assertions above

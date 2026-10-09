@@ -6,10 +6,10 @@ import hashlib
 
 import pytest
 
-from gate.core.evidence import hashing
-from gate.core.evidence.record import RESERVED_KEYS, build_record, recompute_hash
-from gate.core.schemas import Assurance, EvidenceType, Mode
-from gate.infra.keys.file import FileSigner
+from qed.core.evidence import hashing
+from qed.core.evidence.record import RESERVED_KEYS, build_record, recompute_hash
+from qed.core.schemas import Assurance, EvidenceType, Mode
+from qed.infra.keys.file import FileSigner
 
 
 def test_genesis_prev_hash_binds_the_chain_to_one_instance() -> None:
@@ -67,7 +67,7 @@ def test_no_hashed_field_can_contain_the_separator() -> None:
     int and the two hashes are hex. ``ts`` is machine-formatted. This test
     pins that property so that widening any of those types fails here first.
     """
-    from gate.core.schemas import SCHEMA_VERSION, EvidenceType, rfc3339_ms, utcnow
+    from qed.core.schemas import SCHEMA_VERSION, EvidenceType, rfc3339_ms, utcnow
 
     fields = [SCHEMA_VERSION, rfc3339_ms(utcnow()), *(t.value for t in EvidenceType)]
     assert all("\x1f" not in field for field in fields)
@@ -115,7 +115,7 @@ class TestBuildRecord:
         assert recompute_hash(record) == record.hash
 
     def test_signature_covers_the_hash_bytes(self, signer: FileSigner) -> None:
-        from gate.core.evidence.signing import verify_signature
+        from qed.core.evidence.signing import verify_signature
 
         record = build_record(
             seq=3,

@@ -23,7 +23,7 @@ It is **closed and commercial** if:
   ever stops being true, the product is broken, not the pricing.
 - No commercial feature ever removes or caps an open capability. There is no
   "30-day chain in the free tier".
-- Everything under `gate.remote.*` is opt-in, outbound-only, carries hashes and
+- Everything under `qed.remote.*` is opt-in, outbound-only, carries hashes and
   signatures but never customer data, and degrades gracefully when switched off.
   Zero bytes leave by default.
 
@@ -31,9 +31,9 @@ It is **closed and commercial** if:
 
 | Repo | Contents |
 |---|---|
-| `gate` (this one) | kernel, adapters, policy language, baseline pack, `gate-verify`, docs, Helm, examples |
-| `gate-ui` | live UI, approval pages, SSE client |
-| `gate-cloud` | multi-tenant evidence vault, auditor portal, transparency log, signed pack feed, SSO/RBAC, long retention |
+| `qed` (this one) | kernel, adapters, policy language, baseline pack, `qed-verify`, docs, Helm, examples |
+| `qed-ui` | live UI, approval pages, SSE client |
+| `qed-cloud` | multi-tenant evidence vault, auditor portal, transparency log, signed pack feed, SSO/RBAC, long retention |
 
 No proprietary code ever enters this repository. Git history is irreversible, so
 this is a rule about the first commit, not about the current state.
@@ -57,11 +57,11 @@ fork free to do, which is everything except claim the product name.
 
 ## Relationship to Valqore
 
-One-directional. `gate` has **zero** imports from Valqore. Valqore becomes a
-consumer in v1.x (`gate.propose(kind="iac")`) and deletes its own
+One-directional. `qed` has **zero** imports from Valqore. Valqore becomes a
+consumer in v1.x (`qed.propose(kind="iac")`) and deletes its own
 `approvals.py` and `mcp/gateway.py` at that point.
 
-gate does not do IaC or Kubernetes manifest scanning. That stays in Valqore,
+QED does not do IaC or Kubernetes manifest scanning. That stays in Valqore,
 permanently (SPEC §1.3).
 
 ## Changing the evidence format
@@ -71,7 +71,7 @@ must verify in seven years. Therefore:
 
 - any change to hashing, to record fields, or to the masking pattern set is a
   `schema_version` bump with an ADR;
-- `gate-verify` must keep verifying every prior version, with cross-version
+- `qed-verify` must keep verifying every prior version, with cross-version
   fixtures in CI;
 - `docs/evidence-format.md` is the specification, and it is published.
 

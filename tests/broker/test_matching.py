@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from gate.core.broker.model import (
+from qed.core.broker.model import (
     CredentialSpec,
     Enforcement,
     Upstream,
@@ -15,7 +15,7 @@ from gate.core.broker.model import (
     describe,
     match_upstream,
 )
-from gate.infra.secrets.resolver import (
+from qed.infra.secrets.resolver import (
     CredentialResolver,
     SecretNotAvailable,
     SecretResolutionError,
@@ -215,8 +215,8 @@ class TestResolution:
 
     def test_a_vault_reference_without_a_client_says_what_to_install(self) -> None:
         resolver = CredentialResolver()
-        with pytest.raises(SecretResolutionError, match=r"valqore-gate\[vault\]"):
-            resolver.resolve(self.spec("vault", "secret/data/gate/pg#DATABASE_URL"))
+        with pytest.raises(SecretResolutionError, match=r"valqore-qed\[vault\]"):
+            resolver.resolve(self.spec("vault", "secret/data/qed/pg#DATABASE_URL"))
 
     def test_an_error_never_carries_the_value(self, tmp_path: Path) -> None:
         path = tmp_path / "token"
@@ -248,8 +248,8 @@ class TestCache:
         assert resolver.resolve(self.spec(), now=120.0).reveal() == "second"
 
     def test_forgetting_makes_the_next_read_fresh(self) -> None:
-        """Rotation has to take effect without a restart: a gate handing out
-        a credential revoked a minute ago is a gate working against you."""
+        """Rotation has to take effect without a restart: a qed handing out
+        a credential revoked a minute ago is a qed working against you."""
         environ = {"TOKEN": "first"}
         resolver = CredentialResolver(environ=environ, ttl_seconds=3600)
         resolver.resolve(self.spec(), now=0.0)

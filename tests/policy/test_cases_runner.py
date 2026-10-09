@@ -1,4 +1,4 @@
-"""The case runner behind `gate policy test` (SPEC §14)."""
+"""The case runner behind `qed policy test` (SPEC §14)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from gate.core.policy.cases import (
+from qed.core.policy.cases import (
     CaseError,
     CaseFile,
     deep_merge,
@@ -15,7 +15,7 @@ from gate.core.policy.cases import (
     run_cases,
     uncovered_rules,
 )
-from gate.core.policy.model import PolicyBundle
+from qed.core.policy.model import PolicyBundle
 from tests.conftest import BASE_PROPOSAL, NOW
 
 ALLOW_CASE: dict[str, Any] = {

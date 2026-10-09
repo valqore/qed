@@ -1,4 +1,4 @@
-# gate — Tasarım Kararları (ADR)
+# qed — Tasarım Kararları (ADR)
 
 Durum işaretleri: **ÖNERİ** (onay bekliyor) · **KABUL** · **RET** · **ERTELENDİ**
 Her karar: bağlam → seçenekler → öneri → sonuçları → açık sorular. Kabul edilenler repoya `docs/adr/NNNN-*.md` olarak girer.
@@ -10,22 +10,22 @@ Her karar: bağlam → seçenekler → öneri → sonuçları → açık sorular
 **Boşluk:** Review A-1
 
 ### Bağlam
-Üç adaptör (hook, MCP proxy ayarı, `HTTPS_PROXY`) ajanın kendi ortamında çalışır ve ajan ya da geliştirici tarafından kapatılabilir. Prompt injection ile ele geçirilmiş bir ajan `settings.json`'dan hook'u silebilir. "Gate atlatılamaz" cümlesi bu adaptörler için yanlıştır. Gerçek zorlama, ajanın gate olmadan hedefe ulaşamadığı durumdur.
+Üç adaptör (hook, MCP proxy ayarı, `HTTPS_PROXY`) ajanın kendi ortamında çalışır ve ajan ya da geliştirici tarafından kapatılabilir. Prompt injection ile ele geçirilmiş bir ajan `settings.json`'dan hook'u silebilir. "QED atlatılamaz" cümlesi bu adaptörler için yanlıştır. Gerçek zorlama, ajanın qed olmadan hedefe ulaşamadığı durumdur.
 
 ### Seçenekler
 | | Yaklaşım | Zorlama gücü | Kurulum maliyeti |
 |---|---|---|---|
 | A | Sadece adaptörler (hook / proxy ayarı / env) | **Advisory** — iyi niyetli ajanı yönlendirir, kötü niyetliyi durdurmaz | Dakikalar |
-| B | A + **Credential Broker**: upstream kimlik bilgileri (DB şifresi, bulut anahtarı, MCP OAuth token'ı) gate'te; ajan hiç görmez, gate her çağrıda kısa ömürlü türetilmiş kimlik bilgisi kullanır | **Enforcing** — gate atlansa bile ajan kimliksizdir, çağrı başarısız | Saatler; secret store entegrasyonu |
-| C | B + **ağ seviyesi**: ajan pod'unun tek egress'i gate (NetworkPolicy / güvenlik grubu) | **Enforcing+** — HTTP dahil her çıkış gate'ten | Platform ekibi işi; K8s/VPC gerekir |
+| B | A + **Credential Broker**: upstream kimlik bilgileri (DB şifresi, bulut anahtarı, MCP OAuth token'ı) qed'te; ajan hiç görmez, qed her çağrıda kısa ömürlü türetilmiş kimlik bilgisi kullanır | **Enforcing** — qed atlansa bile ajan kimliksizdir, çağrı başarısız | Saatler; secret store entegrasyonu |
+| C | B + **ağ seviyesi**: ajan pod'unun tek egress'i qed (NetworkPolicy / güvenlik grubu) | **Enforcing+** — HTTP dahil her çıkış qed'ten | Platform ekibi işi; K8s/VPC gerekir |
 
 ### Öneri
 **Üç sınıfı da destekle, her adaptörü sınıfıyla etiketle, denetçiye sınıfı yaz.** v1'de B zorunlu bileşen, C dokümante edilmiş referans mimari.
 
-1. Yeni bileşen **`core/broker`**: upstream başına kimlik bilgisi kaydı (`upstreams.yaml`), kaynaklar: env, dosya, Vault, AWS Secrets Manager, Azure Key Vault. MCP proxy ve HTTP proxy, ALLOW aldıktan sonra isteği **broker'dan aldığı kimlik bilgisiyle** upstream'e iletir; ajanın gönderdiği `Authorization` başlığı atılır. Ajan tarafında sadece gate'in delegation token'ı vardır.
+1. Yeni bileşen **`core/broker`**: upstream başına kimlik bilgisi kaydı (`upstreams.yaml`), kaynaklar: env, dosya, Vault, AWS Secrets Manager, Azure Key Vault. MCP proxy ve HTTP proxy, ALLOW aldıktan sonra isteği **broker'dan aldığı kimlik bilgisiyle** upstream'e iletir; ajanın gönderdiği `Authorization` başlığı atılır. Ajan tarafında sadece qed'in delegation token'ı vardır.
 2. Her `ActionProposal.context.adapter` alanına **`enforcement: advisory | enforcing`** eklenir. Hook ve SDK her zaman `advisory`; MCP/HTTP proxy, broker devredeyse `enforcing`, değilse `advisory`.
-3. `EvidenceRecord` bu alanı taşır; OSCAL ihracatında `advisory` kayıtlar ayrı bir `observation` türüyle işaretlenir. Denetçi "insan onayladı" (güçlü) ile "ajan gate'ten geçti ama geçmeyebilirdi" (zayıf) arasındaki farkı görür.
-4. `gate doctor` çıktısında posture özeti: "3 upstream broker'da, 2 upstream advisory (ajan kendi kimliğini taşıyor) — enforcing için şunları taşıyın."
+3. `EvidenceRecord` bu alanı taşır; OSCAL ihracatında `advisory` kayıtlar ayrı bir `observation` türüyle işaretlenir. Denetçi "insan onayladı" (güçlü) ile "ajan qed'ten geçti ama geçmeyebilirdi" (zayıf) arasındaki farkı görür.
+4. `qed doctor` çıktısında posture özeti: "3 upstream broker'da, 2 upstream advisory (ajan kendi kimliğini taşıyor) — enforcing için şunları taşıyın."
 5. Referans mimari dokümanı: K8s NetworkPolicy + egress gateway örneği; "enforcing+" istiyorsan bu.
 6. Hook adaptörü için ek savunma (advisory'yi biraz güçlendirir, enforcing yapmaz): Claude Code managed settings (`allowManagedPermissionRulesOnly`) ile hook'un kullanıcı tarafından silinememesi; dokümante edilir, zorlanmaz.
 
@@ -33,11 +33,11 @@ Her karar: bağlam → seçenekler → öneri → sonuçları → açık sorular
 - Kapsam artar: broker v1'e girer (~Faz 2, 1 hafta). Karşılığında "atlatılamaz" cümlesi dürüst hale gelir.
 - Satış cümlesi değişir: "ajanlarınıza dokunmuyoruz" doğru kalır; "ajan atlatamaz" sadece broker/egress'te söylenir.
 - Ajan hiçbir upstream kimlik bilgisi tutmadığı için **sızıntı yüzeyi küçülür** — bu başlı başına satış argümanı (Supabase MCP ve AgentCore sızıntı vakaları).
-- Broker, gate'i kimlik bilgisi tutan bir hedef yapar; kernel'ın kendi güvenliği (ADR-007'de) önem kazanır.
+- Broker, qed'i kimlik bilgisi tutan bir hedef yapar; kernel'ın kendi güvenliği (ADR-007'de) önem kazanır.
 
 ### Açık sorular
 - Broker'ın secret store entegrasyonları v1'de kaç tane? Öneri: env + dosya + Vault; AWS/Azure v1.x.
-- MCP upstream OAuth akışında (RFC 9728 PRM) gate'in "istemci" olarak kaydı — CIMD olgunlaşana kadar manuel client_id.
+- MCP upstream OAuth akışında (RFC 9728 PRM) qed'in "istemci" olarak kaydı — CIMD olgunlaşana kadar manuel client_id.
 
 ---
 
@@ -57,7 +57,7 @@ Kural dili "applies_to + predicate + verdict" olarak tanımlandı ama çakışma
 | B | `BLOCK` | Güvenlik saflığı | İlk gün her şey kırılır; kimse açmaz |
 | C | Ortam bazlı: `dev/staging → ALLOW`, `prod → REQUIRE_APPROVAL` | İkisinin ortası | Karmaşıklık, sürpriz |
 
-**Öneri: A, ama `gate.yaml`'da `default_verdict` ile değiştirilebilir ve `prod` için `REQUIRE_APPROVAL` önerilen (dokümante) ayar.** Baseline paketi zaten prod/delete/para/network gibi riskli sınıfları kapsar; "hiç kural eşleşmedi" nadir ve kayıtlı olur. Denetçi için `no_rule_matched` oranı bir metrik: yüksekse politika eksik.
+**Öneri: A, ama `qed.yaml`'da `default_verdict` ile değiştirilebilir ve `prod` için `REQUIRE_APPROVAL` önerilen (dokümante) ayar.** Baseline paketi zaten prod/delete/para/network gibi riskli sınıfları kapsar; "hiç kural eşleşmedi" nadir ve kayıtlı olur. Denetçi için `no_rule_matched` oranı bir metrik: yüksekse politika eksik.
 
 **2.2 Öncelik — birden fazla kural tetiklenince**
 Deterministik sıralama, en kısıtlayıcı kazanır: **`BLOCK > REQUIRE_APPROVAL > ALLOW`**. Severity karara etki etmez (sadece raporlama ve `--max-severity` eşiği için). Tetiklenen *tüm* kuralların ID'leri verdict'e yazılır, sadece kazananın değil. Sıra bağımsızlığı golden testle garanti edilir (kuralların yükleme sırası değiştirilince sonuç aynı).
@@ -86,7 +86,7 @@ Her kuralda `mode: enforce | shadow` (varsayılan: paket seviyesi ayarı). Shado
 `policy_hash = sha256(canonical_json(sorted rules))`. Her verdict'te. `policy_loaded` kaydı: eski hash → yeni hash, kim yükledi, diff özeti (kaç kural eklendi/değişti/kapatıldı). Lint: aynı `rule_id` iki kez → hata; `override` hedefi yoksa → hata; regex derlenemiyorsa → hata; `disabled` gerekçesiz → hata.
 
 **2.8 Lint ve test komutları**
-`gate policy lint` (statik), `gate policy test` (`tests/*.yaml`: proposal + beklenen verdict + beklenen rule_ids), `gate policy explain <proposal.json>` (hangi kurallar neden tetiklendi — operatörün debug aracı).
+`qed policy lint` (statik), `qed policy test` (`tests/*.yaml`: proposal + beklenen verdict + beklenen rule_ids), `qed policy explain <proposal.json>` (hangi kurallar neden tetiklendi — operatörün debug aracı).
 
 ### Sonuçlar
 - Motor küçük kalır (~300 satır) ve tamamen saf.
@@ -121,19 +121,19 @@ Kural seviyesinde de `mode` var (ADR-002.6); servis `shadow` ise kural `enforce`
 **Fail** — kernel ulaşılamazsa adaptör ne yapar
 | Adaptör | Varsayılan | Not |
 |---|---|---|
-| MCP proxy (broker'lı) | `closed` | Zaten kimlik bilgisi gate'te; açık olması anlamsız |
+| MCP proxy (broker'lı) | `closed` | Zaten kimlik bilgisi qed'te; açık olması anlamsız |
 | HTTP proxy | `closed` | prod; dev profilinde `open` |
 | Hook / SDK | `open` + yerel JSONL'e `ungated: true` kaydı | Advisory zaten; kapalı olması geliştiriciyi durdurur, güvenlik katmaz |
 | CI komutu | `closed` (exit ≠ 0) | Pipeline durur |
 
 Kernel ulaşılamadığında adaptör yerel bir "açık tutuldu" kaydı yazar; kernel dönünce bu kayıtlar `ungated_window` olarak zincire eklenir (başlangıç/bitiş zamanı, kaç çağrı). Denetçi boşluğu görür; gizlenmez.
 
-**Onboarding yolu (dokümante):** `shadow` 1-2 hafta → `gate report --shadow` ile "şunlar bloke olacaktı" listesi → politika düzeltme → `enforce`. `gate doctor` servis shadow'da 14 günden uzun kalmışsa uyarır.
+**Onboarding yolu (dokümante):** `shadow` 1-2 hafta → `qed report --shadow` ile "şunlar bloke olacaktı" listesi → politika düzeltme → `enforce`. `qed doctor` servis shadow'da 14 günden uzun kalmışsa uyarır.
 
 ### Sonuçlar
 - Benimseme engeli kalkar; ilk günden üretim trafiğinde çalışır.
 - Shadow kayıtları da zincirde olduğu için "şu tarihten beri gözlemliyoruz" denetçiye gösterilebilir.
-- Adaptör tarafında küçük bir yerel kuyruk gerekir (hook/SDK için `~/.gate/pending.jsonl`).
+- Adaptör tarafında küçük bir yerel kuyruk gerekir (hook/SDK için `~/.qed/pending.jsonl`).
 
 ---
 
@@ -147,7 +147,7 @@ Kernel ulaşılamadığında adaptör yerel bir "açık tutuldu" kaydı yazar; k
 ### Seçenekler
 | | Model | Artı | Eksi |
 |---|---|---|---|
-| A | **Tek yazar lideri**: Postgres advisory lock ile bir replica yazar, diğerleri ona iletir (ya da yazma isteğini DB'de sıraya koyar, lider işler) | Basit, `gate-verify` tek zincir doğrular | Lider devrilmesi sırasında kısa yazma duraksaması (ms-sn) |
+| A | **Tek yazar lideri**: Postgres advisory lock ile bir replica yazar, diğerleri ona iletir (ya da yazma isteğini DB'de sıraya koyar, lider işler) | Basit, `qed-verify` tek zincir doğrular | Lider devrilmesi sırasında kısa yazma duraksaması (ms-sn) |
 | B | **Replica başına zincir** + periyodik birleşik checkpoint | Yazma daralması yok | Doğrulama karmaşık, "zincir bütün mü" sorusu çok zincirli cevap ister |
 | C | **DB-atanmış seq** (Postgres `SERIAL`/sequence) + `prev_hash` için son kaydı oku-yaz transaction'ı | Lider yok | Yüksek eşzamanlılıkta serialization hataları ve retry |
 
@@ -159,8 +159,8 @@ Kernel ulaşılamadığında adaptör yerel bir "açık tutuldu" kaydı yazar; k
 - `hash = sha256(schema_version || seq || ts || type || payload_hash || prev_hash)` — alan ayracı `0x1f`, canonical JSON (RFC 8785 JCS) ile payload_hash.
 - `key_id` zorunlu; `sig = Ed25519(hash)`.
 - İlk kayıt `genesis`: `prev_hash = sha256("gate-genesis:" + instance_id)`.
-- `checkpoint` kaydı: her 1.000 kayıt ya da 1 saat (hangisi önce); `merkle_root` son checkpoint'ten bu yana kayıtların kökü; `published_to[]` (ADR'de belirlenen dış yayın hedefleri: S3 object-lock, git tag, e-posta, v1.x'te gate şeffaflık günlüğü).
-- `gate-verify` iki mod: `--full` (her imza) ve `--checkpoints` (sadece kökler, hızlı); denetçi ikisini de kullanabilir.
+- `checkpoint` kaydı: her 1.000 kayıt ya da 1 saat (hangisi önce); `merkle_root` son checkpoint'ten bu yana kayıtların kökü; `published_to[]` (ADR'de belirlenen dış yayın hedefleri: S3 object-lock, git tag, e-posta, v1.x'te qed şeffaflık günlüğü).
+- `qed-verify` iki mod: `--full` (her imza) ve `--checkpoints` (sadece kökler, hızlı); denetçi ikisini de kullanabilir.
 - Kayıt payload'ı asla değiştirilmez; düzeltme = yeni `correction` tipi kayıt, önceki `seq`'e referansla.
 
 ### Sonuçlar
@@ -186,7 +186,7 @@ Kernel ulaşılamadığında adaptör yerel bir "açık tutuldu" kaydı yazar; k
 ### Öneri
 **A, B'nin bir parçasıyla:** zincirde yalnız `principal_hash`; eşleme tablosu `principals(hash, sub, display_name, created_at, erased_at)`; silme talebi `sub` ve `display_name`'i siler, `erased_at` yazar; zincir dokunulmaz. Denetçi için: silinmiş kişi "principal #a3f9…" olarak görünür, "kimin onayladığı" sorusu "yetkili bir insanın onayladığı" olarak hâlâ kanıtlanabilir (hash değişmedi, SoD kontrolü hash üzerinden). Onay anında Slack'e giden isim eşleme tablosundan okunur, zincire girmez.
 
-Ek kurallar: `params_redacted` içinde e-posta/telefon/IBAN/anahtar desenleri kayıt anında maskelenir (regex seti, test edilir); `intent` metni (ajanın niyeti) serbest metin olduğu için aynı maskelemeden geçer; saklama süresi `gate.yaml`'da (`retention: 7y` DORA için), süre dolunca payload'lar silinir ama `hash` ve `sig` kalır — zincir bütünlüğü bozulmaz, içerik gider.
+Ek kurallar: `params_redacted` içinde e-posta/telefon/IBAN/anahtar desenleri kayıt anında maskelenir (regex seti, test edilir); `intent` metni (ajanın niyeti) serbest metin olduğu için aynı maskelemeden geçer; saklama süresi `qed.yaml`'da (`retention: 7y` DORA için), süre dolunca payload'lar silinir ama `hash` ve `sig` kalır — zincir bütünlüğü bozulmaz, içerik gider.
 
 ### Sonuçlar
 - Zincir baştan PII'sız; "silme talebi geldi" senaryosu bir SQL satırı.
@@ -255,7 +255,7 @@ Denetçi dokümanında açık cümle: "İnsan onayı kanıtı her zaman `kernel`
 - Kernel API'si mTLS ya da en az OIDC bearer; adaptörler kernel'a kendi kimliğiyle gelir (`adapter_id` + anahtar).
 - Admin işlemleri (`policy reload`, `keys rotate`, `upstreams` değişikliği) kendi kapısından geçer: REQUIRE_APPROVAL + farklı admin (SoD) + zincir kaydı. Kernel kendi kurallarına tabi.
 - Rate limit: ajan başına proposal/sn; onay spam'i ADR-006.3.
-- Kernel binary'si cosign imzalı; `gate doctor` çalışan binary'nin imzasını doğrular.
+- Kernel binary'si cosign imzalı; `qed doctor` çalışan binary'nin imzasını doğrular.
 - Threat model dokümanı (`THREAT_MODEL.md`) ilk release'te: STRIDE tablosu — ajan, geliştirici, iç saldırgan, kernel operatörü, upstream.
 
 ---
@@ -270,18 +270,18 @@ Denetçi dokümanında açık cümle: "İnsan onayı kanıtı her zaman `kernel`
 ### Karar (öneri)
 
 **8.1 İnsan arkasındaki ajan (attended)**
-- `gate login` → OAuth **device authorization flow** (RFC 8628): terminalde kod, tarayıcıda Okta onayı; refresh token `~/.gate/` altında OS keychain'de (macOS Keychain, Linux secret-service), dosyada değil.
-- `gate token` → refresh token ile kernel'dan **delegation token** (RFC 8693 exchange): 30 dk ömür, `act: [agent_id]`, bütçe claim'leri, kapsam = kullanıcının grup üyeliğinden türetilen politika (`gate.yaml` → `scopes_by_group`).
-- Adaptörler token'ı otomatik yeniler (refresh varken sessiz; refresh dolunca `gate login` ister — günde bir).
+- `qed login` → OAuth **device authorization flow** (RFC 8628): terminalde kod, tarayıcıda Okta onayı; refresh token `~/.qed/` altında OS keychain'de (macOS Keychain, Linux secret-service), dosyada değil.
+- `qed token` → refresh token ile kernel'dan **delegation token** (RFC 8693 exchange): 30 dk ömür, `act: [agent_id]`, bütçe claim'leri, kapsam = kullanıcının grup üyeliğinden türetilen politika (`qed.yaml` → `scopes_by_group`).
+- Adaptörler token'ı otomatik yeniler (refresh varken sessiz; refresh dolunca `qed login` ister — günde bir).
 - Bütçe token ömrüne bağlı: yeni token = yeni bütçe; politika "günlük toplam" isterse `principal_hash` bazında ikinci sayaç.
 
 **8.2 Gözetimsiz ajan (unattended)**
-- Ajanın kendi kimliği: OAuth **client credentials** (IdP'de servis hesabı) ya da K8s **service account token** (projected, audience=gate) ya da SPIFFE SVID (v1.x).
+- Ajanın kendi kimliği: OAuth **client credentials** (IdP'de servis hesabı) ya da K8s **service account token** (projected, audience=qed) ya da SPIFFE SVID (v1.x).
 - Tek başına yetmez: **imzalı Mandate** gerekir — bir insanın önceden imzaladığı görev tanımı:
   ```yaml
   mandate:
     id: md_2026_10_sre_nightly
-    issued_by: oncall-lead@acme      # insan, OIDC ile imzalar (gate mandate sign)
+    issued_by: oncall-lead@acme      # insan, OIDC ile imzalar (qed mandate sign)
     for_agent: sre-agent@prod-runner
     purpose: "Payment-api alarmlarına otomatik müdahale"
     allowed: { kinds: [http], targets: ["aws:ec2:*", "aws:rds:describe*"], environments: [prod] }

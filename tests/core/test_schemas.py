@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from gate.core.schemas import (
+from qed.core.schemas import (
     ActionProposal,
     Budget,
     BudgetState,
@@ -66,7 +66,7 @@ def test_base_fixture_matches_the_declared_schema_version() -> None:
 
 
 def test_blast_radius_is_bounded() -> None:
-    from gate.core.schemas import Derived
+    from qed.core.schemas import Derived
 
     with pytest.raises(ValidationError):
         Derived(blast_radius=101)

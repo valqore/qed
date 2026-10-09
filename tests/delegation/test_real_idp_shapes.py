@@ -2,7 +2,7 @@
 
 Every case here was found by running the week-3 demo against a real Keycloak 26
 rather than a fixture, and every one of them was invisible to the synthetic
-tests because those built claims the way the gate itself writes them.
+tests because those built claims the way QED itself writes them.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import pytest
 from joserfc import jwt
 from joserfc.jwk import KeySet, RSAKey
 
-from gate.core.delegation.claims import TokenClaims, TokenVerificationError
-from gate.infra.tokens import verify_token
+from qed.core.delegation.claims import TokenClaims, TokenVerificationError
+from qed.infra.tokens import verify_token
 
 NOW = datetime.fromisoformat("2026-10-08T12:00:00+00:00")
 IDP = "https://idp.example"
@@ -22,7 +22,7 @@ IDP = "https://idp.example"
 BASE = {
     "iss": IDP,
     "sub": "c952ac57-6ece-44a2-a385-a09eb6eb40c4",
-    "aud": "gate",
+    "aud": "qed",
     "exp": NOW + timedelta(minutes=30),
     "iat": NOW,
     "jti": "01JB000000000000000000IDP0",
@@ -37,7 +37,7 @@ class TestScopeIsASpaceDelimitedString:
         assert claims.scope == ["openid", "email", "profile"]
 
     def test_a_list_scope_still_works(self) -> None:
-        """The gate's own tokens carry a list, because that is what the rest of
+        """QED's own tokens carry a list, because that is what the rest of
         the code works with. Both forms have to be accepted."""
         claims = TokenClaims.model_validate({**BASE, "scope": ["read", "write"]})
         assert claims.scope == ["read", "write"]
@@ -53,21 +53,21 @@ class TestScopeIsASpaceDelimitedString:
 class TestAKeycloakShapedToken:
     def test_the_claim_set_keycloak_sends_is_accepted(self) -> None:
         """Captured from a real realm: a UUID subject, a string scope, groups,
-        and a pile of claims the gate has never heard of."""
+        and a pile of claims QED has never heard of."""
         key = RSAKey.generate_key(2048, parameters={"kid": "kc-1"})
         token = jwt.encode(
             {"alg": "RS256", "kid": "kc-1"},
             {
                 "iss": IDP,
                 "sub": "c952ac57-6ece-44a2-a385-a09eb6eb40c4",
-                "aud": "gate",
+                "aud": "qed",
                 "exp": int((NOW + timedelta(minutes=30)).timestamp()),
                 "iat": int(NOW.timestamp()),
                 "jti": "64377988-f004-4b9f-b3e7-9a66abb8fcc8",
                 "scope": "openid profile email",
                 "groups": ["platform"],
                 "acr": "1",
-                "azp": "gate-cli",
+                "azp": "qed-cli",
                 "email": "ali@example.com",
                 "email_verified": True,
                 "preferred_username": "ali",
@@ -98,20 +98,20 @@ class TestAKeycloakShapedToken:
 
 class TestATokenCannotDeclareItsOwnKind:
     def test_a_token_type_claim_is_ignored(self) -> None:
-        """`TokenClaims` carried a `token_type` field with a default of "gate",
+        """`TokenClaims` carried a `token_type` field with a default of "qed",
         so an IdP token -- which has no such claim -- arrived looking
-        gate-issued and was handed to the narrowing check as its own parent.
-        Whether a token is gate-issued is now decided by which key verified it.
+        qed-issued and was handed to the narrowing check as its own parent.
+        Whether a token is qed-issued is now decided by which key verified it.
         """
         import inspect
 
-        from gate.api import app_state
-        from gate.api.routers import token as token_router
-        from gate.core.delegation import claims as claims_module
+        from qed.api import app_state
+        from qed.api.routers import token as token_router
+        from qed.core.delegation import claims as claims_module
 
         # Extra claims are kept, as any unknown claim is -- but no field by
         # that name exists, so nothing can read it off the model.
-        claims = TokenClaims.model_validate({**BASE, "token_type": "gate"})
+        claims = TokenClaims.model_validate({**BASE, "token_type": "qed"})
         assert "token_type" not in type(claims).model_fields
 
         # And no module on the verification path mentions it either.
@@ -126,7 +126,7 @@ class TestATokenCannotDeclareItsOwnKind:
             ]
             assert not offenders, (
                 f"{module.__name__} reads a token_type claim again: {offenders}. "
-                "Whether a token is gate-issued is decided by which key "
+                "Whether a token is qed-issued is decided by which key "
                 "verified it, not by what the token says about itself."
             )
 

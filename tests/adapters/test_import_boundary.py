@@ -39,10 +39,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-ADAPTERS = ROOT / "gate" / "adapters"
+ADAPTERS = ROOT / "qed" / "adapters"
 INTENT = ADAPTERS / "mcp" / "intent.py"
 
-#: Everything ``gate/adapters/mcp/intent.py`` is allowed to import. The point is
+#: Everything ``qed/adapters/mcp/intent.py`` is allowed to import. The point is
 #: the shortness of this list. Adding to it is a decision, not a detail: each
 #: entry is an import that could fail at runtime and take classification with it.
 INTENT_ALLOWLIST = frozenset(
@@ -51,7 +51,7 @@ INTENT_ALLOWLIST = frozenset(
         "dataclasses",
         "typing",
         "regex",
-        "gate",  # gate.core.schemas, for the Scope literal
+        "qed",  # qed.core.schemas, for the Scope literal
     }
 )
 
@@ -80,7 +80,7 @@ class TestTheClassifierHasNoImportThatCanFail:
     def test_it_imports_only_the_allowlist(self) -> None:
         extra = module_roots(INTENT) - INTENT_ALLOWLIST
         assert not extra, (
-            f"gate/adapters/mcp/intent.py imports {sorted(extra)}. Classification must not "
+            f"qed/adapters/mcp/intent.py imports {sorted(extra)}. Classification must not "
             "depend on anything that can fail to import: that is how Valqore's gateway "
             "silently degraded to tool-name matching. If the import is genuinely needed, "
             "add it to INTENT_ALLOWLIST deliberately."
@@ -112,18 +112,18 @@ class TestTheClassifierHasNoImportThatCanFail:
         gate_modules = {
             node.module
             for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("gate.")
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("qed.")
         }
-        assert gate_modules <= {"gate.core.schemas"}, gate_modules
+        assert gate_modules <= {"qed.core.schemas"}, gate_modules
 
     def test_it_is_importable_with_nothing_else_present(self) -> None:
         """A positive check to go with the structural ones."""
         import importlib
         import sys
 
-        for name in [n for n in sys.modules if n.startswith("gate.adapters")]:
+        for name in [n for n in sys.modules if n.startswith("qed.adapters")]:
             del sys.modules[name]
-        module = importlib.import_module("gate.adapters.mcp.intent")
+        module = importlib.import_module("qed.adapters.mcp.intent")
         assert module.classify("db.drop_table", {}).deletes is True
 
 

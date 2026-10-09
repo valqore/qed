@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qed-verify"
+version = "0.1.0.dev1"
+description = "Independent verifier for qed evidence chains"
+requires-python = ">=3.12"
+# `license-files` globs are resolved inside this project directory, so the
+# root LICENSE and NOTICE are copied here rather than referenced upwards. CI
+# asserts the copies are byte-identical to the originals.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+classifiers = ["Programming Language :: Python :: 3.12"]
+# One dependency, on purpose: an auditor must be able to install this on a
+# machine that is not allowed to reach the internet twice.
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+qed-verify = "qed_verify.cli:main"
+
+[tool.setuptools]
+packages = ["qed_verify"]

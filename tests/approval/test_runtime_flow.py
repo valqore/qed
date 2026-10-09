@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from gate.core.approval.model import ApprovalStatus, DecisionKind, decide, dedupe_key
-from gate.core.evidence.hashing import principal_hash
-from gate.core.schemas import Decision, EvidenceType, Mode
-from gate.runtime import Session, check_proposal, open_session
+from qed.core.approval.model import ApprovalStatus, DecisionKind, decide, dedupe_key
+from qed.core.evidence.hashing import principal_hash
+from qed.core.schemas import Decision, EvidenceType, Mode
+from qed.runtime import Session, check_proposal, open_session
 from tests.conftest import make_proposal
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
@@ -35,10 +35,10 @@ NEEDS_APPROVAL: dict[str, object] = {
 
 
 @pytest.fixture
-def session(gate_dir: Path, tmp_path: Path) -> Iterator[Session]:
-    config = tmp_path / "gate.yaml"
+def session(qed_dir: Path, tmp_path: Path) -> Iterator[Session]:
+    config = tmp_path / "qed.yaml"
     config.write_text("mode: enforce\n", encoding="utf-8")
-    opened = open_session(directory=gate_dir, config_path=config)
+    opened = open_session(directory=qed_dir, config_path=config)
     try:
         yield opened
     finally:

@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gate.core.policy.engine import approval_spec, evaluate, explain
-from gate.core.policy.loader import load_bundle
-from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import (
+from qed.core.policy.engine import approval_spec, evaluate, explain
+from qed.core.policy.loader import load_bundle
+from qed.core.policy.model import PolicyBundle
+from qed.core.schemas import (
     ActionProposal,
     Budget,
     BudgetState,

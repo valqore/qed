@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.core import jcs
+from qed.core import jcs
 
 
 def test_object_keys_are_sorted() -> None:

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from gate.core.delegation.exchange import (
+from qed.core.delegation.exchange import (
     MAX_LIFETIME,
     cap_budget,
     grant_for,
     scopes_for_groups,
 )
-from gate.core.schemas import Budget
+from qed.core.schemas import Budget
 
 HOUR = timedelta(hours=1)
 QUARTER = timedelta(minutes=15)

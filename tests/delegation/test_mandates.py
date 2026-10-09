@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-from gate.core.mandates import (
+from qed.core.mandates import (
     MANDATE_ALG,
     MandateError,
     canonical_mandate,
@@ -17,9 +17,9 @@ from gate.core.mandates import (
     signing_payload,
     verify_mandate,
 )
-from gate.core.schemas import Mandate, MandateSignature
-from gate.infra.keys.file import FileSigner
-from gate.infra.storage.sqlite import SqliteStore
+from qed.core.schemas import Mandate, MandateSignature
+from qed.infra.keys.file import FileSigner
+from qed.infra.storage.sqlite import SqliteStore
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
 EXAMPLE = Path(__file__).parents[2] / "examples/mandates/sre-agent.json"
@@ -52,7 +52,7 @@ def sign(mandate: Mandate, signer: FileSigner) -> Mandate:
 
 @pytest.fixture
 def store(tmp_path: Path) -> Iterator[SqliteStore]:
-    with SqliteStore(tmp_path / "gate.db") as opened:
+    with SqliteStore(tmp_path / "qed.db") as opened:
         yield opened
 
 

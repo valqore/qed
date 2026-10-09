@@ -1,10 +1,10 @@
 """The week 2 exit criterion, as a test (SPEC §22).
 
-``gate mcp -- <a real MCP server>`` proxies calls, writes proposal and verdict
-records, and ``gate-verify`` validates the chain.
+``qed mcp -- <a real MCP server>`` proxies calls, writes proposal and verdict
+records, and ``qed-verify`` validates the chain.
 
 Nothing here is mocked. There are three processes: this test as the MCP client,
-``gate mcp`` as the proxy, and ``tests/adapters/upstream_server.py`` as a real
+``qed mcp`` as the proxy, and ``tests/adapters/upstream_server.py`` as a real
 MCP server. The bytes between them are real MCP over real pipes, because the
 things most likely to be wrong -- capability mirroring, the shape of a tool
 error, whether stdout stays clean -- are exactly the things an in-process fake
@@ -22,7 +22,7 @@ import mcp.types as types
 import pytest
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
-from gate.infra.keys.file import PUBLIC_DIR_NAME, init_keys
+from qed.infra.keys.file import PUBLIC_DIR_NAME, init_keys
 from tests.adapters import upstream_server
 
 REPO = Path(__file__).resolve().parents[2]
@@ -33,11 +33,11 @@ TIMEOUT = 60.0
 
 
 def proxy_params(
-    gate_dir: Path, *, extra: list[str] | None = None, env: str = "prod"
+    qed_dir: Path, *, extra: list[str] | None = None, env: str = "prod"
 ) -> StdioServerParameters:
-    """``gate mcp`` as a subprocess, via the installed entry point's module.
+    """``qed mcp`` as a subprocess, via the installed entry point's module.
 
-    ``python -c`` rather than the ``gate`` console script so the test does not
+    ``python -c`` rather than the ``qed`` console script so the test does not
     depend on where pip put the wrapper, which differs between Windows and
     POSIX and between a venv and a user install.
     """
@@ -45,10 +45,10 @@ def proxy_params(
         command=sys.executable,
         args=[
             "-c",
-            "from gate.cli import main; main()",
+            "from qed.cli import main; main()",
             "mcp",
             "--dir",
-            str(gate_dir),
+            str(qed_dir),
             "--env",
             env,
             "--server-name",
@@ -68,21 +68,21 @@ def proxy_params(
 
 @pytest.fixture
 def proxy_dir(tmp_path: Path) -> Path:
-    directory = tmp_path / "gate"
+    directory = tmp_path / "qed"
     init_keys(directory)
     return directory
 
 
-def read_chain(gate_dir: Path) -> list[dict[str, object]]:
+def read_chain(qed_dir: Path) -> list[dict[str, object]]:
     """Export the chain with the CLI, so the test reads what an auditor would."""
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "from gate.cli import main; main()",
+            "from qed.cli import main; main()",
             "export",
             "--dir",
-            str(gate_dir),
+            str(qed_dir),
         ],
         capture_output=True,
         text=True,
@@ -121,7 +121,7 @@ async def test_the_proxy_forwards_a_call_and_records_the_decision(proxy_dir: Pat
         assert init.server_info.version == upstream_server.VERSION
         assert init.instructions is not None
         assert upstream_server.INSTRUCTIONS in init.instructions
-        assert "gate" in init.instructions
+        assert "qed" in init.instructions
 
         tools = await client.list_tools()
         assert [tool.name for tool in tools.tools] == [tool.name for tool in upstream_server.TOOLS]
@@ -152,7 +152,7 @@ async def test_the_proxy_forwards_a_call_and_records_the_decision(proxy_dir: Pat
 
 
 @pytest.mark.asyncio
-async def test_the_chain_the_proxy_wrote_passes_gate_verify(proxy_dir: Path) -> None:
+async def test_the_chain_the_proxy_wrote_passes_qed_verify(proxy_dir: Path) -> None:
     async with (
         stdio_client(proxy_params(proxy_dir)) as (read, write),
         ClientSession(read, write, read_timeout_seconds=TIMEOUT) as client,
@@ -161,20 +161,20 @@ async def test_the_chain_the_proxy_wrote_passes_gate_verify(proxy_dir: Path) -> 
         await client.call_tool("list_tables", {})
         await client.call_tool("execute_sql", {"sql": "SELECT 1", "table": "orders"})
 
-    from gate_verify.verify import load_jsonl, verify_records
+    from qed_verify.verify import load_jsonl, verify_records
 
-    from gate.core.evidence.export.jsonl import to_jsonl
-    from gate.infra.keys.file import load_public_keys
-    from gate.infra.storage.sqlite import SqliteStore
+    from qed.core.evidence.export.jsonl import to_jsonl
+    from qed.infra.keys.file import load_public_keys
+    from qed.infra.storage.sqlite import SqliteStore
 
-    store = SqliteStore(proxy_dir / "gate.db")
+    store = SqliteStore(proxy_dir / "qed.db")
     text = to_jsonl(store.iter_evidence())
     store.close()
 
     report = verify_records(
         load_jsonl(text),
         load_public_keys(proxy_dir / PUBLIC_DIR_NAME),
-        instance_id="gate-local",
+        instance_id="qed-local",
     )
     assert report.ok, report.summary()
 
@@ -205,7 +205,7 @@ async def test_shadow_mode_records_a_would_be_approval_and_forwards_anyway(
         )
         assert isinstance(result, types.CallToolResult)
         assert not result.is_error, "shadow mode must not stop the call"
-        assert "[gate" not in _text(result)
+        assert "[qed" not in _text(result)
 
     chain = read_chain(proxy_dir)
     verdict = payload_of(records_of(chain, "verdict")[0])["verdict"]
@@ -250,7 +250,7 @@ async def test_enforce_mode_blocks_and_tells_the_model_why(proxy_dir: Path, tmp_
     """The same proxy in enforce mode. Week 10 flips this on; it works now."""
     import yaml
 
-    config = tmp_path / "gate.yaml"
+    config = tmp_path / "qed.yaml"
     config.write_text(yaml.safe_dump({"mode": "enforce"}), encoding="utf-8")
 
     params = proxy_params(proxy_dir, extra=["--config", str(config)])
@@ -265,7 +265,7 @@ async def test_enforce_mode_blocks_and_tells_the_model_why(proxy_dir: Path, tmp_
         assert isinstance(result, types.CallToolResult)
         assert result.is_error
         text = _text(result)
-        assert text.startswith("[gate APPROVAL PENDING]")
+        assert text.startswith("[qed APPROVAL PENDING]")
         assert "AG-BLR-003" in text
         assert "week 4" in text, "be honest that there is no approval route yet"
 
@@ -365,7 +365,7 @@ def test_the_proxy_refuses_to_start_without_a_signing_key(tmp_path: Path) -> Non
         [
             sys.executable,
             "-c",
-            "from gate.cli import main; main()",
+            "from qed.cli import main; main()",
             "mcp",
             "--dir",
             str(tmp_path / "empty"),
@@ -381,7 +381,7 @@ def test_the_proxy_refuses_to_start_without_a_signing_key(tmp_path: Path) -> Non
         timeout=TIMEOUT,
     )
     assert result.returncode == 1
-    assert "gate keys init" in result.stderr
+    assert "qed keys init" in result.stderr
     assert result.stdout == "", "stdout is the MCP transport and must stay empty"
 
 

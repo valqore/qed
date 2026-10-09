@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import pytest
 
-from gate.adapters.http_proxy.proxy import INTENT_HEADER, HttpProxyOptions, build_http_proposal
-from gate.adapters.http_proxy.targets import classify_method, derive_target
-from gate.adapters.http_proxy.wire import parse_headers, parse_request_line, resolve_target
-from gate.core.broker.model import Upstream, UpstreamSet, match_upstream
-from gate.core.evidence.hashing import principal_hash
-from gate.core.policy.engine import evaluate
-from gate.core.policy.loader import baseline_pack_dir, load_bundle
-from gate.core.schemas import (
+from qed.adapters.http_proxy.proxy import INTENT_HEADER, HttpProxyOptions, build_http_proposal
+from qed.adapters.http_proxy.targets import classify_method, derive_target
+from qed.adapters.http_proxy.wire import parse_headers, parse_request_line, resolve_target
+from qed.core.broker.model import Upstream, UpstreamSet, match_upstream
+from qed.core.evidence.hashing import principal_hash
+from qed.core.policy.engine import evaluate
+from qed.core.policy.loader import baseline_pack_dir, load_bundle
+from qed.core.schemas import (
     ActionKind,
     BudgetState,
     Decision,

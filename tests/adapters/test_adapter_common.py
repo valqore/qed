@@ -1,4 +1,4 @@
-"""The shared adapter library (``gate/adapters/common.py``).
+"""The shared adapter library (``qed/adapters/common.py``).
 
 Two things here are load-bearing for the chain and easy to get wrong:
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.adapters.common import (
+from qed.adapters.common import (
     MAX_PARAMS_BYTES,
     OMITTED_KEY,
     AdapterInfo,
@@ -23,11 +23,11 @@ from gate.adapters.common import (
     new_proposal_id,
     params_hash,
 )
-from gate.core import jcs
-from gate.core.evidence.hashing import principal_hash
-from gate.core.policy.engine import evaluate
-from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import (
+from qed.core import jcs
+from qed.core.evidence.hashing import principal_hash
+from qed.core.policy.engine import evaluate
+from qed.core.policy.model import PolicyBundle
+from qed.core.schemas import (
     ActionKind,
     BudgetState,
     Decision,

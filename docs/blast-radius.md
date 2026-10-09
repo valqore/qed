@@ -10,7 +10,7 @@ years, which is what makes a recorded decision replayable.
 
 ## The table
 
-Read top to bottom and add up. Implementation: `gate/core/policy/blast_radius.py`.
+Read top to bottom and add up. Implementation: `qed/core/policy/blast_radius.py`.
 
 | Contribution | Points |
 |---|---|
@@ -29,7 +29,7 @@ Read top to bottom and add up. Implementation: `gate/core/policy/blast_radius.py
 | touches identity / secrets / audit surface | +15 |
 | destructive verb | +15 |
 
-Total clamped to 100. `gate policy explain` prints the contributions for a
+Total clamped to 100. `qed policy explain` prints the contributions for a
 specific proposal.
 
 ## The two pattern signals

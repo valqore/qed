@@ -1,13 +1,13 @@
 # The HTTP forward proxy
 
-SPEC §12.3. One sentence: **point the agent's `HTTPS_PROXY` at the gate and
+SPEC §12.3. One sentence: **point the agent's `HTTPS_PROXY` at QED and
 every outbound call gets a verdict.**
 
 ```
-$ gate proxy --human you@acme.com --env prod
-gate: forward proxy on 127.0.0.1:8888 in shadow mode, env prod
-gate: point your agent at it with  HTTPS_PROXY=http://127.0.0.1:8888 HTTP_PROXY=http://127.0.0.1:8888
-gate: every CONNECT tunnel is ADVISORY -- the gate decides whether the
+$ qed proxy --human you@acme.com --env prod
+qed: forward proxy on 127.0.0.1:8888 in shadow mode, env prod
+qed: point your agent at it with  HTTPS_PROXY=http://127.0.0.1:8888 HTTP_PROXY=http://127.0.0.1:8888
+qed: every CONNECT tunnel is ADVISORY -- QED decides whether the
       connection may be opened, but the request inside it is encrypted, so it
       cannot replace the credential and the agent is using its own.
 ```
@@ -25,10 +25,10 @@ same port are not equally governable.
 |---|---|---|
 | What arrives | `GET http://api.test/v1/orders` | `CONNECT api.test:443` |
 | Decided on | method, path, query, headers | host and port |
-| Credential | the gate's, with the agent's stripped | the agent's, inside TLS |
+| Credential | QED's, with the agent's stripped | the agent's, inside TLS |
 | `enforcement` | `enforcing` when the broker holds it | **always `advisory`** |
 
-**Every tunnel is advisory.** The gate decides whether the connection may be
+**Every tunnel is advisory.** QED decides whether the connection may be
 opened at all, which is a real control and the refusal is real — but once the
 tunnel is open it carries ciphertext. There is no method, no path, no body, and
 no way to replace the credential inside it. An adapter that recorded
@@ -112,7 +112,7 @@ and wrong either way it only moves a hint that a rule can override.
 `CONNECT` claims nothing. Guessing `writes=True` would route every TLS
 connection to an approver; guessing `writes=False` would tell the blast-radius
 scorer the connection is harmless. Neither is known, so neither is asserted,
-and the summary says in words what the gate cannot see.
+and the summary says in words what QED cannot see.
 
 ### Declaring intent
 
@@ -120,15 +120,15 @@ An agent can say what it is doing with a header, the HTTP counterpart of MCP's
 `_meta.intent`:
 
 ```
-X-Gate-Intent: refund order 123
+X-QED-Intent: refund order 123
 ```
 
 It lands in `context.intent`, and it is stripped before the request is
-forwarded — it is for the gate, not for the upstream.
+forwarded — it is for QED, not for the upstream.
 
 ## Enforcing: the credential
 
-An `http` upstream in `upstreams.yaml` is what makes the gate enforcing:
+An `http` upstream in `upstreams.yaml` is what makes QED enforcing:
 
 ```yaml
 upstreams:
@@ -137,7 +137,7 @@ upstreams:
     match: { host_globs: ["api.stripe.com"], environments: [prod] }
     credential:
       source: vault
-      ref: "secret/data/gate/stripe#SECRET_KEY"
+      ref: "secret/data/qed/stripe#SECRET_KEY"
       inject: { type: header, name: Authorization, format: "Bearer {value}" }
 ```
 
@@ -156,13 +156,13 @@ still chooses which credential gets used.
 If the agent keeps supplying one, the closing summary says so:
 
 ```
-gate: removed 4 agent-supplied credential header(s): Authorization, X-Api-Key.
+qed: removed 4 agent-supplied credential header(s): Authorization, X-Api-Key.
       Something is wiring a token into the agent; it is being ignored.
 ```
 
 That is worth noticing in both directions: it usually means somebody wired a
 token into the agent and is wondering why it is ignored, and it can mean the
-agent is trying to reach past the gate.
+agent is trying to reach past QED.
 
 **With no `http` upstream configured, the session is advisory** and says so at
 startup. The MCP proxy keeps the operator's flag in that situation because
@@ -189,9 +189,9 @@ ids with it.
 ```
 HTTP/1.1 403 Forbidden
 
-[gate BLOCK] AG-DAT-013: This request targets the cloud instance metadata
+[qed BLOCK] AG-DAT-013: This request targets the cloud instance metadata
 service, which hands out the instance's own credentials. Fix: An agent does
-not need instance credentials. Give it a scoped credential through the gate's
+not need instance credentials. Give it a scoped credential through QED's
 broker instead.
 ```
 
@@ -208,7 +208,7 @@ broker instead.
 A proxy that resolves an ambiguity in request framing can be made to disagree
 with the server behind it about where one request ends and the next begins.
 That is request smuggling, and here it has a sharper edge than usual: the
-smuggled half is the half the gate never decided, so it would execute with no
+smuggled half is the half QED never decided, so it would execute with no
 verdict and leave no record.
 
 So anything ambiguous is refused:
@@ -231,7 +231,7 @@ port scan, not an error, and is not answered or counted.
 
 ## Loopback is the access control
 
-`gate proxy` binds `127.0.0.1`. Binding anything else needs
+`qed proxy` binds `127.0.0.1`. Binding anything else needs
 `--allow-non-loopback`, because a forward proxy on a reachable interface is an
 open relay: anything that can see the port gets to make requests, and the chain
 would attribute every one of them to this session's `--human`.

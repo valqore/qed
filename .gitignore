@@ -17,7 +17,7 @@ htmlcov/
 *.db-journal
 *.db-wal
 *.db-shm
-.gate/
+.qed/
 data/
 scratch/
 
@@ -25,7 +25,7 @@ scratch/
 # locally as well as in CI. *.pem already covers the keys; an exported chain is
 # evidence data, not source, and carries whatever was in the proposals that
 # produced it. An OSCAL export is the same data in another shape.
-ci-gate/
+ci-qed/
 ci-mcp/
 ci-no-keys/
 *-chain.jsonl

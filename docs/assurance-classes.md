@@ -11,8 +11,8 @@ same chain.
 
 | Class | Written by | What it proves | How it could be wrong |
 |---|---|---|---|
-| `kernel` | gate itself | The decision was made as recorded, against the recorded policy, for the recorded principal. Replayable from the record alone. | Only if gate's own code or signing key is compromised. |
-| `broker` | gate's credential broker | The action was executed through gate, with a credential the agent never held. The agent could not have made this call any other way. | Only if the upstream credential leaked outside the broker. |
+| `kernel` | qed itself | The decision was made as recorded, against the recorded policy, for the recorded principal. Replayable from the record alone. | Only if qed's own code or signing key is compromised. |
+| `broker` | qed's credential broker | The action was executed through qed, with a credential the agent never held. The agent could not have made this call any other way. | Only if the upstream credential leaked outside the broker. |
 | `adapter` | an adapter inside the agent's process | A call was attempted and this was its result. The adapter is in the agent's trust boundary. | A compromised or bypassed adapter can misreport or stay silent. |
 | `self` | the agent | The agent's own claim about what it did. | Freely. This is testimony, not evidence. |
 

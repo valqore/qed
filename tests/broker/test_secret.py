@@ -15,7 +15,7 @@ import traceback
 
 import pytest
 
-from gate.core.broker.model import REDACTED, Secret
+from qed.core.broker.model import REDACTED, Secret
 
 TOKEN = "ghp_realLookingTokenThatMustNeverAppear"
 

@@ -18,21 +18,21 @@ Two things follow:
 
 1. Removing the Kubernetes-specific parts removes the module. The graph walk is
    the module; there is no environment-agnostic core underneath it.
-2. The unit is wrong. gate's `derived.blast_radius` is a 0–100 risk score, and
+2. The unit is wrong. qed's `derived.blast_radius` is a 0–100 risk score, and
    ADR-008 gates unattended agents on `blast_radius > 60`. As a resource count,
    "> 60" means "touches more than sixty objects", which is a completely
    different statement and happens to be false for every single-row `DROP TABLE`
    in production.
 
-Also, gate explicitly leaves Kubernetes manifest analysis in Valqore
+Also, qed explicitly leaves Kubernetes manifest analysis in Valqore
 (SPEC §1.3), so the input this module needs does not exist here.
 
 ## Decision
 
-Write `gate/core/policy/blast_radius.py` fresh as an additive table over fields
+Write `qed/core/policy/blast_radius.py` fresh as an additive table over fields
 the proposal already carries: scope, environment, kind, writes, deletes, and two
 pattern signals. Clamp at 100. Document the table in `docs/blast-radius.md` and
-expose the per-contribution breakdown through `gate policy explain`.
+expose the per-contribution breakdown through `qed policy explain`.
 
 Delete the `governance/blast_radius.py` row from the port list.
 

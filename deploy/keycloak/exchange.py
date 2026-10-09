@@ -1,4 +1,4 @@
-"""Exchange an IdP token for a gate token, the way an adapter does.
+"""Exchange an IdP token for a qed token, the way an adapter does.
 
 Used by ``demo.sh``. The signing helpers are imported from the package rather
 than reimplemented here: a demo that computed the MAC its own way would pass
@@ -6,9 +6,9 @@ while the two sides disagreed. The first run of this script failed twice for
 exactly that reason -- a hex digest where the server expects unpadded base64url,
 then a guessed header name -- so even the header constants are imported.
 
-    python exchange.py <gate-url> <adapter-id> <idp-token> [scope]
+    python exchange.py <qed-url> <adapter-id> <idp-token> [scope]
 
-Prints the gate token on stdout and a short summary on stderr, so the caller
+Prints QED token on stdout and a short summary on stderr, so the caller
 can capture one without the other.
 """
 
@@ -20,7 +20,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from gate.api.auth import (
+from qed.api.auth import (
     HEADER_ADAPTER,
     HEADER_NONCE,
     HEADER_SIGNATURE,
@@ -28,7 +28,7 @@ from gate.api.auth import (
     canonical_string,
     sign,
 )
-from gate.core.schemas import rfc3339_ms, utcnow
+from qed.core.schemas import rfc3339_ms, utcnow
 
 PATH = "/v1/token"
 
@@ -50,9 +50,9 @@ def main() -> int:
         }
     ).encode()
 
-    secret = os.environ.get("GATE_DEMO_SECRET")
+    secret = os.environ.get("QED_DEMO_SECRET")
     if not secret:
-        sys.stderr.write("GATE_DEMO_SECRET is not set\n")
+        sys.stderr.write("QED_DEMO_SECRET is not set\n")
         return 2
 
     timestamp = rfc3339_ms(utcnow())

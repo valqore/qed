@@ -1,9 +1,9 @@
-"""`gate proxy` end to end (SPEC §12.3).
+"""`qed proxy` end to end (SPEC §12.3).
 
 A real listening socket, a real upstream, and the written chain read back
 afterwards. The unit tests prove the proposal is right; these prove the
 request actually went where the verdict said it could, that the credential
-the upstream received came from the gate rather than the agent, and that
+the upstream received came from QED rather than the agent, and that
 ``context.enforcement`` in the evidence is the derived answer.
 
 The raw-socket style is on purpose. An HTTP client library would hide the
@@ -21,14 +21,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gate.adapters.http_proxy.proxy import HttpProxyOptions, HttpProxyStats, http_upstreams, serving
-from gate.core.broker.model import Upstream, UpstreamSet
-from gate.core.evidence.hashing import principal_hash
-from gate.core.schemas import Enforcement
-from gate.infra.keys.file import init_keys
-from gate.infra.secrets.broker import CredentialBroker
-from gate.infra.secrets.resolver import CredentialResolver
-from gate.runtime import open_session
+from qed.adapters.http_proxy.proxy import HttpProxyOptions, HttpProxyStats, http_upstreams, serving
+from qed.core.broker.model import Upstream, UpstreamSet
+from qed.core.evidence.hashing import principal_hash
+from qed.core.schemas import Enforcement
+from qed.infra.keys.file import init_keys
+from qed.infra.secrets.broker import CredentialBroker
+from qed.infra.secrets.resolver import CredentialResolver
+from qed.runtime import open_session
 from tests.adapters.http_proxy.upstream import closed_port, echo_server, tcp_echo
 
 pytestmark = pytest.mark.anyio
@@ -42,14 +42,14 @@ def anyio_backend() -> str:
 
 
 @pytest.fixture
-def gate_dir(tmp_path: Path) -> Path:
-    directory = tmp_path / "gate"
+def qed_dir(tmp_path: Path) -> Path:
+    directory = tmp_path / "qed"
     init_keys(directory)
     return directory
 
 
 def config_file(tmp_path: Path, mode: str = "shadow") -> Path:
-    path = tmp_path / "gate.yaml"
+    path = tmp_path / "qed.yaml"
     path.write_text(yaml.safe_dump({"mode": mode}), encoding="utf-8")
     return path
 
@@ -73,11 +73,11 @@ OPTIONS = HttpProxyOptions(
 class Harness:
     """A running proxy plus the chain it is writing."""
 
-    def __init__(self, host: str, port: int, stats: HttpProxyStats, gate_dir: Path) -> None:
+    def __init__(self, host: str, port: int, stats: HttpProxyStats, qed_dir: Path) -> None:
         self.host = host
         self.port = port
         self.stats = stats
-        self.gate_dir = gate_dir
+        self.qed_dir = qed_dir
 
     async def speak(self, request: bytes, then: bytes = b"", *, expect: int | None = None) -> bytes:
         """Send raw bytes to the proxy and read what it says back.
@@ -116,9 +116,9 @@ class Harness:
         return self.results()
 
     def chain(self) -> list[dict[str, object]]:
-        from gate.infra.storage.sqlite import SqliteStore
+        from qed.infra.storage.sqlite import SqliteStore
 
-        with SqliteStore(self.gate_dir / "gate.db") as store:
+        with SqliteStore(self.qed_dir / "qed.db") as store:
             return [
                 {"type": record.type.value, "payload": record.payload or {}}
                 for record in store.iter_evidence()
@@ -138,9 +138,9 @@ class Harness:
 
     def record_enforcement(self, type_: str) -> list[str]:
         """``_enforcement`` on the record envelope, not inside the payload."""
-        from gate.infra.storage.sqlite import SqliteStore
+        from qed.infra.storage.sqlite import SqliteStore
 
-        with SqliteStore(self.gate_dir / "gate.db") as store:
+        with SqliteStore(self.qed_dir / "qed.db") as store:
             return [
                 record.enforcement.value if record.enforcement is not None else "none"
                 for record in store.iter_evidence()
@@ -156,9 +156,9 @@ class Harness:
 
 
 @pytest.fixture
-async def proxy(gate_dir: Path, tmp_path: Path):  # type: ignore[no-untyped-def]
+async def proxy(qed_dir: Path, tmp_path: Path):  # type: ignore[no-untyped-def]
     """A proxy with no broker: everything is advisory, as it should be."""
-    session = open_session(directory=gate_dir, config_path=config_file(tmp_path))
+    session = open_session(directory=qed_dir, config_path=config_file(tmp_path))
     stats = HttpProxyStats()
     try:
         async with serving(session=session, options=OPTIONS, port=0, stats=stats) as (
@@ -166,7 +166,7 @@ async def proxy(gate_dir: Path, tmp_path: Path):  # type: ignore[no-untyped-def]
             port,
             counters,
         ):
-            yield Harness(host, port, counters, gate_dir)
+            yield Harness(host, port, counters, qed_dir)
     finally:
         session.close()
 
@@ -187,7 +187,7 @@ async def test_a_plain_request_is_forwarded_and_recorded(proxy: Harness) -> None
     # Origin form upstream, Host from the resolved target, and Via added.
     assert seen["request_line"] == "GET /v1/orders HTTP/1.1"
     assert seen["headers"]["user-agent"] == "claude-code"
-    assert seen["headers"]["via"] == "1.1 gate"
+    assert seen["headers"]["via"] == "1.1 qed"
     assert proxy.stats.requests == 1
     assert proxy.stats.allowed == 1
     assert [p["http_status"] for p in proxy.results()] == [200]
@@ -241,7 +241,7 @@ async def test_a_tunnel_carries_bytes_both_ways_and_counts_them(proxy: Harness) 
 
 
 async def test_every_tunnel_is_recorded_as_advisory(proxy: Harness) -> None:
-    """The gate can refuse to open it, which is real. It cannot see inside it
+    """QED can refuse to open it, which is real. It cannot see inside it
     or replace the credential, so claiming `enforcing` would put a control in
     the evidence that the transport does not allow."""
     async with tcp_echo() as (up_host, up_port):
@@ -287,7 +287,7 @@ async def test_an_ambiguous_request_is_refused_with_a_status(
 ) -> None:
     """A proxy that resolves an ambiguity can be made to disagree with its
     upstream about where the request ends, and the smuggled half would be the
-    half the gate never decided."""
+    half QED never decided."""
     answer = await proxy.speak(request_bytes)
     assert answer.split(b" ")[1] == status
     assert proxy.stats.malformed >= 1
@@ -328,7 +328,7 @@ UPSTREAM_CONFIG: list[dict[str, object]] = [
 
 
 async def run_with_broker(
-    gate_dir: Path,
+    qed_dir: Path,
     tmp_path: Path,
     upstreams: list[dict[str, object]],
     environ: dict[str, str],
@@ -336,7 +336,7 @@ async def run_with_broker(
     *,
     options: HttpProxyOptions = OPTIONS,
 ) -> tuple[bytes, Harness]:
-    session = open_session(directory=gate_dir, config_path=config_file(tmp_path))
+    session = open_session(directory=qed_dir, config_path=config_file(tmp_path))
     stats = HttpProxyStats()
     try:
         async with serving(
@@ -346,57 +346,57 @@ async def run_with_broker(
             stats=stats,
             broker=broker_for(upstreams, environ),
         ) as (host, port, counters):
-            harness = Harness(host, port, counters, gate_dir)
+            harness = Harness(host, port, counters, qed_dir)
             return await harness.speak(request), harness
     finally:
         session.close()
 
 
-async def test_the_gates_credential_replaces_the_agents(gate_dir: Path, tmp_path: Path) -> None:
+async def test_the_gates_credential_replaces_the_agents(qed_dir: Path, tmp_path: Path) -> None:
     """Stripping comes before attaching. An adapter that added the broker's
     header while leaving the agent's in place would be an adapter where the
     agent still chooses which credential is used."""
     async with echo_server() as (up_host, up_port):
         answer, harness = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             UPSTREAM_CONFIG,
-            {"ORDERS_API_TOKEN": "from-the-gate"},
+            {"ORDERS_API_TOKEN": "from-the-qed"},
             f"GET http://{up_host}:{up_port}/v1/orders HTTP/1.1\r\n"
             f"Authorization: Bearer the-agents-own-token\r\n\r\n".encode(),
         )
     seen = json.loads(answer.split(b"\r\n\r\n", 1)[1])
-    assert seen["headers"]["authorization"] == "Bearer from-the-gate"
+    assert seen["headers"]["authorization"] == "Bearer from-the-qed"
     assert "the-agents-own-token" not in json.dumps(seen)
     assert harness.stats.stripped == ["Authorization"]
     assert harness.enforcement_recorded() == ["enforcing"]
 
 
 async def test_a_capitalised_header_does_not_get_past_the_strip(
-    gate_dir: Path, tmp_path: Path
+    qed_dir: Path, tmp_path: Path
 ) -> None:
     async with echo_server() as (up_host, up_port):
         answer, _ = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             UPSTREAM_CONFIG,
-            {"ORDERS_API_TOKEN": "from-the-gate"},
+            {"ORDERS_API_TOKEN": "from-the-qed"},
             f"GET http://{up_host}:{up_port}/v1/orders HTTP/1.1\r\n"
             f"AUTHORIZATION: Bearer sneaky\r\nX-Api-Key: also-sneaky\r\n\r\n".encode(),
         )
     seen = json.loads(answer.split(b"\r\n\r\n", 1)[1])
     assert "sneaky" not in json.dumps(seen)
-    assert seen["headers"]["authorization"] == "Bearer from-the-gate"
+    assert seen["headers"]["authorization"] == "Bearer from-the-qed"
 
 
 async def test_a_missing_credential_is_advisory_and_the_request_still_goes(
-    gate_dir: Path, tmp_path: Path
+    qed_dir: Path, tmp_path: Path
 ) -> None:
     """Failing the request would make an unset environment variable look like a
     policy decision, and the operator would go looking in the wrong place."""
     async with echo_server() as (up_host, up_port):
         answer, harness = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             UPSTREAM_CONFIG,
             {},
@@ -407,12 +407,12 @@ async def test_a_missing_credential_is_advisory_and_the_request_still_goes(
     assert harness.stats.advisory == 1
 
 
-async def test_an_advisory_flag_overrides_a_held_credential(gate_dir: Path, tmp_path: Path) -> None:
+async def test_an_advisory_flag_overrides_a_held_credential(qed_dir: Path, tmp_path: Path) -> None:
     """The flag is a ceiling. An operator can ask for less than the broker can
     give, never for more."""
     async with echo_server() as (up_host, up_port):
         _, harness = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             UPSTREAM_CONFIG,
             {"ORDERS_API_TOKEN": "x"},
@@ -425,11 +425,11 @@ async def test_an_advisory_flag_overrides_a_held_credential(gate_dir: Path, tmp_
     assert harness.enforcement_recorded() == ["advisory"]
 
 
-async def test_the_credential_never_reaches_the_chain(gate_dir: Path, tmp_path: Path) -> None:
+async def test_the_credential_never_reaches_the_chain(qed_dir: Path, tmp_path: Path) -> None:
     secret = "tok-hunter2-do-not-log"
     async with echo_server() as (up_host, up_port):
         _, harness = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             UPSTREAM_CONFIG,
             {"ORDERS_API_TOKEN": secret},
@@ -442,7 +442,7 @@ async def test_the_credential_never_reaches_the_chain(gate_dir: Path, tmp_path: 
 
 
 async def test_sigv4_is_refused_rather_than_forwarded_unsigned(
-    gate_dir: Path, tmp_path: Path
+    qed_dir: Path, tmp_path: Path
 ) -> None:
     """The signature covers the request body, so it cannot be planned ahead.
     Forwarding unsigned would mean the agent's own credentials get used after
@@ -457,7 +457,7 @@ async def test_sigv4_is_refused_rather_than_forwarded_unsigned(
     ]
     async with echo_server() as (up_host, up_port):
         answer, harness = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             config,
             {"AWS_KEY": "AKIAnotreal"},
@@ -468,11 +468,11 @@ async def test_sigv4_is_refused_rather_than_forwarded_unsigned(
     assert [p["status"] for p in harness.results()] == ["error"]
 
 
-async def test_an_env_injection_is_reported_as_a_config_error(gate_dir: Path) -> None:
+async def test_an_env_injection_is_reported_as_a_config_error(qed_dir: Path) -> None:
     """An `env` injection means "put it in the child's environment", which an
     HTTP request does not have. Caught at startup, where somebody is still
     reading the output, rather than silently dropped per request."""
-    from gate.adapters.http_proxy.proxy import injection_problems
+    from qed.adapters.http_proxy.proxy import injection_problems
 
     problems = injection_problems(
         UpstreamSet(
@@ -493,10 +493,10 @@ async def test_an_env_injection_is_reported_as_a_config_error(gate_dir: Path) ->
     )
     assert len(problems) == 1
     assert "does not have" in problems[0]
-    del gate_dir
+    del qed_dir
 
 
-async def test_an_mcp_upstream_is_not_used_for_http(gate_dir: Path) -> None:
+async def test_an_mcp_upstream_is_not_used_for_http(qed_dir: Path) -> None:
     """`match_upstream` does not look at `kind`, so an upstream written for an
     MCP server with a loose match would otherwise be picked up here and the
     proxy would try to put a database URL in an HTTP header."""
@@ -507,7 +507,7 @@ async def test_an_mcp_upstream_is_not_used_for_http(gate_dir: Path) -> None:
         ]
     )
     assert [u.id for u in http_upstreams(mixed).upstreams] == ["an-api"]
-    del gate_dir
+    del qed_dir
 
 
 # --------------------------------------------------------------------------
@@ -515,12 +515,12 @@ async def test_an_mcp_upstream_is_not_used_for_http(gate_dir: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-async def test_a_blocked_request_never_reaches_the_upstream(gate_dir: Path, tmp_path: Path) -> None:
+async def test_a_blocked_request_never_reaches_the_upstream(qed_dir: Path, tmp_path: Path) -> None:
     """The metadata service is the sharpest case: one unauthenticated GET to a
     link-local address returns the instance role's keys."""
-    path = tmp_path / "gate.yaml"
+    path = tmp_path / "qed.yaml"
     path.write_text(yaml.safe_dump({"mode": "enforce"}), encoding="utf-8")
-    session = open_session(directory=gate_dir, config_path=path)
+    session = open_session(directory=qed_dir, config_path=path)
     stats = HttpProxyStats()
     try:
         async with serving(session=session, options=OPTIONS, port=0, stats=stats) as (
@@ -528,7 +528,7 @@ async def test_a_blocked_request_never_reaches_the_upstream(gate_dir: Path, tmp_
             port,
             counters,
         ):
-            harness = Harness(host, port, counters, gate_dir)
+            harness = Harness(host, port, counters, qed_dir)
             answer = await harness.speak(
                 b"GET http://169.254.169.254/latest/meta-data/iam/ HTTP/1.1\r\n\r\n"
             )
@@ -543,7 +543,7 @@ async def test_a_blocked_request_never_reaches_the_upstream(gate_dir: Path, tmp_
 
 
 async def test_shadow_mode_forwards_what_it_would_have_blocked(
-    gate_dir: Path, tmp_path: Path
+    qed_dir: Path, tmp_path: Path
 ) -> None:
     """ADR-003: the verdict is recorded with `mode: shadow` and the request
     goes through, which is what makes "we have been observing since this date"
@@ -567,7 +567,7 @@ async def test_shadow_mode_forwards_what_it_would_have_blocked(
         encoding="utf-8",
     )
     session = open_session(
-        directory=gate_dir, config_path=config_file(tmp_path), policy_paths=[policy]
+        directory=qed_dir, config_path=config_file(tmp_path), policy_paths=[policy]
     )
     stats = HttpProxyStats()
     try:
@@ -579,7 +579,7 @@ async def test_shadow_mode_forwards_what_it_would_have_blocked(
                 counters,
             ),
         ):
-            harness = Harness(host, port, counters, gate_dir)
+            harness = Harness(host, port, counters, qed_dir)
             answer = await harness.speak(
                 f"GET http://{up_host}:{up_port}/ HTTP/1.1\r\n\r\n".encode()
             )
@@ -599,14 +599,14 @@ async def test_shadow_mode_forwards_what_it_would_have_blocked(
 async def test_the_result_records_the_same_enforcement_as_the_proposal(
     proxy: Harness,
 ) -> None:
-    """Found by running `gate proxy` against the real internet rather than
+    """Found by running `qed proxy` against the real internet rather than
     against a fixture.
 
     The proposal said `advisory`, correctly -- no upstream was configured.
     Two records later the `execution_result` said `enforcing`, because the
     recording path read the operator's flag instead of the answer that had
     just been derived. One chain, one call, two different claims about
-    whether the gate was holding the credential.
+    whether QED was holding the credential.
     """
     async with echo_server() as (up_host, up_port):
         await proxy.speak(f"GET http://{up_host}:{up_port}/ HTTP/1.1\r\n\r\n".encode())
@@ -619,11 +619,11 @@ async def test_an_advisory_result_is_recorded_as_the_agents_own_testimony(
 ) -> None:
     """ADR-007.1: an advisory adapter is one the agent could have gone
     around, so `assurance` is `self` and not `adapter`."""
-    from gate.infra.storage.sqlite import SqliteStore
+    from qed.infra.storage.sqlite import SqliteStore
 
     async with echo_server() as (up_host, up_port):
         await proxy.speak(f"GET http://{up_host}:{up_port}/ HTTP/1.1\r\n\r\n".encode())
-    with SqliteStore(proxy.gate_dir / "gate.db") as store:
+    with SqliteStore(proxy.qed_dir / "qed.db") as store:
         assurance = [
             record.assurance.value
             for record in store.iter_evidence()
@@ -633,11 +633,11 @@ async def test_an_advisory_result_is_recorded_as_the_agents_own_testimony(
 
 
 async def test_a_held_credential_makes_the_result_say_enforcing(
-    gate_dir: Path, tmp_path: Path
+    qed_dir: Path, tmp_path: Path
 ) -> None:
     async with echo_server() as (up_host, up_port):
         _, harness = await run_with_broker(
-            gate_dir,
+            qed_dir,
             tmp_path,
             UPSTREAM_CONFIG,
             {"ORDERS_API_TOKEN": "held"},
@@ -648,12 +648,12 @@ async def test_a_held_credential_makes_the_result_say_enforcing(
 
 
 async def test_a_tunnel_result_says_advisory_even_with_a_credential_held(
-    gate_dir: Path, tmp_path: Path
+    qed_dir: Path, tmp_path: Path
 ) -> None:
     """A tunnel cannot be enforcing however well the broker is configured,
     and the result has to agree with the proposal about that."""
     async with tcp_echo() as (up_host, up_port):
-        session = open_session(directory=gate_dir, config_path=config_file(tmp_path))
+        session = open_session(directory=qed_dir, config_path=config_file(tmp_path))
         stats = HttpProxyStats()
         try:
             async with serving(
@@ -663,7 +663,7 @@ async def test_a_tunnel_result_says_advisory_even_with_a_credential_held(
                 stats=stats,
                 broker=broker_for(UPSTREAM_CONFIG, {"ORDERS_API_TOKEN": "held"}),
             ) as (host, port, counters):
-                harness = Harness(host, port, counters, gate_dir)
+                harness = Harness(host, port, counters, qed_dir)
                 await harness.speak(
                     f"CONNECT {up_host}:{up_port} HTTP/1.1\r\n\r\n".encode(),
                     then=b"ping",
@@ -680,7 +680,7 @@ async def test_an_advisory_proxy_does_not_strip_the_agents_own_credential(
     proxy: Harness,
 ) -> None:
     """Removing it would break the call and put nothing in its place, which is
-    worse than letting a credential the gate did not choose reach a host the
+    worse than letting a credential QED did not choose reach a host the
     agent was always going to reach."""
     async with echo_server() as (up_host, up_port):
         answer = await proxy.speak(

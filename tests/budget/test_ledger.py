@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from gate.core.budget import Charge
-from gate.core.schemas import Budget
-from gate.infra.storage.sqlite import SqliteStore
+from qed.core.budget import Charge
+from qed.core.schemas import Budget
+from qed.infra.storage.sqlite import SqliteStore
 
 NOW = datetime.fromisoformat("2026-10-07T12:00:00+00:00")
 JTI = "01JB000000000000000000JTI0"
@@ -20,7 +20,7 @@ PRINCIPAL = "a" * 64
 
 @pytest.fixture
 def store(tmp_path: Path) -> Iterator[SqliteStore]:
-    with SqliteStore(tmp_path / "gate.db") as opened:
+    with SqliteStore(tmp_path / "qed.db") as opened:
         yield opened
 
 
@@ -28,7 +28,7 @@ class TestMigration:
     def test_opening_twice_does_not_reapply_a_migration(self, tmp_path: Path) -> None:
         """`ALTER TABLE ADD COLUMN` is not idempotent, so a second open that
         replayed 0002 would raise `duplicate column name`."""
-        path = tmp_path / "gate.db"
+        path = tmp_path / "qed.db"
         SqliteStore(path).close()
         SqliteStore(path).close()  # must not raise
 
@@ -40,13 +40,13 @@ class TestMigration:
         assert "0002_budget.sql" in names
 
     def test_a_database_predating_the_ledger_is_upgraded_in_place(self, tmp_path: Path) -> None:
-        """Existing `.gate` directories have 0001 applied and no
+        """Existing `.qed` directories have 0001 applied and no
         `schema_migrations`. 0001 is replayed there, which is safe because it is
         `CREATE TABLE IF NOT EXISTS` throughout, and 0002 then runs once."""
         path = tmp_path / "old.db"
         legacy = sqlite3.connect(path)
         legacy.executescript(
-            (Path(__file__).parents[2] / "gate/infra/storage/migrations/0001_init.sql").read_text(
+            (Path(__file__).parents[2] / "qed/infra/storage/migrations/0001_init.sql").read_text(
                 encoding="utf-8"
             )
         )
@@ -157,7 +157,7 @@ class TestAtomicity:
     def test_concurrent_charges_do_not_lose_an_update(self, tmp_path: Path) -> None:
         """Two connections to the same file, interleaved. Without the write lock
         both would read `steps_used = 0` and both would write 1."""
-        path = tmp_path / "gate.db"
+        path = tmp_path / "qed.db"
         one = SqliteStore(path)
         two = SqliteStore(path)
         for _ in range(10):

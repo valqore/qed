@@ -64,11 +64,11 @@ is opened.
 ## Decisions
 
 ```bash
-gate approvals                      # the queue
-gate approvals --expire             # run the timeout sweep first
-gate approve apr_... --by you@example.com --groups sre-oncall
-gate approve apr_... --by you@example.com --groups sre-oncall --window 15m
-gate approve apr_... --by you@example.com --groups sre-oncall --deny --reason "..."
+qed approvals                      # the queue
+qed approvals --expire             # run the timeout sweep first
+qed approve apr_... --by you@example.com --groups sre-oncall
+qed approve apr_... --by you@example.com --groups sre-oncall --window 15m
+qed approve apr_... --by you@example.com --groups sre-oncall --deny --reason "..."
 ```
 
 ### `approve_once` versus `--window`
@@ -96,7 +96,7 @@ looks exactly like the first to whoever sees it.
 ## Timeouts
 
 A request expires at the shortest `approval.timeout` among the rules that
-fired, defaulting to fifteen minutes. `gate approvals --expire` runs the
+fired, defaulting to fifteen minutes. `qed approvals --expire` runs the
 sweep and writes one `approval_expired` record per request — a request that
 simply vanished from the queue would not be evidence of anything.
 
@@ -129,7 +129,7 @@ approval_expired       nobody answered in time
 
 A channel does two things and nothing else: it renders a request so somebody
 can judge it, and it turns a click back into an **identified person**. The
-decision is always `gate.core.approval.model.decide` — a channel that decided
+decision is always `qed.core.approval.model.decide` — a channel that decided
 for itself would be a channel where separation of duties worked differently,
 and that is the one place a second implementation must not exist.
 
@@ -141,7 +141,7 @@ GET  /v1/approvals/{id}           # includes the approver view stored at request
 POST /v1/approvals/{id}           # {"decision": "approve_once|approve_window|deny", ...}
 ```
 
-The approver travels in `X-Gate-Approver` and `X-Gate-Approver-Groups`, **not
+The approver travels in `X-QED-Approver` and `X-QED-Approver-Groups`, **not
 in the body**. An endpoint that let the request name its own approver would
 make the whole control decorative.
 
@@ -174,7 +174,7 @@ working.
 
 ```yaml
 approvals:
-  webhook_url: https://hooks.example/gate
+  webhook_url: https://hooks.example/qed
 ```
 
 One-way, for Teams or PagerDuty. It announces; it does not accept decisions,

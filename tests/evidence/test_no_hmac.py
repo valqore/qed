@@ -21,9 +21,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCANNED = sorted(
     [
-        *(ROOT / "gate" / "core").rglob("*.py"),
-        *(ROOT / "gate" / "infra").rglob("*.py"),
-        *(ROOT / "packages" / "gate-verify" / "gate_verify").rglob("*.py"),
+        *(ROOT / "qed" / "core").rglob("*.py"),
+        *(ROOT / "qed" / "infra").rglob("*.py"),
+        *(ROOT / "packages" / "qed-verify" / "qed_verify").rglob("*.py"),
     ]
 )
 
@@ -56,7 +56,7 @@ def test_no_hmac_call(path: Path) -> None:
 
 def test_the_signer_protocol_exposes_no_secret_material() -> None:
     """A symmetric path would need a shared secret on this interface."""
-    from gate.core.evidence.signing import Signer
+    from qed.core.evidence.signing import Signer
 
     members = {name for name in dir(Signer) if not name.startswith("_")}
     assert members == {"key_id", "public_pem", "sign"}, sorted(members)
@@ -70,7 +70,7 @@ def test_signing_refuses_a_non_ed25519_key(tmp_path: Path) -> None:
         PrivateFormat,
     )
 
-    from gate.infra.keys.file import FileSigner, MissingSigningKey
+    from qed.infra.keys.file import FileSigner, MissingSigningKey
 
     path = tmp_path / "rsa.pem"
     path.write_bytes(
@@ -83,7 +83,7 @@ def test_signing_refuses_a_non_ed25519_key(tmp_path: Path) -> None:
 
 
 def test_there_is_no_development_fallback_key(tmp_path: Path) -> None:
-    from gate.infra.keys.file import MissingSigningKey, load_signer
+    from qed.infra.keys.file import MissingSigningKey, load_signer
 
-    with pytest.raises(MissingSigningKey, match="gate keys init"):
+    with pytest.raises(MissingSigningKey, match="qed keys init"):
         load_signer(tmp_path / "empty")

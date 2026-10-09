@@ -3,7 +3,7 @@
 The readiness tests are the SPEC §17 MUST: "service refuses to start without
 evidence signing key (``readyz=false``)". The evidence tests are mostly about
 one thing -- a filtered export is not a verifiable export, and the response has
-to say so rather than hand back something that will fail ``gate-verify`` later
+to say so rather than hand back something that will fail ``qed-verify`` later
 with no explanation.
 """
 
@@ -16,7 +16,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from gate.api.app import create_app
+from qed.api.app import create_app
 from tests.api.conftest import ADAPTER_ID, SECRET, SECRET_ENV, Signer
 from tests.conftest import BASE_PROPOSAL, deep_merge
 
@@ -35,7 +35,7 @@ def submit(signed: Signer, count: int) -> None:
 class TestReadiness:
     def test_no_signing_key_means_not_ready(self, tmp_path: Path) -> None:
         """SPEC §17. An unsigned decision is not evidence."""
-        config = tmp_path / "gate.yaml"
+        config = tmp_path / "qed.yaml"
         config.write_text(
             yaml.safe_dump({"adapters": [{"adapter_id": ADAPTER_ID, "secret_env": SECRET_ENV}]}),
             encoding="utf-8",
@@ -87,7 +87,7 @@ class TestReadiness:
             ),
             encoding="utf-8",
         )
-        config = tmp_path / "gate.yaml"
+        config = tmp_path / "qed.yaml"
         config.write_text(
             yaml.safe_dump(
                 {
@@ -108,7 +108,7 @@ class TestReadiness:
         assert ready["key_id"].startswith("ed25519:")
         assert len(ready["policy_hash"]) == 64
         assert ready["mode"] == "shadow"
-        assert ready["instance_id"] == "gate-local"
+        assert ready["instance_id"] == "qed-local"
         assert ready["checks"]["adapter_auth"] == "signed"
 
 
@@ -118,20 +118,20 @@ class TestReadiness:
 
 
 class TestEvidenceExport:
-    def test_jsonl_is_what_gate_verify_reads(self, signed: Signer, api_dir: Path) -> None:
+    def test_jsonl_is_what_qed_verify_reads(self, signed: Signer, api_dir: Path) -> None:
         submit(signed, 2)
         response = signed.get("/v1/evidence")
         assert response.headers["content-type"].startswith("application/x-ndjson")
-        assert response.headers["X-Gate-Verifiable"] == "true"
+        assert response.headers["X-QED-Verifiable"] == "true"
 
-        from gate_verify.verify import load_jsonl, verify_records
+        from qed_verify.verify import load_jsonl, verify_records
 
-        from gate.infra.keys.file import PUBLIC_DIR_NAME, load_public_keys
+        from qed.infra.keys.file import PUBLIC_DIR_NAME, load_public_keys
 
         report = verify_records(
             load_jsonl(response.text),
             load_public_keys(api_dir / PUBLIC_DIR_NAME),
-            instance_id="gate-local",
+            instance_id="qed-local",
         )
         assert report.ok, report.summary()
 
@@ -148,11 +148,11 @@ class TestEvidenceExport:
         assert seqs == [2, 3, 4]
 
     def test_a_type_filter_is_marked_unverifiable(self, signed: Signer) -> None:
-        """``gate-verify`` needs contiguous sequence numbers to check linkage."""
+        """``qed-verify`` needs contiguous sequence numbers to check linkage."""
         submit(signed, 2)
         response = signed.get("/v1/evidence?type=verdict")
-        assert response.headers["X-Gate-Verifiable"] == "false"
-        assert "not contiguous" in response.headers["X-Gate-Not-Verifiable-Reason"]
+        assert response.headers["X-QED-Verifiable"] == "false"
+        assert "not contiguous" in response.headers["X-QED-Not-Verifiable-Reason"]
         types = {json.loads(row)["type"] for row in response.text.strip().splitlines()}
         assert types == {"verdict"}
 
@@ -198,7 +198,7 @@ class TestEvidenceExport:
 
     def test_the_record_count_is_in_a_header(self, signed: Signer) -> None:
         submit(signed, 1)
-        assert signed.get("/v1/evidence").headers["X-Gate-Records"] == "4"
+        assert signed.get("/v1/evidence").headers["X-QED-Records"] == "4"
 
 
 # --------------------------------------------------------------------------

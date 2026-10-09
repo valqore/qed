@@ -1,0 +1,224 @@
+# agent-baseline — data handling, second set (SPEC §4.6, AG-DAT-004..012)
+#
+# Same constraint as the first set: these read `action.params_redacted` only.
+# Raw parameters never reach the engine, so a rule here sees what an approver
+# would see.
+#
+# The theme across these is that the damage is usually not the write. It is
+# the read nobody noticed, the control somebody turned off, and the copy that
+# left the building.
+
+- rule_id: AG-DAT-004
+  name: Bulk read with no limit
+  severity: MEDIUM
+  mode: shadow
+  # Exfiltration rarely looks like exfiltration. It looks like a SELECT
+  # somebody forgot to bound.
+  when:
+    all:
+      - field: action.params_redacted.sql
+        regex: "(?i)^\\s*select\\b"
+      - not:
+          field: action.params_redacted.sql
+          regex: "(?i)\\blimit\\s+[0-9]+"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [dba]
+    timeout: 20m
+  message: "This reads a table with no row limit."
+  fix: "Add a LIMIT, or say in the intent why the whole table is needed."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_llm, control: "LLM02" }
+    - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-DAT-005
+  name: Database dump or bulk export
+  severity: HIGH
+  mode: enforce
+  when:
+    any:
+      - field: action.params_redacted.command
+        regex: "(?i)\\b(pg_dump|mysqldump|mongodump|bq\\s+extract)\\b"
+      - field: action.name
+        regex: "(?i)\\b(export_table|create_snapshot_export|start_export_task)\\b"
+      - field: action.params_redacted.sql
+        regex: "(?i)\\b(select\\s+.*\\binto\\s+outfile|copy\\s+.*\\bto\\b)"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [dba, privacy-oncall]
+    timeout: 30m
+  message: "This copies a dataset out of its store."
+  fix: "Say where the copy is going and how long it lives, and have a person agree to it."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_agentic, control: "ASI05" }
+    - { framework: soc2, control: "CC6.7" }
+
+- rule_id: AG-DAT-006
+  name: Storage or dataset made public
+  severity: CRITICAL
+  mode: enforce
+  when:
+    any:
+      - field: action.name
+        regex: "(?i)\\b(put_bucket_acl|put_public_access_block|set_iam_policy|make_public|publish_dataset)\\b"
+      - field: action.params_redacted.acl
+        regex: "(?i)(public-read|all-?users|allAuthenticatedUsers)"
+      - field: action.params_redacted.body
+        regex: "(?i)\"?(Principal)\"?\\s*:\\s*\"?\\*\"?"
+  verdict: BLOCK
+  message: "This exposes stored data to anyone."
+  fix: "Grant to a named principal. If the data really is public, that is a decision a person signs."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_agentic, control: "ASI05" }
+    - { framework: soc2, control: "CC6.6" }
+
+- rule_id: AG-DAT-008
+  name: Encryption turned off
+  severity: CRITICAL
+  mode: enforce
+  when:
+    any:
+      - field: action.params_redacted.body
+        regex: "(?i)\"?(encryption|encrypted|storage_encrypted|sse)\"?\\s*[:=]\\s*(false|\"false\"|none|\"none\"|disabled)"
+      - field: action.name
+        regex: "(?i)\\b(delete_bucket_encryption|disable_encryption|remove_kms_key)\\b"
+  verdict: BLOCK
+  message: "This turns encryption off."
+  fix: "Leave it on. If a migration needs it off, that is a change window, not an agent action."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+    - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-DAT-009
+  name: Audit logging turned off
+  severity: CRITICAL
+  mode: enforce
+  # The action that makes every later action invisible. It is worth blocking
+  # on its own terms, whatever the agent was trying to achieve.
+  when:
+    any:
+      - field: action.name
+        regex: "(?i)\\b(delete_trail|stop_logging|delete_log_group|disable_audit|put_retention_policy)\\b"
+      - field: action.params_redacted.body
+        regex: "(?i)\"?(logging|audit|cloudtrail)\"?\\s*[:=]\\s*(false|\"false\"|disabled)"
+      - field: action.params_redacted.command
+        regex: "(?i)\\b(auditctl\\s+-[eD]\\s*0?|systemctl\\s+stop\\s+auditd)\\b"
+  verdict: BLOCK
+  message: "This disables the record of what happens next."
+  fix: "Never from an agent. If retention is being changed, do it as a reviewed configuration change."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 12" }
+    - { framework: nist_ai_rmf, control: "MEASURE-2.8" }
+    - { framework: owasp_agentic, control: "ASI06" }
+    - { framework: soc2, control: "CC7.2" }
+
+- rule_id: AG-DAT-010
+  name: Backup or retention weakened
+  severity: HIGH
+  mode: enforce
+  when:
+    any:
+      - field: action.params_redacted.body
+        regex: "(?i)\"?(backup_retention_period|deletion_protection|versioning)\"?\\s*[:=]\\s*(0|false|\"false\"|suspended)"
+      - field: action.name
+        regex: "(?i)\\b(delete_backup|disable_versioning|remove_deletion_protection)\\b"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [sre-oncall, dba]
+    timeout: 20m
+  message: "This weakens the ability to recover from the next mistake."
+  fix: "Keep the protection. If it is genuinely in the way, have someone agree in writing."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+    - { framework: soc2, control: "A1.2" }
+
+- rule_id: AG-DAT-011
+  name: Egress to a paste or file-sharing host
+  severity: HIGH
+  mode: enforce
+  # Narrower and harsher than AG-DAT-003's allow-list check, because these
+  # hosts have one use in an incident and it is not a good one.
+  when:
+    any:
+      - field: action.target
+        regex: "(?i)(^|[./])(pastebin\\.com|gist\\.github\\.com|transfer\\.sh|file\\.io|0x0\\.st|ngrok\\.io|requestbin\\.)"
+      - field: action.params_redacted.command
+        regex: "(?i)(curl|wget)[^|]*\\b(pastebin\\.com|transfer\\.sh|file\\.io|0x0\\.st)"
+  verdict: BLOCK
+  message: "This sends data to a host whose purpose is to make it available to strangers."
+  fix: "Put the artefact somewhere the organisation controls."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_agentic, control: "ASI05" }
+    - { framework: soc2, control: "CC6.7" }
+
+- rule_id: AG-DAT-012
+  name: Payment card data in action parameters
+  severity: CRITICAL
+  mode: enforce
+  # Separate from AG-DAT-002 because the obligations are different and an
+  # approver needs to know which kind of data they are looking at.
+  when:
+    any:
+      - field: action.params_redacted.body
+        regex: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\\b"
+      - field: action.params_redacted.sql
+        regex: "(?i)\\b(card_number|pan|cvv|cvc|expiry_date)\\b"
+  verdict: BLOCK
+  message: "The parameters of this action look like they contain payment card data."
+  fix: "Card data does not pass through an agent. Use a token from the payment processor."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_llm, control: "LLM02" }
+    - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-DAT-013
+  name: Request to a cloud instance metadata service
+  severity: CRITICAL
+  mode: enforce
+  # The HTTP forward proxy (SPEC 12.3) is the first adapter that can see this
+  # at all, which is why the rule arrives with it. The metadata service is how
+  # an agent with network access turns "can make HTTP requests" into "has the
+  # instance's cloud credentials": one unauthenticated GET to a link-local
+  # address returns a role's keys.
+  #
+  # BLOCK rather than REQUIRE_APPROVAL, and no approval path, because there is
+  # no legitimate reason for an agent's own traffic to go here. The workload's
+  # SDK reads the metadata service directly, in the workload, not through a
+  # governed egress path -- so blocking it costs nothing that works today.
+  applies_to:
+    kinds: [http]
+  when:
+    any:
+      # IMDS on AWS, Azure and OpenStack; GCP and Alibaba use the same
+      # link-local address. Alibaba uses 100.100.100.200.
+      - field: action.target
+        glob:
+          - "*://169.254.169.254*"
+          - "*://100.100.100.200*"
+          - "*://metadata.google.internal*"
+          - "*://metadata.goog*"
+      # `contains`, not `glob`, for the IPv6 form. A glob's `[` opens a
+      # character class, so `*://[fd00:ec2::254]*` matches any target whose
+      # host starts with one of f, d, 0, 2, 4, 5, c, e or `:` -- which is most
+      # of the internet. The first live run of `qed proxy` was refused a
+      # CONNECT to example.com by this rule, because `e` is in that set.
+      - field: action.target
+        contains: "[fd00:ec2::254]"
+      - field: action.params_redacted.host
+        equals: "169.254.169.254"
+      - field: action.params_redacted.host
+        equals: "fd00:ec2::254"
+  verdict: BLOCK
+  message: "This request targets the cloud instance metadata service, which hands out the instance's own credentials."
+  fix: "An agent does not need instance credentials. Give it a scoped credential through QED's broker instead."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 15" }
+    - { framework: owasp_agentic, control: "ASI02" }
+    - { framework: owasp_llm, control: "LLM06" }
+    - { framework: nist_csf, control: "PR.AC-4" }
+    - { framework: soc2, control: "CC6.1" }

@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 import yaml
 
-from gate.core.policy.loader import bundle_hash, load_bundle
-from gate.core.policy.predicates import validate_predicate
-from gate.core.schemas import Decision
+from qed.core.policy.loader import bundle_hash, load_bundle
+from qed.core.policy.predicates import validate_predicate
+from qed.core.schemas import Decision
 
 GOOD: dict[str, Any] = {
     "rule_id": "TT-AAA-001",
@@ -300,7 +300,7 @@ class TestASuspiciousGlob:
     any target whose host starts with one of ``f d 0 2 4 5 c e :``, which is
     most of the internet -- and a rule written that way reads correct while
     firing on traffic nobody meant it to, in the direction that blocks real
-    work. The first live run of ``gate proxy`` was refused a CONNECT to
+    work. The first live run of ``qed proxy`` was refused a CONNECT to
     example.com by exactly this.
     """
 
@@ -341,7 +341,7 @@ class TestASuspiciousGlob:
 
 
 def test_the_shipped_baseline_pack_lints_clean() -> None:
-    from gate.core.policy.loader import baseline_pack_dir
+    from qed.core.policy.loader import baseline_pack_dir
 
     result = load_bundle([baseline_pack_dir()])
     assert result.findings == [], [f.format() for f in result.findings]

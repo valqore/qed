@@ -1,7 +1,7 @@
 """``/v1/proposals`` (SPEC §13, SPEC §22 week 2).
 
 The first test is the week 2 exit criterion: ``POST /v1/proposals`` returns the
-same verdict ``gate check`` would, for the same input. It is asserted by running
+same verdict ``qed check`` would, for the same input. It is asserted by running
 both against the same proposal and comparing the verdict JSON field by field,
 rather than by trusting that both call ``check_proposal`` -- which is true today
 and is exactly the kind of thing a refactor breaks quietly.
@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from gate.cli import app as cli_app
+from qed.cli import app as cli_app
 from tests.api.conftest import Signer
 from tests.conftest import BASE_PROPOSAL, deep_merge
 
@@ -66,7 +66,7 @@ def test_the_api_and_the_cli_agree(
     patch: dict[str, object],
     signed: Signer,
     api_dir: Path,
-    gate_config: Path,
+    qed_config: Path,
     tmp_path: Path,
 ) -> None:
     """SPEC §22: the same input must give the same verdict either way.
@@ -81,8 +81,8 @@ def test_the_api_and_the_cli_agree(
     assert api.status_code in {200, 202}, api.text
     from_api = api.json()["verdict"]
 
-    cli_dir = tmp_path / "cli-gate"
-    from gate.infra.keys.file import init_keys
+    cli_dir = tmp_path / "cli-qed"
+    from qed.infra.keys.file import init_keys
 
     init_keys(cli_dir)
     proposal_file = tmp_path / "p.json"
@@ -95,7 +95,7 @@ def test_the_api_and_the_cli_agree(
             "--dir",
             str(cli_dir),
             "--config",
-            str(gate_config),
+            str(qed_config),
             "--json",
         ],
     )
@@ -141,7 +141,7 @@ def test_enforce_mode_answers_202_for_an_approval(
     import yaml
     from fastapi.testclient import TestClient as Client
 
-    from gate.api.app import create_app
+    from qed.api.app import create_app
     from tests.api.conftest import ADAPTER_ID, SECRET, SECRET_ENV
 
     monkeypatch.setenv(SECRET_ENV, SECRET)
@@ -179,7 +179,7 @@ def test_a_replayed_proposal_id_is_a_conflict(signed: Signer) -> None:
 
 
 def test_an_envelope_may_carry_a_budget(signed: Signer) -> None:
-    """The same shape `gate check --budget` takes."""
+    """The same shape `qed check --budget` takes."""
     response = signed.post(
         "/v1/proposals",
         {
@@ -197,7 +197,7 @@ def test_an_envelope_may_carry_a_budget(signed: Signer) -> None:
 
 
 def test_an_unknown_field_is_refused_rather_than_ignored(signed: Signer) -> None:
-    """A field gate does not understand is a field no rule can match."""
+    """A field qed does not understand is a field no rule can match."""
     response = signed.post("/v1/proposals", proposal({"severity": "critical"}))
     assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
@@ -253,8 +253,8 @@ def test_what_comes_back_is_what_went_into_the_chain(signed: Signer) -> None:
     """The proposal the API returns must be the one the chain attests to.
 
     Not a tautology: the chain payload is masked before it is hashed
-    (``gate/core/evidence/record.py``), and the ``proposals`` table is not. Any
-    pattern in the masking set that fires on a value gate itself generated --
+    (``qed/core/evidence/record.py``), and the ``proposals`` table is not. Any
+    pattern in the masking set that fires on a value qed itself generated --
     an id, a token id, a hash -- makes these two disagree, and the record then
     attests to a value nothing else in the system has. That is how the
     ``token_jti`` / card-number collision in ``_mask_cards`` was found.
@@ -265,8 +265,8 @@ def test_what_comes_back_is_what_went_into_the_chain(signed: Signer) -> None:
     signed.post("/v1/proposals", proposal(PROD_DROP))
     fetched = signed.get(f"/v1/proposals/{PROD_DROP['id']}").json()["proposal"]
 
-    from gate.core import jcs
-    from gate.core.evidence.hashing import payload_hash
+    from qed.core import jcs
+    from qed.core.evidence.hashing import payload_hash
 
     records = [
         json.loads(line) for line in signed.get("/v1/evidence?from=0").text.strip().splitlines()

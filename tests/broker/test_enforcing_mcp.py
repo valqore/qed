@@ -5,7 +5,7 @@ flag, and that claim went into `context.enforcement` and from there into the
 evidence. If the credential was missing the claim was simply wrong and
 nothing in the chain said so.
 
-These tests are about the replacement: the gate is enforcing for a call if
+These tests are about the replacement: QED is enforcing for a call if
 and only if it is holding the credential for that call.
 """
 
@@ -15,17 +15,17 @@ from typing import Any
 
 import pytest
 
-from gate.adapters.mcp.proxy import ProxyOptions, UpstreamSpec, build_tool_proposal
-from gate.core.broker.injection import (
+from qed.adapters.mcp.proxy import ProxyOptions, UpstreamSpec, build_tool_proposal
+from qed.core.broker.injection import (
     STRIPPED_HEADERS,
     plan_injection,
     strip_agent_credentials,
 )
-from gate.core.broker.model import Secret, Upstream, UpstreamSet
-from gate.core.evidence.hashing import principal_hash
-from gate.core.schemas import Enforcement, Mode
-from gate.infra.secrets.broker import CredentialBroker
-from gate.infra.secrets.resolver import CredentialResolver
+from qed.core.broker.model import Secret, Upstream, UpstreamSet
+from qed.core.evidence.hashing import principal_hash
+from qed.core.schemas import Enforcement, Mode
+from qed.infra.secrets.broker import CredentialBroker
+from qed.infra.secrets.resolver import CredentialResolver
 
 UPSTREAM = UpstreamSpec(name="orders-db", command="python", args=["-c", "pass"])
 OPTIONS = ProxyOptions(

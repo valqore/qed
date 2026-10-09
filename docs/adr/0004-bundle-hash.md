@@ -11,7 +11,7 @@ the policy changes, the hash changes, and an auditor can tell the two eras apart
 
 Two things fall outside "sorted rules".
 
-**`default_verdict`.** It lives in `gate.yaml`, not in a rule file, and it
+**`default_verdict`.** It lives in `qed.yaml`, not in a rule file, and it
 decides the outcome of every proposal that matches nothing. Flipping it from
 `ALLOW` to `REQUIRE_APPROVAL` changes the behaviour of the whole system while
 leaving a rules-only hash identical. That is precisely the situation the hash is

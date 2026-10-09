@@ -28,7 +28,7 @@ record hash, not over its hex form and not over the canonical payload.
 SPEC §10.2 says "base64url" without stating padding. Unpadded, because the `=`
 characters carry no information and padded/unpadded is the kind of difference
 that only surfaces when a third-party verifier is written against the format.
-`gate-verify` re-pads on read, so either form is accepted on input and only one
+`qed-verify` re-pads on read, so either form is accepted on input and only one
 is produced.
 
 ## 3. `key_id` is derived from the public key
@@ -37,7 +37,7 @@ is produced.
 
 Consequences: the same key always has the same id, so two copies of a key cannot
 be labelled differently; an operator cannot name one key as another; and
-`gate-verify` recomputes the id from the key material rather than trusting a
+`qed-verify` recomputes the id from the key material rather than trusting a
 filename, so a renamed PEM cannot make a record appear to verify under the wrong
 key.
 

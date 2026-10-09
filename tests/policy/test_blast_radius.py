@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.core.policy.blast_radius import explain, score
+from qed.core.policy.blast_radius import explain, score
 from tests.conftest import make_proposal
 
 

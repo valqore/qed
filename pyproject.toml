@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "valqore-gate"
+name = "valqore-qed"
 version = "0.1.0"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
 requires-python = ">=3.12"
@@ -27,7 +27,7 @@ dependencies = [
     "regex>=2024.0.0",
     # Week 2. All four are in SPEC 20.3's allowed set for the kernel wheel.
     # `mcp` is pinned to 2.x: the 2.0 SDK replaced the decorator-based
-    # low-level server with the `on_*` callbacks gate/adapters/mcp/proxy.py
+    # low-level server with the `on_*` callbacks qed/adapters/mcp/proxy.py
     # uses, so a 1.x resolution would not import.
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -57,13 +57,13 @@ dev = [
 ]
 
 [project.scripts]
-gate = "gate.cli:main"
+qed = "qed.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["gate*"]
+include = ["qed*"]
 
 [tool.setuptools.package-data]
-gate = ["core/policy/packs/*/*.yaml", "infra/storage/migrations/*.sql"]
+qed = ["core/policy/packs/*/*.yaml", "infra/storage/migrations/*.sql"]
 
 [tool.ruff]
 line-length = 100
@@ -83,16 +83,16 @@ ignore = ["ANN401", "RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["gate", "packages/gate-verify/gate_verify"]
-mypy_path = "packages/gate-verify"
+files = ["qed", "packages/qed-verify/qed_verify"]
+mypy_path = "packages/qed-verify"
 
 [[tool.mypy.overrides]]
 module = ["ulid.*", "regex.*", "yaml.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/gate-verify/tests"]
-pythonpath = [".", "packages/gate-verify"]
+testpaths = ["tests", "packages/qed-verify/tests"]
+pythonpath = [".", "packages/qed-verify"]
 filterwarnings = ["error"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"

@@ -1,7 +1,7 @@
 """JWKS fetching and the offline fallback (SPEC §6.1 step 1).
 
 The property under test throughout: the network is an optimisation, not a
-dependency. A gate whose purpose is to keep deciding must not stop deciding
+dependency. A qed whose purpose is to keep deciding must not stop deciding
 because its identity provider is unreachable.
 """
 
@@ -16,7 +16,7 @@ import httpx
 import pytest
 from joserfc.jwk import RSAKey
 
-from gate.infra.jwks import JwksCache, JwksError, discover_jwks_uri
+from qed.infra.jwks import JwksCache, JwksError, discover_jwks_uri
 
 ISSUER = "https://idp.example"
 JWKS_URI = f"{ISSUER}/jwks"

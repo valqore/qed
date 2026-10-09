@@ -1,6 +1,6 @@
 # HTTP API
 
-`gate serve` runs the API from SPEC §13. Base path `/v1`. Everything is JSON;
+`qed serve` runs the API from SPEC §13. Base path `/v1`. Everything is JSON;
 errors are RFC 9457 `application/problem+json`.
 
 Week 2 implements the subset SPEC §22 asks for. Routes that do not exist are
@@ -23,7 +23,7 @@ and `/v1/metrics` (weeks 4 and 7), `/v1/policies` and `/v1/admin` (week 10).
 ## One decision path
 
 The router does not decide anything. It validates the body and calls
-`gate.runtime.check_proposal`, which is the same function `gate check` calls.
+`qed.runtime.check_proposal`, which is the same function `qed check` calls.
 SPEC §22's week 2 exit criterion is that both return the same verdict for the
 same input, and `tests/api/test_proposals.py` asserts it by running both and
 comparing the verdict field by field — not by trusting that they still share a
@@ -53,26 +53,26 @@ a CI job or on a laptop with no browser to redirect.
 ### Registering an adapter
 
 ```yaml
-# gate.yaml
+# qed.yaml
 adapters:
   - adapter_id: adp_laptop_ali
     secret_env: GATE_SECRET_LAPTOP_ALI    # the name, never the value
     kind: mcp
 ```
 
-The secret lives in the environment variable named here, so `gate.yaml` stays
+The secret lives in the environment variable named here, so `qed.yaml` stays
 safe to commit and the secret stays out of the process table. It must be at
 least 32 characters: a shorter shared secret is a password somebody typed.
 
-`gate adapters add` with per-adapter rotation is week 5 (SPEC §12.6).
+`qed adapters add` with per-adapter rotation is week 5 (SPEC §12.6).
 
 ### Signing a request
 
 ```
-X-Gate-Adapter-Id : adp_laptop_ali
-X-Gate-Timestamp  : 2026-10-07T12:00:00.000Z     RFC 3339, UTC, milliseconds
-X-Gate-Nonce      : 01JB...                       optional
-X-Gate-Signature  : base64url(HMAC-SHA256(secret, canonical))     unpadded
+X-QED-Adapter-Id : adp_laptop_ali
+X-QED-Timestamp  : 2026-10-07T12:00:00.000Z     RFC 3339, UTC, milliseconds
+X-QED-Nonce      : 01JB...                       optional
+X-QED-Signature  : base64url(HMAC-SHA256(secret, canonical))     unpadded
 ```
 
 The canonical string is exactly five fields joined by `\n`, with nothing else:
@@ -91,7 +91,7 @@ timestamp bounds how long one stays usable: requests more than
 `api.max_clock_skew_seconds` (default 300) from the server's clock are refused.
 
 A worked example lives in `tests/api/conftest.py`, which signs through the same
-`gate.api.auth` functions the server verifies with.
+`qed.api.auth` functions the server verifies with.
 
 ### Two limits in week 2
 
@@ -104,7 +104,7 @@ that adding the store in week 3 needs no protocol change.
 
 ### `--dev`
 
-`gate serve --dev` skips signature verification entirely, marks every record
+`qed serve --dev` skips signature verification entirely, marks every record
 `dev: true`, and records the reporting adapter as `dev-unauthenticated` so a dev
 chain is honest about never having checked who was calling. It prints a warning
 to stderr on start. Bind it to loopback and do not point real agents at it.
@@ -122,7 +122,7 @@ caller already holds:
 }
 ```
 
-The envelope is the same shape `gate check --budget --mandate` takes. Budgets
+The envelope is the same shape `qed check --budget --mandate` takes. Budgets
 become server-side state in week 3; until then whoever holds the token is the
 only one who knows how much of it is left.
 
@@ -174,10 +174,10 @@ testimony and the chain says so. See `docs/assurance-classes.md`.
 
 Two response headers matter:
 
-- `X-Gate-Verifiable: true｜false`
-- `X-Gate-Not-Verifiable-Reason` when false
+- `X-QED-Verifiable: true｜false`
+- `X-QED-Not-Verifiable-Reason` when false
 
-A filtered export is **not** verifiable. `gate-verify` checks that sequence
+A filtered export is **not** verifiable. `qed-verify` checks that sequence
 numbers are contiguous and that each record links to the previous hash, which a
 `?type=verdict` export cannot satisfy. Rather than hand back something that will
 fail verification later with no explanation, the response says so up front.

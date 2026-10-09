@@ -82,7 +82,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" -e packages/gate-verify
+          pip install -e ".[dev]" -e packages/qed-verify
 
       - name: Lint
         run: |
@@ -99,14 +99,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gate keys init --dir ci-gate
-          gate check examples/proposals/prod-db-drop.json --dir ci-gate --json
-          gate check examples/proposals/open-ingress.json --dir ci-gate --json \
+          qed keys init --dir ci-qed
+          qed check examples/proposals/prod-db-drop.json --dir ci-qed --json
+          qed check examples/proposals/open-ingress.json --dir ci-qed --json \
             --mandate examples/mandates/sre-agent.json
-          gate check examples/proposals/github-read.json --dir ci-gate --json
-          gate checkpoint --dir ci-gate --force
-          gate export --dir ci-gate --out ci-chain.jsonl
-          gate-verify ci-chain.jsonl --keys ci-gate/public --instance-id gate-local
+          qed check examples/proposals/github-read.json --dir ci-qed --json
+          qed checkpoint --dir ci-qed --force
+          qed export --dir ci-qed --out ci-chain.jsonl
+          qed-verify ci-chain.jsonl --keys ci-qed/public --instance-id qed-local
 
       - name: A tampered chain must fail verification
         shell: bash
@@ -124,13 +124,13 @@ jobs:
           lines[i] = json.dumps(record)
           pathlib.Path("ci-tampered.jsonl").write_text("\n".join(lines) + "\n")
           PY
-          if gate-verify ci-tampered.jsonl --keys ci-gate/public; then
+          if qed-verify ci-tampered.jsonl --keys ci-qed/public; then
             echo "FAIL: the verifier accepted a tampered chain"
             exit 1
           fi
           echo "ok: tampering was detected"
 
-      # SPEC 22 week 2: `gate mcp -- <server>` in shadow against a real MCP
+      # SPEC 22 week 2: `qed mcp -- <server>` in shadow against a real MCP
       # server. tests/adapters/upstream_server.py is a real MCP server process
       # speaking the real protocol; this drives it through the CLI the way an
       # agent would, then verifies the chain the proxy wrote.
@@ -138,7 +138,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gate keys init --dir ci-mcp
+          qed keys init --dir ci-mcp
           python - <<'PY'
           import anyio, sys
           from mcp import ClientSession, StdioServerParameters, stdio_client
@@ -146,7 +146,7 @@ jobs:
           PROXY = StdioServerParameters(
               command=sys.executable,
               args=[
-                  "-c", "from gate.cli import main; main()", "mcp",
+                  "-c", "from qed.cli import main; main()", "mcp",
                   "--dir", "ci-mcp", "--env", "prod",
                   "--server-name", "orders",
                   "--human", "ci@example.com",
@@ -175,8 +175,8 @@ jobs:
           print("ok: the proxy forwarded a call in shadow mode")
           PY
 
-          gate export --dir ci-mcp --out ci-mcp-chain.jsonl
-          gate-verify ci-mcp-chain.jsonl --keys ci-mcp/public --instance-id gate-local
+          qed export --dir ci-mcp --out ci-mcp-chain.jsonl
+          qed-verify ci-mcp-chain.jsonl --keys ci-mcp/public --instance-id qed-local
 
           python - <<'PY'
           import json, pathlib
@@ -209,7 +209,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gate export --dir ci-mcp --format oscal --out ci-oscal.json
+          qed export --dir ci-mcp --format oscal --out ci-oscal.json
           python - <<'PY'
           import hashlib, json, pathlib, sys
           sys.path.insert(0, "tests")
@@ -235,11 +235,11 @@ jobs:
       # Both serve steps redirect the server's output to a file. A backgrounded
       # process that inherits the step's stdout keeps the pipe open, and the
       # runner then waits for it after the script has finished.
-      - name: gate serve answers readyz
+      - name: qed serve answers readyz
         shell: bash
         run: |
           set -euo pipefail
-          gate serve --dir ci-mcp --host 127.0.0.1 --port 8711 --dev \
+          qed serve --dir ci-mcp --host 127.0.0.1 --port 8711 --dev \
             > ci-serve.log 2>&1 &
           server=$!
           trap 'kill "$server" 2>/dev/null || true' EXIT
@@ -271,7 +271,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gate serve --dir ci-no-keys --host 127.0.0.1 --port 8712 --dev \
+          qed serve --dir ci-no-keys --host 127.0.0.1 --port 8712 --dev \
             > ci-serve-nokeys.log 2>&1 &
           server=$!
           trap 'kill "$server" 2>/dev/null || true' EXIT
@@ -303,7 +303,7 @@ jobs:
       # closed. 24.2 is answered, so the invariant inverts. What can go wrong
       # now is a licence that quietly disappears from one of the two projects,
       # the PyPI guard rail coming back and failing a release, or the
-      # gate-verify copy of LICENSE drifting from the original — it is a copy
+      # qed-verify copy of LICENSE drifting from the original — it is a copy
       # because PEP 639 `license-files` globs cannot escape a project
       # directory, and a verifier shipped under a stale licence text is
       # exactly the kind of detail an auditor checks.
@@ -313,11 +313,11 @@ jobs:
           set -euo pipefail
           test -f LICENSE
           test -f NOTICE
-          test -f packages/gate-verify/NOTICE
+          test -f packages/qed-verify/NOTICE
           grep -q "Version 2.0, January 2004" LICENSE
-          cmp LICENSE packages/gate-verify/LICENSE
+          cmp LICENSE packages/qed-verify/LICENSE
 
-          for f in pyproject.toml packages/gate-verify/pyproject.toml; do
+          for f in pyproject.toml packages/qed-verify/pyproject.toml; do
             grep -qx 'license = "Apache-2.0"' "$f" || {
               echo "FAIL: $f does not declare the Apache-2.0 SPDX expression"
               exit 1
@@ -328,5 +328,5 @@ jobs:
             fi
           done
 
-          test ! -f PATENT-AND-LICENCE-GATE.md
+          test ! -f PATENT-AND-LICENCE-QED.md
           echo "ok: Apache-2.0, both projects, one licence text"

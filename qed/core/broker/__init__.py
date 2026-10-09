@@ -1,0 +1,49 @@
+"""Credential broker (SPEC §7, ADR-001).
+
+The idea in one sentence: **the agent never holds the credential**. It asks
+QED to do something; QED decides; and if the answer is yes, QED
+attaches the credential on the way out. An agent that cannot read a token
+cannot leak one, cannot be tricked into pasting one, and cannot keep using one
+after its mandate is revoked.
+
+That is also the difference between a qed and a linter. A linter tells you
+the action was unwise. A broker means the action was not possible.
+
+This package is the pure half: which upstream an action belongs to, and what
+would be injected. Resolving the secret is :mod:`qed.infra.secrets`, because
+reading Vault is I/O and the decision path must stay replayable.
+"""
+
+from __future__ import annotations
+
+from qed.core.broker.injection import (
+    Injection,
+    plan_injection,
+    strip_agent_credentials,
+)
+from qed.core.broker.model import (
+    CredentialSpec,
+    Enforcement,
+    InjectSpec,
+    Match,
+    Secret,
+    Upstream,
+    UpstreamSet,
+    describe,
+    match_upstream,
+)
+
+__all__ = [
+    "CredentialSpec",
+    "Enforcement",
+    "InjectSpec",
+    "Injection",
+    "Match",
+    "Secret",
+    "Upstream",
+    "UpstreamSet",
+    "describe",
+    "match_upstream",
+    "plan_injection",
+    "strip_agent_credentials",
+]

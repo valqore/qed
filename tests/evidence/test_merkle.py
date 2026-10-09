@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from gate_verify.verify import _merkle_root as verifier_root
+from qed_verify.verify import _merkle_root as verifier_root
 
-from gate.core.evidence.merkle import merkle_root, merkle_root_bytes
+from qed.core.evidence.merkle import merkle_root, merkle_root_bytes
 
 H = [hashlib.sha256(bytes([i])).hexdigest() for i in range(8)]
 

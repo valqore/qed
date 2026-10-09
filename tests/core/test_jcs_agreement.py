@@ -1,6 +1,6 @@
 """The producer and the verifier must canonicalise identically.
 
-`gate.core.jcs` and `gate_verify.jcs` are two implementations on purpose
+`qed.core.jcs` and `qed_verify.jcs` are two implementations on purpose
 (see the docstring in the latter). Two implementations only buy independence if
 something checks they agree; this is that check.
 """
@@ -8,9 +8,9 @@ something checks they agree; this is that check.
 from __future__ import annotations
 
 import pytest
-from gate_verify import jcs as verifier
+from qed_verify import jcs as verifier
 
-from gate.core import jcs as producer
+from qed.core import jcs as producer
 
 CORPUS: list[object] = [
     None,

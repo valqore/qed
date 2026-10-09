@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gate.core.approval.model import (
+from qed.core.approval.model import (
     DEFAULT_WINDOW,
     MAX_WINDOW,
     ApprovalRequest,

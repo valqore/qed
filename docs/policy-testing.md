@@ -1,10 +1,10 @@
 # Testing a rule set
 
-SPEC §14. `gate policy test` runs cases you write against the rules you have
+SPEC §14. `qed policy test` runs cases you write against the rules you have
 loaded. It touches nothing: no chain, no store, no network.
 
 ```bash
-gate policy test cases.yaml --policy ./policies
+qed policy test cases.yaml --policy ./policies
 ```
 
 Exit codes: **0** all passed, **1** a case failed or the file is unusable.
@@ -105,7 +105,7 @@ thing that demonstrates it. You get that check for free on your own rules;
 ## Finding rules you never tested
 
 ```bash
-gate policy test cases.yaml --coverage
+qed policy test cases.yaml --coverage
 ```
 
 Lists every loaded rule that no case mentions. A rule nobody has a case for is
@@ -129,7 +129,7 @@ than raising, so one malformed entry does not hide every case after it.
 
 ## The same runner as ours
 
-`gate policy test` and the project's own golden suite
+`qed policy test` and the project's own golden suite
 (`tests/policy/golden/cases.yaml`, 74 cases) compare results through the same
-code, `gate.core.policy.cases`. Two comparison routines would drift, and the
+code, `qed.core.policy.cases`. Two comparison routines would drift, and the
 one that drifted would be yours — ours is the one with a CI job behind it.

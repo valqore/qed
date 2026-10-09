@@ -2,12 +2,12 @@
 
 SPEC §7, ADR-001. One sentence: **the agent never holds the credential.**
 
-It asks the gate to do something. The gate decides. If the answer is yes, the
-gate attaches the credential on the way out.
+It asks QED to do something. QED decides. If the answer is yes, the
+qed attaches the credential on the way out.
 
 An agent that cannot read a token cannot leak one, cannot be talked into
 pasting one into a chat window, and cannot keep using one after its mandate
-is revoked. This is also the difference between a gate and a linter: a linter
+is revoked. This is also the difference between a qed and a linter: a linter
 tells you the action was unwise, a broker means the action was not possible.
 
 ## Posture first
@@ -15,9 +15,9 @@ tells you the action was unwise, a broker means the action was not possible.
 Before anything else, ask what this instance can actually enforce:
 
 ```
-$ gate doctor
+$ qed doctor
 
-instance   : gate-prod  (mode enforce)
+instance   : qed-prod  (mode enforce)
 signing key: ed25519:7fbb6319282f9912
 policy     : 46 rules
 
@@ -29,20 +29,20 @@ internal-wiki        ADVISORY   -        not configured
 1 enforcing, 2 advisory
 ```
 
-**`advisory` is the honest answer when the gate does not hold the
-credential.** The gate still decides and still records, but the agent is
-carrying its own token and could bypass the gate entirely. An upstream that
+**`advisory` is the honest answer when QED does not hold the
+credential.** QED still decides and still records, but the agent is
+carrying its own token and could bypass QED entirely. An upstream that
 claimed to be enforcing while the agent held the credential would make the
 evidence a lie, so an upstream with no resolvable credential is downgraded
 whatever the config says.
 
-With nothing configured at all, every adapter is advisory and `gate doctor`
+With nothing configured at all, every adapter is advisory and `qed doctor`
 says so in those words.
 
 ## Configuration
 
 ```yaml
-# gate.yaml
+# qed.yaml
 broker:
   upstreams_file: upstreams.yaml     # relative to this file
   ttl_seconds: 60
@@ -64,7 +64,7 @@ upstreams:
     match: { mcp_server: postgres, environments: [prod] }
     credential:
       source: vault
-      ref: "secret/data/gate/postgres-prod#DATABASE_URL"
+      ref: "secret/data/qed/postgres-prod#DATABASE_URL"
       inject: { type: env, name: DATABASE_URL }
 
   - id: aws-prod
@@ -72,7 +72,7 @@ upstreams:
     match: { host_globs: ["*.amazonaws.com"], environments: [prod] }
     credential:
       source: vault
-      ref: aws/creds/gate-prod            # dynamic STS, short TTL
+      ref: aws/creds/qed-prod            # dynamic STS, short TTL
       inject: { type: sigv4 }
 ```
 
@@ -98,7 +98,7 @@ match `ec2.amazonaws.com.evil.test`.
 | `file` | a path; the trailing newline `echo secret > file` leaves is stripped |
 | `vault` | `secret/data/path#field` |
 
-Vault is an optional extra (`pip install valqore-gate[vault]`). Asking for a
+Vault is an optional extra (`pip install valqore-qed[vault]`). Asking for a
 `vault:` reference without it says what to install rather than raising a
 missing-module traceback — you wrote the config and deserve to be told.
 
@@ -110,7 +110,7 @@ injecting nothing.
 
 A resolved credential is reused for `ttl_seconds` (default 60). Short enough
 that a rotation or a revoked Vault lease takes effect within a minute,
-long enough that a busy gate is not asking Vault on every action.
+long enough that a busy qed is not asking Vault on every action.
 
 ## Where a credential is allowed to exist
 
@@ -139,14 +139,14 @@ claim went into `context.enforcement`, and from there into the evidence. If
 the credential was missing the claim was simply wrong, and nothing in the
 chain said so.
 
-Now the gate is enforcing for a call **if and only if it is holding the
+Now QED is enforcing for a call **if and only if it is holding the
 credential for that call**. The adapter does not get asked.
 
 ```
-$ gate mcp --config gate.yaml -- npx -y @some/mcp-server
+$ qed mcp --config qed.yaml -- npx -y @some/mcp-server
 ...
-gate: 4 tool call(s); 4 forwarded, ...
-gate: 1 of those call(s) were ADVISORY -- decided and recorded, but the gate
+qed: 4 tool call(s); 4 forwarded, ...
+qed: 1 of those call(s) were ADVISORY -- decided and recorded, but QED
       was not holding the credential.
 ```
 
@@ -191,5 +191,5 @@ credentials get used after all.
 
 ## Still to come
 
-The HTTP forward proxy (`gate proxy`), for agents that make plain HTTP calls
+The HTTP forward proxy (`qed proxy`), for agents that make plain HTTP calls
 rather than MCP ones. Everything it needs exists.

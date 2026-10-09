@@ -3,7 +3,7 @@
 For auditors, and for whoever has to answer them.
 
 ```bash
-gate export --dir .gate --format oscal --out assessment.json
+qed export --dir .qed --format oscal --out assessment.json
 # or
 curl -s 'localhost:8710/v1/evidence?format=oscal&from=0&to=999' > assessment.json
 ```
@@ -14,7 +14,7 @@ validates against the published NIST schema in CI, which SPEC §10.8 marks
 
 ## What maps to what
 
-| gate | OSCAL |
+| qed | OSCAL |
 |---|---|
 | one export | one `result` |
 | one evidence record | one `observation` |
@@ -38,9 +38,9 @@ document metadata carries
 file rather than only in this page. The compliance packs, and the complete EU AI
 Act and NIST AI RMF mappings, are week 8.
 
-**A finding is about the action, not about gate.** A rule that matched means the
+**A finding is about the action, not about qed.** A rule that matched means the
 action the agent proposed did not satisfy the control objective, so the status is
-`not-satisfied` with reason `fail`. Whether gate then stopped it is a separate
+`not-satisfied` with reason `fail`. Whether QED then stopped it is a separate
 fact, in the `enforced` and `rule-mode` properties. In shadow mode the objective
 was equally unsatisfied and nothing was prevented — do not read a shadow finding
 as a control that worked.
@@ -89,13 +89,13 @@ what a human reads. Single separators survive so a control stays recognisable �
 document contains what is needed to check it:
 
 ```bash
-gate export --dir .gate --out chain.jsonl
-gate-verify chain.jsonl --keys .gate/public --instance-id <id>
+qed export --dir .qed --out chain.jsonl
+qed-verify chain.jsonl --keys .qed/public --instance-id <id>
 ```
 
 The observations carry `record-hash`, `previous-hash`, `payload-hash` and
 `signature`, so the linkage is readable from the OSCAL document alone, though
-`gate-verify` on the JSONL export is the supported path.
+`qed-verify` on the JSONL export is the supported path.
 
 Checkpoints in the range appear as their own back-matter resources with the
 Merkle root and the number of publication receipts attached to the previous
@@ -103,7 +103,7 @@ checkpoint (SPEC §10.4).
 
 ## `import-ap`
 
-OSCAL requires `import-ap`, a reference to an assessment plan. gate monitors
+OSCAL requires `import-ap`, a reference to an assessment plan. qed monitors
 continuously rather than running a planned assessment, so there is no plan
 document. The reference resolves to a back-matter resource that says exactly
 that, rather than pointing at a file that does not exist.

@@ -2,7 +2,7 @@
 
 The signing helper is the point of this file. Every ``/v1`` request has to carry
 a real HMAC, so the tests sign the way an adapter does, through the same
-``gate.api.auth`` functions. A test helper that computed the MAC its own way
+``qed.api.auth`` functions. A test helper that computed the MAC its own way
 would pass while the two sides disagreed.
 """
 
@@ -18,8 +18,8 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gate.api.app import create_app
-from gate.api.auth import (
+from qed.api.app import create_app
+from qed.api.auth import (
     HEADER_ADAPTER,
     HEADER_NONCE,
     HEADER_SIGNATURE,
@@ -27,8 +27,8 @@ from gate.api.auth import (
     canonical_string,
     sign,
 )
-from gate.core.schemas import rfc3339_ms, utcnow
-from gate.infra.keys.file import init_keys
+from qed.core.schemas import rfc3339_ms, utcnow
+from qed.infra.keys.file import init_keys
 
 ADAPTER_ID = "adp_test"
 SECRET_ENV = "GATE_TEST_ADAPTER_SECRET"
@@ -70,13 +70,13 @@ class Signer:
 
 
 @pytest.fixture
-def gate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def qed_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(SECRET_ENV, SECRET)
-    path = tmp_path / "gate.yaml"
+    path = tmp_path / "qed.yaml"
     path.write_text(
         yaml.safe_dump(
             {
-                "instance_id": "gate-local",
+                "instance_id": "qed-local",
                 "mode": "shadow",
                 "adapters": [{"adapter_id": ADAPTER_ID, "secret_env": SECRET_ENV, "kind": "mcp"}],
             }
@@ -88,14 +88,14 @@ def gate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def api_dir(tmp_path: Path) -> Path:
-    directory = tmp_path / "gate"
+    directory = tmp_path / "qed"
     init_keys(directory)
     return directory
 
 
 @pytest.fixture
-def app(api_dir: Path, gate_config: Path) -> FastAPI:
-    return create_app(directory=api_dir, config_path=gate_config)
+def app(api_dir: Path, qed_config: Path) -> FastAPI:
+    return create_app(directory=api_dir, config_path=qed_config)
 
 
 @pytest.fixture

@@ -1,23 +1,29 @@
 # ADR-0006 — Hash domain separators carry no product name
 
+> **The rename happened.** `gate` became **QED** on 2026-10-08, and because of
+> this decision it cost one mechanical commit: no chain was invalidated, no
+> `principal_hash` moved, and `qed-verify` needed no compatibility table. The
+> `"gate-..."` strings quoted below are left exactly as they were, because they
+> are the thing this record is about.
+
 **Status:** accepted · before the first remote
 **Deviates from:** SPEC §10.3 (`genesis.prev_hash = hex(SHA256("gate-genesis:" + instance_id))`), SPEC §10.6 (principal hashing).
 **Relates to:** SPEC §24.1 (product name undecided), §25.5 (publication).
 
 ## Context
 
-SPEC §24.1 records that `gate` is a placeholder and that the final name is still
+SPEC §24.1 records that `qed` is a placeholder and that the final name is still
 open. The review of week 1 repeated the spec's own claim that a rename is "a
 single refactor". That claim was not checked. It is false, and the reason is
 three strings:
 
 | Where | Value |
 |---|---|
-| `gate/core/evidence/hashing.py` | `"gate-genesis:" + instance_id`, hashed into the genesis `prev_hash` |
-| `gate/core/evidence/hashing.py` | `"gate-principal:"`, hashed into every `principal_hash` |
+| `qed/core/evidence/hashing.py` | `"gate-genesis:" + instance_id`, hashed into the genesis `prev_hash` |
+| `qed/core/evidence/hashing.py` | `"gate-principal:"`, hashed into every `principal_hash` |
 | `chain_writer.py`, `export/oscal.py` | `"gate-evidence/1.0"`, written into the signed genesis payload |
 
-All three are hash inputs, and the first two are duplicated in `gate-verify`,
+All three are hash inputs, and the first two are duplicated in `qed-verify`,
 which reimplements the format on purpose (SPEC §10.7).
 
 So the product name sat inside the evidence format. Renaming the product would
@@ -38,7 +44,7 @@ outcome 1, 2 or 3 the first time a design partner runs the kernel — which SPEC
 
 ## Decision
 
-The format constants move to `gate/core/evidence/format.py` and are scoped to
+The format constants move to `qed/core/evidence/format.py` and are scoped to
 the format and its version, not to the brand:
 
 ```
@@ -48,7 +54,7 @@ PRINCIPAL_DOMAIN = "evidence-chain/1:principal:"
 ```
 
 `chain_format` in the genesis payload and `chain-format` in the OSCAL export
-both become `CHAIN_FORMAT`. `gate-verify` keeps its own copy of the two strings
+both become `CHAIN_FORMAT`. `qed-verify` keeps its own copy of the two strings
 it needs — sharing them with the producer would mean a bug in the producer
 verifies cleanly — and `tests/evidence/test_format_constants.py` checks the two
 copies agree.
@@ -79,13 +85,13 @@ hash comes from `instance_id`, as before.
 
 ## Outcome (2026-10-08)
 
-SPEC §24.1 closed: the product is **Valqore Gate** and `gate` stays the
+SPEC §24.1 closed: the product is **Valqore QED** and `qed` stays the
 command, the import package and the repository name. This ADR is the reason
 that answer cost nothing. The context above is kept as written, including its
 description of §24.1 as open, because that was the state when the decision was
 taken.
 
 The property this ADR protects still has to hold — the test asserts no
-candidate product name appears in a hash input, and "Valqore Gate" being the
+candidate product name appears in a hash input, and "Valqore QED" being the
 settled name does not make it safe to put in one. A future rename remains a
 packaging change.

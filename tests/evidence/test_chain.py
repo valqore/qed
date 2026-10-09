@@ -1,7 +1,7 @@
 """Chain behaviour end to end, through the real store and the real verifier.
 
 The tamper tests write the chain, then corrupt the *export* and check that
-`gate-verify` notices — which is the position an auditor is actually in.
+`qed-verify` notices — which is the position an auditor is actually in.
 """
 
 from __future__ import annotations
@@ -11,25 +11,25 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from gate_verify.verify import load_jsonl, verify_records
+from qed_verify.verify import load_jsonl, verify_records
 
-from gate.core.evidence.export.jsonl import to_jsonl
-from gate.core.schemas import Assurance, EvidenceType
-from gate.infra.chain_writer import ChainWriter, InstanceMismatch
-from gate.infra.keys.file import FileSigner, load_public_keys
-from gate.infra.storage.sqlite import ChainIntegrityError, SqliteStore
+from qed.core.evidence.export.jsonl import to_jsonl
+from qed.core.schemas import Assurance, EvidenceType
+from qed.infra.chain_writer import ChainWriter, InstanceMismatch
+from qed.infra.keys.file import FileSigner, load_public_keys
+from qed.infra.storage.sqlite import ChainIntegrityError, SqliteStore
 
 INSTANCE = "test-instance"
 
 
 @pytest.fixture
 def chain(tmp_path: Path) -> Iterator[tuple[SqliteStore, ChainWriter, FileSigner]]:
-    from gate.infra.keys.file import init_keys, load_signer
+    from qed.infra.keys.file import init_keys, load_signer
 
-    directory = tmp_path / "gate"
+    directory = tmp_path / "qed"
     init_keys(directory)
     signer = load_signer(directory)
-    store = SqliteStore(directory / "gate.db")
+    store = SqliteStore(directory / "qed.db")
     writer = ChainWriter(store, signer, instance_id=INSTANCE)
     for i in range(5):
         writer.append(
@@ -52,7 +52,7 @@ def _verify(store: SqliteStore, directory: Path, *, instance_id: str | None = IN
 
 def test_a_fresh_chain_verifies(chain, tmp_path: Path) -> None:
     store, _, _ = chain
-    records, report = _verify(store, tmp_path / "gate")
+    records, report = _verify(store, tmp_path / "qed")
     assert report.ok, report.summary()
     assert report.records == 6  # genesis + 5
     assert records[0]["type"] == "genesis"
@@ -66,7 +66,7 @@ def test_genesis_is_written_once(chain) -> None:
 
 def test_genesis_prev_hash_is_checked_against_the_instance_id(chain, tmp_path: Path) -> None:
     store, _, _ = chain
-    _, report = _verify(store, tmp_path / "gate", instance_id="someone-elses-instance")
+    _, report = _verify(store, tmp_path / "qed", instance_id="someone-elses-instance")
     assert not report.ok
     assert any(p.code == "genesis_mismatch" for p in report.problems)
 
@@ -78,7 +78,7 @@ def test_reusing_a_chain_under_a_different_instance_id_is_refused(chain, tmp_pat
 
 
 def test_out_of_order_append_is_refused(chain) -> None:
-    from gate.core.evidence.record import build_record
+    from qed.core.evidence.record import build_record
 
     store, _, signer = chain
     bogus = build_record(
@@ -96,25 +96,25 @@ def test_out_of_order_append_is_refused(chain) -> None:
 class TestTampering:
     def test_editing_a_payload_is_detected(self, chain, tmp_path: Path) -> None:
         store, _, _ = chain
-        records, _ = _verify(store, tmp_path / "gate")
+        records, _ = _verify(store, tmp_path / "qed")
         records[3]["payload"]["note"] = "rewritten after the fact"
-        report = verify_records(records, load_public_keys(tmp_path / "gate" / "public"))
+        report = verify_records(records, load_public_keys(tmp_path / "qed" / "public"))
         assert not report.ok
         assert any(p.code == "payload_tampered" for p in report.problems)
 
     def test_editing_a_payload_hash_is_detected(self, chain, tmp_path: Path) -> None:
         store, _, _ = chain
-        records, _ = _verify(store, tmp_path / "gate")
+        records, _ = _verify(store, tmp_path / "qed")
         records[2]["payload_hash"] = "0" * 64
-        report = verify_records(records, load_public_keys(tmp_path / "gate" / "public"))
+        report = verify_records(records, load_public_keys(tmp_path / "qed" / "public"))
         codes = {p.code for p in report.problems}
         assert "hash_mismatch" in codes or "payload_tampered" in codes
 
     def test_deleting_a_record_is_detected(self, chain, tmp_path: Path) -> None:
         store, _, _ = chain
-        records, _ = _verify(store, tmp_path / "gate")
+        records, _ = _verify(store, tmp_path / "qed")
         del records[3]
-        report = verify_records(records, load_public_keys(tmp_path / "gate" / "public"))
+        report = verify_records(records, load_public_keys(tmp_path / "qed" / "public"))
         assert not report.ok
         codes = {p.code for p in report.problems}
         assert "sequence_gap" in codes
@@ -122,33 +122,33 @@ class TestTampering:
 
     def test_reordering_records_is_detected(self, chain, tmp_path: Path) -> None:
         store, _, _ = chain
-        records, _ = _verify(store, tmp_path / "gate")
+        records, _ = _verify(store, tmp_path / "qed")
         records[2], records[3] = records[3], records[2]
-        report = verify_records(records, load_public_keys(tmp_path / "gate" / "public"))
+        report = verify_records(records, load_public_keys(tmp_path / "qed" / "public"))
         assert not report.ok
         assert any(p.code in {"sequence_gap", "broken_link"} for p in report.problems)
 
     def test_a_forged_signature_is_detected(self, chain, tmp_path: Path) -> None:
         """Re-signing a rewritten record with a different key does not help."""
         store, _, _ = chain
-        records, _ = _verify(store, tmp_path / "gate")
+        records, _ = _verify(store, tmp_path / "qed")
         attacker = FileSigner.generate()
         records[4]["payload"] = {"note": "forged"}
         records[4]["payload_hash"] = __import__(
-            "gate_verify.jcs", fromlist=["sha256_hex"]
+            "qed_verify.jcs", fromlist=["sha256_hex"]
         ).sha256_hex(records[4]["payload"])
-        from gate_verify.verify import _record_hash
+        from qed_verify.verify import _record_hash
 
         records[4]["hash"] = _record_hash(records[4])
         records[4]["sig"] = attacker.sign(bytes.fromhex(records[4]["hash"]))
-        report = verify_records(records, load_public_keys(tmp_path / "gate" / "public"))
+        report = verify_records(records, load_public_keys(tmp_path / "qed" / "public"))
         assert not report.ok
         # The chain breaks at the next record even before the key is questioned.
         assert any(p.code in {"broken_link", "unknown_key"} for p in report.problems)
 
     def test_an_unknown_signing_key_is_reported(self, chain, tmp_path: Path) -> None:
         store, _, _ = chain
-        records, _ = _verify(store, tmp_path / "gate")
+        records, _ = _verify(store, tmp_path / "qed")
         report = verify_records(records, {})
         assert not report.ok
         assert all(p.code == "unknown_key" for p in report.problems)
@@ -159,7 +159,7 @@ def test_purged_payloads_still_verify(chain, tmp_path: Path) -> None:
     store, _, _ = chain
     purged = store.purge_payloads(through_seq=3)
     assert purged == 4
-    records, report = _verify(store, tmp_path / "gate")
+    records, report = _verify(store, tmp_path / "qed")
     assert report.ok, report.summary()
     assert report.purged == 4
     assert records[1]["payload"] is None
@@ -170,7 +170,7 @@ def test_checkpoint_merkle_root_verifies(chain, tmp_path: Path) -> None:
     store, writer, _ = chain
     record = writer.checkpoint(force=True)
     assert record is not None
-    _, report = _verify(store, tmp_path / "gate")
+    _, report = _verify(store, tmp_path / "qed")
     assert report.ok, report.summary()
     assert report.checkpoints == 1
 
@@ -201,9 +201,9 @@ def test_a_checkpoint_root_survives_masking(chain, tmp_path: Path) -> None:
 def test_a_tampered_checkpoint_root_is_detected(chain, tmp_path: Path) -> None:
     store, writer, _ = chain
     writer.checkpoint(force=True)
-    records, _ = _verify(store, tmp_path / "gate")
+    records, _ = _verify(store, tmp_path / "qed")
     records[-1]["payload"]["merkle_root"] = "0" * 64
-    report = verify_records(records, load_public_keys(tmp_path / "gate" / "public"))
+    report = verify_records(records, load_public_keys(tmp_path / "qed" / "public"))
     assert not report.ok
     assert any(p.code == "checkpoint_mismatch" for p in report.problems)
 
@@ -234,11 +234,11 @@ def test_checkpoint_declines_below_the_threshold(chain) -> None:
 
 
 def test_checkpoint_on_an_empty_chain_is_a_no_op(tmp_path: Path) -> None:
-    from gate.infra.keys.file import init_keys, load_signer
+    from qed.infra.keys.file import init_keys, load_signer
 
     directory = tmp_path / "empty"
     init_keys(directory)
-    with SqliteStore(directory / "gate.db") as store:
+    with SqliteStore(directory / "qed.db") as store:
         writer = ChainWriter(store, load_signer(directory), instance_id=INSTANCE)
         assert writer.checkpoint(force=True) is None
 
@@ -246,12 +246,12 @@ def test_checkpoint_on_an_empty_chain_is_a_no_op(tmp_path: Path) -> None:
 def test_rotation_continuity(chain, tmp_path: Path) -> None:
     """ADR-004: a key_rotated record is signed by the retiring key.
 
-    `gate keys rotate` is week 7; the record format and the verifier check
+    `qed keys rotate` is week 7; the record format and the verifier check
     exist now, so the format is frozen before anything depends on it.
     """
     store, writer, old = chain
     new = FileSigner.generate()
-    new.save_public(tmp_path / "gate" / "public")
+    new.save_public(tmp_path / "qed" / "public")
     writer.append(
         type_=EvidenceType.key_rotated,
         assurance=Assurance.kernel,
@@ -267,7 +267,7 @@ def test_rotation_continuity(chain, tmp_path: Path) -> None:
         type_=EvidenceType.proposal, assurance=Assurance.kernel, payload={"after": "rotation"}
     )
 
-    records, report = _verify(store, tmp_path / "gate")
+    records, report = _verify(store, tmp_path / "qed")
     assert report.ok, report.summary()
     assert len(report.keys_used) == 2
     rotation = next(r for r in records if r["type"] == "key_rotated")
@@ -277,14 +277,14 @@ def test_rotation_continuity(chain, tmp_path: Path) -> None:
 def test_rotation_signed_by_the_new_key_is_rejected(chain, tmp_path: Path) -> None:
     store, writer, old = chain
     new = FileSigner.generate()
-    new.save_public(tmp_path / "gate" / "public")
+    new.save_public(tmp_path / "qed" / "public")
     writer.signer = new  # the wrong order on purpose
     writer.append(
         type_=EvidenceType.key_rotated,
         assurance=Assurance.kernel,
         payload={"old_key_id": old.key_id, "new_key_id": new.key_id},
     )
-    _, report = _verify(store, tmp_path / "gate")
+    _, report = _verify(store, tmp_path / "qed")
     assert not report.ok
     assert any(p.code == "rotation_discontinuity" for p in report.problems)
 

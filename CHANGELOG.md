@@ -6,14 +6,14 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
-### Added - HTTP forward proxy (`gate proxy`) (SPEC 12.3, week 5)
+### Added - HTTP forward proxy (`qed proxy`) (SPEC 12.3, week 5)
 
-Point an agent's `HTTPS_PROXY` at the gate and every outbound call gets a
-verdict from the same `check_proposal` the MCP proxy and `gate check` use.
+Point an agent's `HTTPS_PROXY` at QED and every outbound call gets a
+verdict from the same `check_proposal` the MCP proxy and `qed check` use.
 `docs/http-proxy.md` has the whole picture; the parts worth stating here:
 
 - **Every CONNECT tunnel is recorded as `advisory`, whatever the command line
-  asks for.** The gate decides whether the connection may be opened, which is
+  asks for.** QED decides whether the connection may be opened, which is
   real and the refusal is real, but once open it carries ciphertext: no
   method, no path, no body, and no way to replace the credential inside. An
   adapter recording `enforcing` there would put a control in the evidence that
@@ -40,8 +40,8 @@ verdict from the same `check_proposal` the MCP proxy and `gate check` use.
 - The body is not read in `host_path` mode, so `params_hash` covers the
   request line and the headers that describe the body. Stated rather than
   implied; a rule that needs the body needs `mitm` mode, which is post-v1.
-- `X-Gate-Intent` is the HTTP counterpart of MCP's `_meta.intent`, and is
-  stripped before forwarding: it is for the gate, not the upstream.
+- `X-QED-Intent` is the HTTP counterpart of MCP's `_meta.intent`, and is
+  stripped before forwarding: it is for QED, not the upstream.
 - Refusals are a `403` whose body carries the rule ids, because an agent that
   only logs the status still logs the body with it. `502` upstream, `503`
   kernel-failed-and-closed, `501` for what this build will not forward.
@@ -50,7 +50,7 @@ verdict from the same `check_proposal` the MCP proxy and `gate check` use.
   name, a `CONNECT` without a port, userinfo in a proxied URL: all refused
   with a status rather than resolved. A proxy that resolves an ambiguity can
   be made to disagree with its upstream about where a request ends, and the
-  smuggled half would be the half the gate never decided. One request per
+  smuggled half would be the half QED never decided. One request per
   connection, for the same reason.
 - Binding anything but loopback needs `--allow-non-loopback`. A forward proxy
   on a reachable interface is an open relay, and the chain would attribute
@@ -65,7 +65,7 @@ verdict from the same `check_proposal` the MCP proxy and `gate check` use.
 
 ### Fixed - a result claimed an enforcement its own proposal denied
 
-The first live run of `gate proxy` put this in one chain, two records apart,
+The first live run of `qed proxy` put this in one chain, two records apart,
 about the same call: the `proposal` recorded `advisory`, correctly, because no
 upstream was configured -- and the `execution_result` beside it recorded
 `enforcing`, with `assurance: adapter`, because the recording path read the
@@ -89,7 +89,7 @@ target whose host begins with one of `f d 0 2 4 5 c e :`. A rule written that
 way reads correct and fires on traffic nobody meant it to, in the direction
 that blocks real work.
 
-AG-DAT-013 shipped with exactly that mistake, and the first live `gate proxy`
+AG-DAT-013 shipped with exactly that mistake, and the first live `qed proxy`
 run was refused a CONNECT to example.com by the instance-metadata rule --
 `e` was in the accidental set. The golden case written beside the rule used
 `api.github.com` and passed the whole time, because `a` was not.
@@ -125,7 +125,7 @@ Two fixes, each sound on its own:
   contain a letter, so a card number, a phone number or a national id -- all
   pure digits -- can never be exempted by sitting under one of those keys.
 
-Old chains are unaffected. `gate-verify` recomputes `payload_hash` from the
+Old chains are unaffected. `qed-verify` recomputes `payload_hash` from the
 payload as stored and never re-runs masking, so a record written under the
 earlier pattern set still verifies.
 
@@ -138,9 +138,9 @@ of `127.0.0.1` then matched nothing, the upstream went unmatched, and the
 request ran advisory while the config said enforcing. `target_globs` still
 sees the whole string for an operator who does want to distinguish ports.
 
-### Fixed - `gate/adapters/http/` shadowed the standard library
+### Fixed - `qed/adapters/http/` shadowed the standard library
 
-The proxy arrived as `gate/adapters/http/` with tests in
+The proxy arrived as `qed/adapters/http/` with tests in
 `tests/adapters/http/`, and every test that runs
 `python tests/adapters/upstream_server.py` as a subprocess started failing
 with `ModuleNotFoundError: No module named 'http.client'` -- three imports
@@ -154,7 +154,7 @@ created rather than a week later.
 ### Added - enforcing MCP (SPEC 7.2, week 5)
 
 - **`context.enforcement` is derived per action, not asserted by a flag.**
-  The gate is enforcing for a call if and only if it is holding the
+  QED is enforcing for a call if and only if it is holding the
   credential for it. Before this an adapter was told it was enforcing by a
   command-line option, that claim reached the evidence, and a missing
   credential made it silently false.
@@ -186,9 +186,9 @@ is where mypy found it. The schema's enum is now re-exported.
 
 ### Added — credential broker: matching, resolution, posture (SPEC §7, week 5)
 
-- `gate/core/broker/` (pure) matches an action to an upstream;
-  `gate/infra/secrets/` resolves `env`, `file` and `vault` references behind a
-  TTL cache; `gate/infra/upstreams.py` loads `upstreams.yaml`.
+- `qed/core/broker/` (pure) matches an action to an upstream;
+  `qed/infra/secrets/` resolves `env`, `file` and `vault` references behind a
+  TTL cache; `qed/infra/upstreams.py` loads `upstreams.yaml`.
 - **`Secret` makes a leak something you have to write on purpose.** `str`,
   `repr`, f-strings, `%`-formatting and `pprint` all render `<redacted>`;
   `json.dumps` refuses outright rather than serialising; `reveal()` is the
@@ -200,8 +200,8 @@ is where mypy found it. The schema's enum is now re-exported.
 - **An upstream with no resolvable credential is advisory, whatever the
   config claims.** Config that promises more than it can deliver is worse
   than config that admits the gap, because the claim ends up in the evidence.
-- `gate doctor` reports the uncomfortable question per upstream: does the
-  gate hold the credential, or is the agent carrying its own? With nothing
+- `qed doctor` reports the uncomfortable question per upstream: does the
+  qed hold the credential, or is the agent carrying its own? With nothing
   configured it says every adapter is advisory, in those words.
 - First match wins, in file order. Not "most specific": specificity between a
   host glob and an environment list is not rankable, and an order nobody can
@@ -246,7 +246,7 @@ that strip an agent-supplied `Authorization` and attach the broker's own.
   request at creation, not looked up at decision time. The bundle can be
   reloaded in between, and an approver should be bounded by the rule in force
   when the action was proposed. Where rules disagree the tighter one wins.
-- `gate approve` and `gate approvals [--expire]`; `approval_requested`,
+- `qed approve` and `qed approvals [--expire]`; `approval_requested`,
   `approval_decided` and `approval_expired` reach the chain.
 - `0004_approvals.sql` adds `principal_hash` and `window_max_seconds`.
   Without the principal on the row, "the approver is not the principal"
@@ -254,7 +254,7 @@ that strip an agent-supplied `Authorization` and attach the broker's own.
 - `docs/approvals.md`.
 
 Not yet: Slack Block Kit, `/events` SSE, the web approval page. The decision
-path they would call is finished and is the one `gate approve` uses.
+path they would call is finished and is the one `qed approve` uses.
 
 ### Added — baseline pack, 15 rules to 45 (SPEC §22 week 3)
 
@@ -299,7 +299,7 @@ ignored) and AG-IDN-004 was harsher than the AG-BLR-004 it backs up.
 could not set it, so any rule keyed on call or block counts was untestable.
 An untestable rule is one nobody can change safely.
 
-### Added — `gate policy test` (SPEC §14)
+### Added — `qed policy test` (SPEC §14)
 
 - Runs cases you write against the rules you have loaded. Touches nothing: no
   chain, no store, no network. Exit 0 all passed, 1 a case failed.
@@ -320,8 +320,8 @@ An untestable rule is one nobody can change safely.
 
 ### Changed — the golden suite and the CLI share one comparison
 
-`tests/policy/test_golden.py` now compares through `gate.core.policy.cases`,
-the same code `gate policy test` uses. Two comparison routines would drift and
+`tests/policy/test_golden.py` now compares through `qed.core.policy.cases`,
+the same code `qed policy test` uses. Two comparison routines would drift and
 the one that drifted would be the user's; ours is the one with a CI job behind
 it. The 74 golden cases still each run twice -- the shuffle moved inside
 `run_case` rather than being a separate parametrized test, which is why the
@@ -329,15 +329,15 @@ total test count falls while coverage does not.
 
 ### Added — mandate lifecycle (SPEC §6.5)
 
-- `gate mandate sign | list | revoke`, completing §6. Mandates were already
-  consumed by `gate check --mandate`, the MCP proxy and the API envelope;
+- `qed mandate sign | list | revoke`, completing §6. Mandates were already
+  consumed by `qed check --mandate`, the MCP proxy and the API envelope;
   there was no way to issue, store or withdraw one.
-- `gate/core/mandates.py` (pure): the signing payload, signature verification
+- `qed/core/mandates.py` (pure): the signing payload, signature verification
   and the active/inactive question. Ed25519 only, with no algorithm field read
   off the document -- the same rule as the token path.
 - **What is signed is the document minus `signature` and minus `revoked_at`.**
   A signature cannot cover itself; the second exclusion is the one that
-  matters. Revocation is an act of the gate, recorded in the chain, not an
+  matters. Revocation is an act of QED, recorded in the chain, not an
   edit the signer authorised, so a revoked mandate still verifies against the
   signature its issuer produced. Including `revoked_at` would mean revoking a
   mandate destroyed the proof of who granted the authority -- exactly the
@@ -354,18 +354,18 @@ total test count falls while coverage does not.
 
 ### Added — delegation (SPEC §6), week 3
 
-- **`POST /v1/token`** (RFC 8693): an IdP token in, a narrower budgeted gate
+- **`POST /v1/token`** (RFC 8693): an IdP token in, a narrower budgeted qed
   token out. Scope is intersected with what the subject's groups hold, budget
   is capped per axis, lifetime is the smallest of the request, an hour, the
   parent's remaining life and the mandate's. `refused_scope` comes back so a
   misconfigured agent fails at the exchange rather than at its first action.
-- **`gate login`** (RFC 8628 device flow) and **`gate token`**. Both were
+- **`qed login`** (RFC 8628 device flow) and **`qed token`**. Both were
   already in SPEC §14's list of 18, so no spec update was needed. The refresh
   token goes to the OS keychain, or a 0600 file with a warning where there is
   none.
 - **`GET /.well-known/jwks.json`**, outside `/v1` on purpose: every `/v1` route
   refuses an unsigned request and that test has no exemption list.
-- `gate/core/delegation/` (pure) and `gate/infra/{tokens,jwks}.py` (I/O).
+- `qed/core/delegation/` (pure) and `qed/infra/{tokens,jwks}.py` (I/O).
 - `deploy/keycloak/`: a real Keycloak with the realm imported, and `demo.sh`,
   which runs the week-3 exit criterion end to end.
 - `docs/delegation.md`.
@@ -374,14 +374,14 @@ total test count falls while coverage does not.
 
 Found by running the demo against Keycloak 26 instead of a fixture. All three
 were invisible to the synthetic tests, because those built claims the way the
-gate itself writes them.
+qed itself writes them.
 
 - **`scope` is a space-delimited string** (RFC 6749 §3.3), not a list. Both
   forms are accepted now.
 - **A token could declare its own kind.** `TokenClaims.token_type` defaulted to
-  `"gate"`, so an IdP token — which carries no such claim — arrived looking
-  gate-issued and was handed to the narrowing check as its own parent, failing
-  every exchange. Whether a token is gate-issued is decided by *which key
+  `"qed"`, so an IdP token — which carries no such claim — arrived looking
+  qed-issued and was handed to the narrowing check as its own parent, failing
+  every exchange. Whether a token is qed-issued is decided by *which key
   verified it*; the field is gone and a test asserts nothing reads it again.
   This is the same rule as never reading `alg` from the token.
 - **A narrowing violation during mint escaped as a 500.** It is a caller asking
@@ -397,7 +397,7 @@ complete run.
 ### Changed — Keycloak realm requests the `basic` client scope
 
 Keycloak 26 omits `sub` from the access token without it. A token with no
-subject cannot name a principal, so the gate refuses it — correctly, but the
+subject cannot name a principal, so QED refuses it — correctly, but the
 shipped realm should not produce one.
 
 ### Added — budget ledger (SPEC §8), week 3
@@ -407,7 +407,7 @@ shipped realm should not produce one.
   and the three AG-BUD-* rules could never fire against stored state. The caps
   now live in `budgets` next to the usage, a decision reads them, and an action
   that runs is charged.
-- `gate.core.budget` holds the arithmetic and stays pure: `charge_for` (cost
+- `qed.core.budget` holds the arithmetic and stays pure: `charge_for` (cost
   from the adapter's estimate), `apply_charge`, `newly_exhausted`. The atomic
   read-modify-write is `SqliteStore.charge_budget`, under the same
   `BEGIN IMMEDIATE` write lock `append_evidence` uses and for the same reason —
@@ -434,7 +434,7 @@ shipped realm should not produce one.
 - 41 tests: arithmetic, ledger, migration, and the runtime rules above.
   End-to-end on the CLI: a 2-step token allows two actions, the third is
   blocked by the AG-BUD-001 short-circuit, exactly one `budget_exhausted` sits
-  after the verdict that caused it, and `gate-verify` still passes on the
+  after the verdict that caused it, and `qed-verify` still passes on the
   resulting chain.
 
 ### Changed — migrations are applied once
@@ -449,7 +449,7 @@ shipped realm should not produce one.
 ### Added — licence applied, name settled (SPEC §24.1, §24.2)
 
 - **Apache-2.0 is applied.** `LICENSE` (verbatim, 202 lines) and `NOTICE` at
-  the root, and the same two files copied into `packages/gate-verify/` —
+  the root, and the same two files copied into `packages/qed-verify/` —
   copied, not referenced, because PEP 639 `license-files` globs cannot escape
   a project directory. CI asserts the two licence texts stay byte-identical,
   since a verifier shipped under a stale licence text is the kind of detail an
@@ -460,14 +460,14 @@ shipped realm should not produce one.
   error, so there is no such classifier.
 - The `Private :: Do Not Upload` classifier is gone from both projects. A PyPI
   upload is no longer refused by its own metadata.
-- `PATENT-AND-LICENCE-GATE.md` is deleted. **SPEC §24.2 closed on 2026-10-08:
+- `PATENT-AND-LICENCE-QED.md` is deleted. **SPEC §24.2 closed on 2026-10-08:
   Valqore holds no patent filings and has nothing pending**, so the
   irrevocable Apache-2.0 §3 grant transfers nothing. It was answered before
   distribution, which was the entire purpose of withholding the licence.
 - The CI job *No LICENSE file until SPEC 24.2 closes* now asserts the
   opposite: both licence files present, both projects declaring Apache-2.0,
-  the guard-rail classifier not back, and the gate-verify copy identical.
-- **SPEC §24.1 closed: the product is "Valqore Gate".** `gate` stays the
+  the guard-rail classifier not back, and the qed-verify copy identical.
+- **SPEC §24.1 closed: the product is "Valqore QED".** `qed` stays the
   command, the import package and the repository name. Zero refactor — the
   evidence format already carries no product name (ADR-0006), so nothing in a
   chain written today depends on this choice.
@@ -491,7 +491,7 @@ publishing is not.
   either invalidating their evidence or shipping a retired name in the format
   forever. SPEC §24.1's "the name is a placeholder, a rename is a single
   refactor" is true after this change and was not true before it.
-- `gate/core/evidence/format.py` is the single definition. `gate-verify` keeps
+- `qed/core/evidence/format.py` is the single definition. `qed-verify` keeps
   its own copy, as SPEC §10.7 requires, and `tests/evidence/test_format_constants.py`
   checks the two agree, pins the exact bytes against digests recorded outside
   the package, and fails if a candidate product name appears in a hash input.
@@ -508,40 +508,40 @@ Weeks 1 and 2 of the SPEC §22 build order.
 
 ### Added — week 2 (SPEC §22)
 
-- `gate/adapters/mcp/`: the MCP proxy. MCP server toward the agent, MCP client
+- `qed/adapters/mcp/`: the MCP proxy. MCP server toward the agent, MCP client
   toward the upstream, over stdio or Streamable HTTP, on the official `mcp` SDK.
   `initialize` keeps the upstream's `serverInfo` and adds a note to
   `instructions`; capabilities are mirrored rather than claimed, so the proxy
   never advertises `prompts` to a client whose upstream has none. `resources/read`
   and `prompts/get` are forwarded, recorded and never refused (SPEC §12.1).
-- `gate/adapters/mcp/intent.py`: tool-call classification into the SPEC §3.1
+- `qed/adapters/mcp/intent.py`: tool-call classification into the SPEC §3.1
   hints. Reads the arguments as well as the tool name. See "Changed from the
   spec" below — this is the week 1 review's carry-forward item.
-- `gate/adapters/mcp/targets.py`: `target_template` with `{server}`, `{tool}`,
+- `qed/adapters/mcp/targets.py`: `target_template` with `{server}`, `{tool}`,
   `{env}` and `{args.<dotted.path>}`. Validated at startup; substituted values
   are sanitised, because a tool argument is attacker-influenced input.
-- `gate/adapters/common.py`: proposal building shared by every adapter —
+- `qed/adapters/common.py`: proposal building shared by every adapter —
   `params_hash` over the whole parameters, a bounded `params_redacted` that
   honours the SPEC §17 16 KB limit, ULID proposal ids.
-- `gate/api/`: FastAPI app. `POST /v1/proposals`, `GET /v1/proposals/{id}`,
+- `qed/api/`: FastAPI app. `POST /v1/proposals`, `GET /v1/proposals/{id}`,
   `POST /v1/proposals/{id}/result`, `GET /v1/evidence`,
   `GET /v1/evidence/by-ref/{ref}`, `GET /healthz`, `GET /readyz`. RFC 9457
   `problem+json` throughout, including for 404s and validation failures.
   `readyz` is false without a signing key, with a broken policy bundle, or
   without usable adapter authentication (SPEC §17).
-- `gate/api/auth.py`: adapter authentication. `X-Gate-Adapter-Id` plus an
+- `qed/api/auth.py`: adapter authentication. `X-QED-Adapter-Id` plus an
   HMAC-SHA256 over method, path, timestamp, nonce and body digest. Secrets come
-  from environment variables named in `gate.yaml`, never from the file itself.
-- `gate/core/evidence/export/oscal.py`: OSCAL 1.1.2 `assessment-results`. One
+  from environment variables named in `qed.yaml`, never from the file itself.
+- `qed/core/evidence/export/oscal.py`: OSCAL 1.1.2 `assessment-results`. One
   observation per evidence record, one finding per (rule hit, control), public
   keys and checkpoint roots in `back-matter`. All identifiers are derived
   version-5 UUIDs, so the same range exports byte-identically every time.
   Validated against the vendored NIST schema in CI (SPEC §10.8, MUST pass).
-- CLI: `gate serve` and `gate mcp`; `gate export --format oscal`.
+- CLI: `qed serve` and `qed mcp`; `qed export --format oscal`.
 - `deploy/Dockerfile`: two-stage, distroless, non-root, no shell in the runtime
   image, no `VOLUME` line (an anonymous volume is how an evidence chain
   disappears on `docker run`).
-- `gate/core/evidence/hashing.py::principal_hash`: one definition of how a human
+- `qed/core/evidence/hashing.py::principal_hash`: one definition of how a human
   principal is hashed, so the proxy today and week 3's token verification
   attribute to the same principal.
 - `docs/api.md`, `docs/mcp-proxy.md`, `docs/oscal.md`; `docs/assurance-classes.md`
@@ -554,8 +554,8 @@ Weeks 1 and 2 of the SPEC §22 build order.
 
 ### Fixed — week 2
 
-- `gate/core/evidence/masking.py`: the card-number masker corrupted identifiers
-  gate itself generates. Luhn is a checksum, not an identifier — a run of
+- `qed/core/evidence/masking.py`: the card-number masker corrupted identifiers
+  qed itself generates. Luhn is a checksum, not an identifier — a run of
   eighteen zeros passes it exactly, because the sum is 0 and 0 is divisible by
   10 — so the ULID-shaped `token_jti` `01JB000000000000000000JTI0` was rewritten
   to `01JB[masked:card]JTI0` *inside the chain*, in every proposal record. The
@@ -571,14 +571,14 @@ Weeks 1 and 2 of the SPEC §22 build order.
 
 ### Changed — week 2
 
-- `gate mcp` requires `--human` or `--mandate`. Without identity, `evaluate`
+- `qed mcp` requires `--human` or `--mandate`. Without identity, `evaluate`
   short-circuits to a synthetic `AG-IDN-007` BLOCK *before* any rule in the
   bundle runs, so the chain would fill with identical identity blocks in which
   no policy rule had ever been evaluated — and in shadow mode nothing would be
   stopped and nothing would look wrong. `--human` is recorded as
   adapter-asserted in `client_fingerprint`, which SPEC §3.1 defines as advisory
   and never enforced on. Verified identity is week 3.
-- `gate/config.py`: `api` and `adapters` sections are now read, and removed from
+- `qed/config.py`: `api` and `adapters` sections are now read, and removed from
   `UNIMPLEMENTED_SECTIONS`.
 - `SqliteStore`: added `get_proposal`, `evidence_at`, and a `types` filter on
   `iter_evidence`.
@@ -614,7 +614,7 @@ Weeks 1 and 2 of the SPEC §22 build order.
   shadow mode nobody would notice, and enforce starts in week 10.
 
   The useful half — the verb tables, earned on tools agents really call — is
-  written out in `gate/adapters/mcp/intent.py` with no import that can fail.
+  written out in `qed/adapters/mcp/intent.py` with no import that can fail.
   Valqore's "sensitive → high" half is deliberately left out: the kernel's
   `blast_radius.py` already scores that surface, already reads `params_redacted`,
   and is inside the policy hash where an auditor can replay it.
@@ -625,21 +625,21 @@ Weeks 1 and 2 of the SPEC §22 build order.
 ### Added — week 1 (SPEC §22)
 
 - Repo skeleton, `ruff` + `mypy --strict` + `pytest` in CI, no-network and
-  no-LLM import guards on `gate.core`.
-- `gate/core/schemas.py`: full SPEC §3 domain model on Pydantic v2, frozen and
+  no-LLM import guards on `qed.core`.
+- `qed/core/schemas.py`: full SPEC §3 domain model on Pydantic v2, frozen and
   `extra="forbid"`. Timestamps are RFC 3339 UTC at millisecond precision with a
   deterministic serializer.
-- `gate/core/jcs.py`: RFC 8785 canonical JSON, used for every hash.
-- `gate/core/evidence/`: record construction, SPEC §10.2 hash, Ed25519
+- `qed/core/jcs.py`: RFC 8785 canonical JSON, used for every hash.
+- `qed/core/evidence/`: record construction, SPEC §10.2 hash, Ed25519
   signatures, Merkle checkpoints, secret/PII masking at write.
-- `gate/infra/storage/sqlite.py` + forward-only migrations: the evidence ledger
+- `qed/infra/storage/sqlite.py` + forward-only migrations: the evidence ledger
   and the SPEC §15 tables week 1 needs.
-- `gate/infra/keys/file.py`: file-backed Ed25519 keys, `gate keys init`.
-- `gate/core/policy/`: loader (rules, overrides, disables), linter (all SPEC
+- `qed/infra/keys/file.py`: file-backed Ed25519 keys, `qed keys init`.
+- `qed/core/policy/`: loader (rules, overrides, disables), linter (all SPEC
   §4.3 error classes), predicate evaluator (SPEC §4.4), engine (SPEC §5),
   deterministic blast-radius table.
-- `gate/core/policy/packs/agent-baseline/`: 15 baseline rules.
-- `packages/gate-verify/`: standalone verifier, `cryptography` only.
+- `qed/core/policy/packs/agent-baseline/`: 15 baseline rules.
+- `packages/qed-verify/`: standalone verifier, `cryptography` only.
 - CLI: `keys init`, `check`, `policy lint|explain`, `export`, `verify`.
 - 62 golden policy cases; chain, Merkle, masking, JCS, lint and CLI suites.
 
@@ -652,5 +652,5 @@ Weeks 1 and 2 of the SPEC §22 build order.
 
 ### Changed from the spec
 
-- `gate/core/policy/blast_radius.py` is **written fresh**, not ported from
+- `qed/core/policy/blast_radius.py` is **written fresh**, not ported from
   Valqore `governance/blast_radius.py`. See `docs/adr/0001-blast-radius-table.md`.

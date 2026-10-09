@@ -1,0 +1,100 @@
+{
+  "realm": "qed-demo",
+  "enabled": true,
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 3600,
+  "oauth2DeviceCodeLifespan": 600,
+  "oauth2DevicePollingInterval": 2,
+  "groups": [
+    {
+      "name": "platform"
+    },
+    {
+      "name": "sre"
+    }
+  ],
+  "users": [
+    {
+      "username": "ali",
+      "email": "ali@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Ali",
+      "lastName": "Demo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/platform"
+      ]
+    },
+    {
+      "username": "nobody",
+      "email": "nobody@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "groups": []
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "qed-cli",
+      "name": "Valqore QED CLI",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "openid",
+        "profile",
+        "email",
+        "acr",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
+      "protocolMappers": [
+        {
+          "name": "qed-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "qed",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

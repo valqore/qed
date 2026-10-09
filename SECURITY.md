@@ -9,7 +9,7 @@ maintainer.
 
 ## What this software is for
 
-gate decides whether an AI agent may perform an action, and writes evidence that
+QED decides whether an AI agent may perform an action, and writes evidence that
 a third party can verify. Two things follow:
 
 - A bug that lets a decision be bypassed is a critical bug.
@@ -21,7 +21,7 @@ a third party can verify. Two things follow:
 | Invariant | Enforced by |
 |---|---|
 | No LLM in the decision path | `tests/core/test_no_llm.py` |
-| No network client in `gate.core` | `tests/core/test_no_network.py` |
+| No network client in `qed.core` | `tests/core/test_no_network.py` |
 | Ed25519 only; no HMAC path exists | `tests/evidence/test_no_hmac.py` |
 | No development fallback signing key | `tests/evidence/test_no_hmac.py` |
 | Tamper, deletion and reordering are all detected | `tests/evidence/test_chain.py` |
@@ -36,8 +36,8 @@ assume, so each one is a build failure rather than a review comment.
 
 ## Keys
 
-- `gate keys init` writes the private key with 0600 where the platform honours
-  it. On Windows the POSIX bits are advisory; `gate doctor` will report posture
+- `qed keys init` writes the private key with 0600 where the platform honours
+  it. On Windows the POSIX bits are advisory; `qed doctor` will report posture
   rather than imply a guarantee (week 5).
 - There is no built-in key, no key generated on first run, and no fallback. A
   missing key is a hard failure.
@@ -64,7 +64,7 @@ assume, so each one is a build failure rather than a review comment.
 Stated plainly because an incomplete system described as complete is itself a
 security problem:
 
-- **No authentication anywhere.** There is no HTTP API yet. `gate check` trusts
+- **No authentication anywhere.** There is no HTTP API yet. `qed check` trusts
   whoever can run it.
 - **No delegation verification.** `principal.token_jti` is taken as given. JWT
   and JWKS verification, actor-chain narrowing and scope checks are week 3.

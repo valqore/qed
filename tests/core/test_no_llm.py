@@ -1,6 +1,6 @@
-"""Invariant §1.4.1: no model SDK anywhere in `gate.core`.
+"""Invariant §1.4.1: no model SDK anywhere in `qed.core`.
 
-Explanations may be model-generated in `gate.explain.*`. The engine must never
+Explanations may be model-generated in `qed.explain.*`. The engine must never
 be able to consult one, because a decision an auditor cannot replay is not
 evidence of anything.
 """

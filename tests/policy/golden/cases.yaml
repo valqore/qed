@@ -919,7 +919,7 @@
 # The first version of AG-DAT-013 wrote the IPv6 metadata address as the glob
 # `*://[fd00:ec2::254]*`, and fnmatch read the brackets as a character class:
 # any host starting with f, d, 0, 2, 4, 5, c, e or `:`. The live run of
-# `gate proxy` was refused a CONNECT to example.com because of it, and the
+# `qed proxy` was refused a CONNECT to example.com because of it, and the
 # `api.github.com` case above passed the whole time -- `a` was not in the
 # accidental set. So the hosts below are chosen for their first letter, one
 # per character the class contained.
@@ -982,7 +982,7 @@
       kind: shell
       name: "edit"
       target: "file:local"
-      params_redacted: { path: ".gate/policies/baseline.yaml" }
+      params_redacted: { path: ".qed/policies/baseline.yaml" }
   expect:
     decision: BLOCK
     rules: [AG-IDN-009]

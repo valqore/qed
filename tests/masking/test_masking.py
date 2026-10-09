@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.core.evidence.masking import mask_payload, mask_text
+from qed.core.evidence.masking import mask_payload, mask_text
 
 CASES = [
     ("email", "ping ali.celik@acme.com now", "ali.celik@acme.com", "[masked:email]"),
@@ -88,7 +88,7 @@ class TestLuhnAloneIsNotEnough:
 
     Over-masking is not the harmless direction it sounds like. The chain is
     masked *before* it is hashed, so a false positive does not redact a secret,
-    it rewrites a value gate itself generated -- and the record then attests to
+    it rewrites a value qed itself generated -- and the record then attests to
     something nothing else in the system has.
     """
 

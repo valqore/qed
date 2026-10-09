@@ -1,0 +1,169 @@
+# agent-baseline — identity and delegation (SPEC §4.6, AG-IDN-*)
+#
+# AG-IDN-003 (narrowing), -005 (unknown adapter), -006 (outside the mandate)
+# and -007 (unattended with no mandate) are raised by the token and engine
+# paths, not by a file rule — they are refusals that happen before any rule
+# runs. What is here is everything the engine can only see once a proposal has
+# been built.
+
+- rule_id: AG-IDN-002
+  name: Delegation chain deeper than two agents
+  severity: MEDIUM
+  mode: shadow
+  # The token layer refuses a chain over four links outright. Two is where it
+  # stops being obvious who is actually acting, so it is worth recording long
+  # before it is worth stopping.
+  when:
+    field: derived.chain_depth
+    gt: 2
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 15m
+  message: "This action reaches QED through more than two agents."
+  fix: "Shorten the delegation, or name the sub-agent in its own mandate."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: owasp_agentic, control: "ASI03" }
+
+- rule_id: AG-IDN-004
+  name: Identity or permission change
+  severity: CRITICAL
+  mode: enforce
+  # Distinct from AG-BLR-004, which keys off the declared hints. This one
+  # matches the verb, so an adapter that did not flag a role grant as a policy
+  # mutation is still caught.
+  when:
+    any:
+      - field: action.name
+        regex: "(?i)\\b(create_user|add_member|attach_(role|policy)|put_(role|user)_policy|grant|assume_role|set_iam_policy|add_ssh_key)\\b"
+      - field: action.params_redacted.command
+        regex: "(?i)\\b(usermod|visudo|chpasswd|adduser)\\b"
+      - field: action.params_redacted.sql
+        regex: "(?i)\\b(grant|create\\s+user|alter\\s+user)\\b"
+  # REQUIRE_APPROVAL, not BLOCK. AG-BLR-004 already covers this class from the
+  # declared hints and asks for approval; this rule exists to catch the same
+  # thing when the adapter did not set them. A fallback that is harsher than
+  # the rule it backs up makes the pair incoherent, and the harsher of the two
+  # is the one that would fire on the adapter that behaved correctly.
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [security-oncall]
+    timeout: 20m
+  message: "This action changes who can do what."
+  fix: "Permission changes go through the normal access-request path, with a person on it."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
+    - { framework: owasp_agentic, control: "ASI01" }
+    - { framework: soc2, control: "CC6.2" }
+
+- rule_id: AG-IDN-008
+  name: Unattended agent acting in production
+  severity: HIGH
+  mode: enforce
+  # A mandate says the agent was authorised to run unattended; it does not say
+  # it was authorised to run unattended *in production*, which is a separate
+  # decision and should be made by a person at least once.
+  applies_to:
+    environments: [prod]
+  when:
+    all:
+      - { field: principal.human_hash, exists: false }
+      - any:
+          - { field: context.blast_radius_hints.writes, equals: true }
+          - { field: context.blast_radius_hints.deletes, equals: true }
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [sre-oncall]
+    timeout: 20m
+  message: "An unattended agent is writing to production with no person behind the request."
+  fix: "Run this attended, or widen the mandate deliberately after review."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
+
+- rule_id: AG-IDN-009
+  name: Action against QED's own configuration
+  severity: CRITICAL
+  mode: enforce
+  # Self-governance. An agent that can edit the policy it is judged by is not
+  # governed, and the one rule that must not be disableable by the thing it
+  # constrains is this one.
+  when:
+    any:
+      - field: action.target
+        regex: "(?i)(^|[:/])qed([:/._-]|$)|/\\.qed(/|$)"
+      - field: action.params_redacted.command
+        regex: "(?i)\\.qed/(policies|evidence|token-key|evidence-key)"
+      - field: action.params_redacted.path
+        regex: "(?i)\\.qed/"
+  verdict: BLOCK
+  message: "This action targets QED's own keys, policy or evidence."
+  fix: "QED is changed by an operator, not by an agent QED is judging."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 12" }
+    - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
+    - { framework: owasp_agentic, control: "ASI01" }
+    - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-IDN-010
+  name: Repeated blocks from the same principal
+  severity: MEDIUM
+  mode: shadow
+  # An agent that keeps hitting QED is either misconfigured or probing.
+  # Either way the pattern is worth surfacing, and neither is worth stopping
+  # the next action over on its own.
+  when:
+    field: derived.history.blocks_24h
+    gte: 5
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [agent-owners]
+    timeout: 30m
+  message: "This principal has been blocked repeatedly in the last day."
+  fix: "Look at what the agent is trying to do before widening anything."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MEASURE-2.7" }
+    - { framework: owasp_agentic, control: "ASI06" }
+
+- rule_id: AG-IDN-011
+  name: Production action from an unrecognised adapter family
+  severity: MEDIUM
+  mode: shadow
+  # Adapters authenticate at the API, so this is not an authentication check.
+  # It catches the adapter that authenticates fine but was never meant to be
+  # pointed at production.
+  applies_to:
+    environments: [prod]
+  when:
+    not:
+      field: context.adapter
+      regex: "^(mcp-proxy|http-proxy|ci|cli)/"
+  verdict: REQUIRE_APPROVAL
+  approval:
+    approvers: [platform-team]
+    timeout: 30m
+  message: "A production action arrived from an adapter family nobody has reviewed."
+  fix: "Add the adapter to the reviewed list, or route the action through a reviewed one."
+  compliance:
+    - { framework: nist_ai_rmf, control: "MAP-4.1" }
+    - { framework: soc2, control: "CC6.1" }
+
+- rule_id: AG-IDN-012
+  name: Action carries a mandate that is not the principal's
+  severity: HIGH
+  mode: enforce
+  # `principal.mandate_id` comes from the verified token. A proposal that
+  # names a different mandate in its tags is an adapter trying to borrow
+  # authority it was not granted.
+  when:
+    all:
+      - { field: principal.mandate_id, exists: false }
+      - { field: context.tags, contains: "mandated" }
+  verdict: BLOCK
+  message: "The proposal claims to be mandated, but the token carries no mandate."
+  fix: "Issue a mandate and exchange a token that references it."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: owasp_agentic, control: "ASI01" }

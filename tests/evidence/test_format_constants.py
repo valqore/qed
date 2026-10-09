@@ -10,7 +10,7 @@ format changed. That is allowed, but it is a format version bump with a
 migration note, never a side effect of a rename.
 
 **No product name.** SPEC §24.1 closed on 2026-10-08 — the product is "Valqore
-Gate" — and that changes nothing here. A brand inside a hash domain separator
+QED" — and that changes nothing here. A brand inside a hash domain separator
 would make a rename an evidence-compatibility decision instead of a packaging
 one, whether or not the brand is settled today. The constants stay
 format-scoped and brand-free, and this file is what keeps them that way.
@@ -21,10 +21,10 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from gate_verify import verify as verifier
+from qed_verify import verify as verifier
 
-from gate.core.evidence import format as fmt
-from gate.core.evidence import hashing
+from qed.core.evidence import format as fmt
+from qed.core.evidence import hashing
 
 # Computed independently and recorded. Do not regenerate from the code.
 GENESIS_ACME_PROD = "a4aa4287e70eb8c942c5234b7366120ba2c6e3780ceaf90f08cf6c3915767f99"
@@ -50,7 +50,7 @@ def test_principal_hash_matches_the_recorded_answer() -> None:
 def test_verifier_carries_the_same_constants() -> None:
     """The verifier reimplements the format; the two copies must not drift.
 
-    `gate_verify` imports nothing from `gate` on purpose (SPEC §10.7), so the
+    `qed_verify` imports nothing from `qed` on purpose (SPEC §10.7), so the
     strings exist twice. This is the check that they are the same strings.
     """
     assert verifier.CHAIN_FORMAT == fmt.CHAIN_FORMAT
@@ -69,7 +69,7 @@ def test_no_product_name_inside_a_hash_input(constant: str) -> None:
     lost (SPEC §24.1). A rename must stay a packaging change; if one of these
     words lands in a hash input, it stops being one.
     """
-    for name in ("gate", "valqore", "lictor"):
+    for name in ("qed", "valqore", "lictor"):
         assert name not in constant.lower()
 
 

@@ -1,0 +1,162 @@
+"""Per-process API state and how a router reaches it.
+
+In its own module so that routers can read the state without importing
+``qed.api.app``, which imports them. The cycle is avoidable and a cycle broken
+by a function-local import is a cycle waiting to come back.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import Request
+
+from qed.api.auth import AdapterAuth
+from qed.api.problems import Problem
+from qed.config import IssuerConfig
+from qed.core.delegation.claims import TokenClaims, TokenVerificationError
+from qed.core.schemas import Principal
+from qed.infra.channels.slack import SlackChannel
+from qed.infra.jwks import JwksCache, discover_jwks_uri
+from qed.infra.tokens import QED_ALG, TokenIssuer, decode_unverified_header, verify_token
+from qed.runtime import Session
+
+__all__ = ["QedState", "authenticate", "qed_state", "require_session"]
+
+
+@dataclass
+class QedState:
+    """What the routers need. Set up once by the app's lifespan."""
+
+    directory: Path
+    dev: bool
+    session: Session | None = None
+    auth: AdapterAuth | None = None
+    #: Present only when `delegation.issuers` is configured. `/v1/token`
+    #: answers 501 without it rather than minting tokens nobody asked for.
+    token_issuer: TokenIssuer | None = None
+    jwks: JwksCache | None = None
+    #: Present only when a bot token is configured. Without it a button click
+    #: cannot be resolved to a person, so the endpoint refuses rather than
+    #: recording a Slack user id as the approver.
+    slack: SlackChannel | None = None
+    _jwks_uris: dict[str, str] = field(default_factory=dict, repr=False)
+    #: Why the service is not ready, if it is not. Empty when it is.
+    blockers: list[str] = field(default_factory=list)
+
+    @property
+    def ready(self) -> bool:
+        return self.session is not None and not self.blockers
+
+    def require(self) -> Session:
+        """The session, or a 503 that names what is missing."""
+        if self.session is None or self.blockers:
+            raise Problem(
+                status=503,
+                code="not-ready",
+                title="The service is not ready",
+                detail="; ".join(self.blockers) or "the policy kernel is not initialised",
+                extra={"blockers": list(self.blockers)},
+            )
+        return self.session
+
+    def verify_subject_token(
+        self, token: str, *, now: datetime
+    ) -> tuple[TokenClaims, Principal, bool]:
+        """Verify a subject token from any configured source (SPEC §6.1 step 1).
+
+        Returns ``(claims, principal, qed_issued)``. The third value says which
+        key verified the token, not what the token claims about itself.
+
+        The `kid` selects among the keys of a *configured* issuer; it never
+        names a URL. A token able to point at its own key server would be a
+        token that signs itself.
+        """
+        session = self.require()
+        delegation = session.config.delegation
+        header = decode_unverified_header(token)
+        kid = header.get("kid")
+
+        if self.token_issuer is not None and kid == self.token_issuer.kid:
+            # QED-issued, because *our key* verified it -- not because the
+            # token said so. A token able to declare its own kind could ask to
+            # be treated as its own parent, which is the same class of mistake
+            # as reading `alg` out of the token.
+            claims, principal = verify_token(
+                token,
+                keys=self.token_issuer.key,
+                now=now,
+                issuers=frozenset({delegation.self_issuer}),
+                algorithms=(QED_ALG,),
+            )
+            return claims, principal, True
+
+        if self.jwks is None or not delegation.issuers:
+            raise TokenVerificationError(
+                "no identity providers are configured, so only tokens this qed "
+                "issued can be exchanged"
+            )
+
+        last: Exception | None = None
+        for configured in delegation.issuers:
+            uri = self._jwks_uri(configured)
+            wanted = kid if isinstance(kid, str) else None
+            keyset = self.jwks.get(configured.issuer, uri, kid=wanted)
+            try:
+                claims, principal = verify_token(
+                    token,
+                    keys=keyset,
+                    now=now,
+                    issuers=frozenset({configured.issuer}),
+                    algorithms=tuple(configured.algorithms),
+                )
+            except TokenVerificationError as exc:
+                last = exc
+            else:
+                return claims, principal, False
+        raise last or TokenVerificationError("no configured issuer accepted this token")
+
+    def _jwks_uri(self, configured: IssuerConfig) -> str:
+        issuer = configured.issuer
+        if configured.jwks_uri:
+            return configured.jwks_uri
+        if issuer not in self._jwks_uris:
+            # Discovery is done once per process. An air-gapped install sets
+            # `jwks_uri` explicitly and never reaches this branch.
+            self._jwks_uris[issuer] = discover_jwks_uri(issuer)
+        return self._jwks_uris[issuer]
+
+
+def qed_state(request: Request) -> QedState:
+    state = request.app.state.qed
+    assert isinstance(state, QedState)  # set in create_app, before any request
+    return state
+
+
+def require_session(request: Request) -> Session:
+    return qed_state(request).require()
+
+
+def authenticate(request: Request, body: bytes) -> str:
+    """Verify the adapter signature and return the adapter id.
+
+    Shared by every ``/v1`` router so that there is one place where an endpoint
+    could be left unauthenticated, and ``tests/api/test_auth.py`` asserts that
+    every route under ``/v1`` rejects an unsigned request.
+    """
+    state = qed_state(request)
+    if state.auth is None:
+        raise Problem(
+            status=503,
+            code="not-ready",
+            title="The service is not ready",
+            detail="; ".join(state.blockers) or "adapter authentication is not initialised",
+        )
+    return state.auth.verify(
+        method=request.method,
+        path=request.url.path,
+        headers={key.lower(): value for key, value in request.headers.items()},
+        body=body,
+    )

@@ -1,4 +1,4 @@
-"""`gate proxy`'s command surface (SPEC §12.3, §14).
+"""`qed proxy`'s command surface (SPEC §12.3, §14).
 
 The adapter itself is tested against real sockets in
 ``tests/adapters/http_proxy/``. What is left here is everything the command
@@ -19,54 +19,54 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from gate.adapters.http_proxy.proxy import HttpProxyStats
-from gate.cli import _print_http_stats, app
+from qed.adapters.http_proxy.proxy import HttpProxyStats
+from qed.cli import _print_http_stats, app
 
 runner = CliRunner()
 
 
 @pytest.fixture
-def gate_dir(tmp_path: Path) -> Path:
+def qed_dir(tmp_path: Path) -> Path:
     directory = tmp_path / "g"
     runner.invoke(app, ["keys", "init", "--dir", str(directory)])
     return directory
 
 
 def config(tmp_path: Path, **values: object) -> Path:
-    path = tmp_path / "gate.yaml"
+    path = tmp_path / "qed.yaml"
     path.write_text(yaml.safe_dump(values), encoding="utf-8")
     return path
 
 
 class TestItRefusesBeforeItListens:
-    def test_without_a_principal_or_a_mandate(self, gate_dir: Path) -> None:
+    def test_without_a_principal_or_a_mandate(self, qed_dir: Path) -> None:
         """Every verdict would be a synthetic AG-IDN-007 identity BLOCK,
         reached before any rule runs, and in shadow mode nothing would look
         wrong."""
-        result = runner.invoke(app, ["proxy", "--dir", str(gate_dir)])
+        result = runner.invoke(app, ["proxy", "--dir", str(qed_dir)])
         assert result.exit_code == 1
         assert "AG-IDN-007" in result.output
 
-    def test_a_reachable_bind_address_without_the_flag(self, gate_dir: Path) -> None:
+    def test_a_reachable_bind_address_without_the_flag(self, qed_dir: Path) -> None:
         """A forward proxy on a reachable interface is an open relay, and the
         chain would attribute every request through it to this --human."""
         result = runner.invoke(
             app,
-            ["proxy", "--dir", str(gate_dir), "--human", "me@acme.com", "--host", "0.0.0.0"],
+            ["proxy", "--dir", str(qed_dir), "--human", "me@acme.com", "--host", "0.0.0.0"],
         )
         assert result.exit_code == 1
         assert "open relay" in result.output
         assert "--allow-non-loopback" in result.output
 
     @pytest.mark.parametrize("value", ["staging-ish", "production"])
-    def test_an_environment_that_is_not_one_of_the_three(self, gate_dir: Path, value: str) -> None:
+    def test_an_environment_that_is_not_one_of_the_three(self, qed_dir: Path, value: str) -> None:
         result = runner.invoke(
-            app, ["proxy", "--dir", str(gate_dir), "--human", "me@acme.com", "--env", value]
+            app, ["proxy", "--dir", str(qed_dir), "--human", "me@acme.com", "--env", value]
         )
         assert result.exit_code == 1
 
     def test_an_upstream_that_injects_into_the_environment(
-        self, gate_dir: Path, tmp_path: Path
+        self, qed_dir: Path, tmp_path: Path
     ) -> None:
         """An environment variable is how a credential reaches a stdio child
         process. An HTTP request does not have one, so the upstream would
@@ -92,7 +92,7 @@ class TestItRefusesBeforeItListens:
         path = config(tmp_path, broker={"upstreams_file": "upstreams.yaml"})
         result = runner.invoke(
             app,
-            ["proxy", "--dir", str(gate_dir), "--config", str(path), "--human", "me@acme.com"],
+            ["proxy", "--dir", str(qed_dir), "--config", str(path), "--human", "me@acme.com"],
         )
         assert result.exit_code == 1
         assert "does not have" in result.output
@@ -133,7 +133,7 @@ class TestTheClosingSummary:
     ) -> None:
         """Worth noticing in both directions: usually somebody wired a token
         into the agent and is wondering why it is ignored, and sometimes the
-        agent is trying to reach past the gate."""
+        agent is trying to reach past QED."""
         stats = HttpProxyStats(
             requests=2, allowed=2, stripped=["Authorization", "X-Api-Key", "Authorization"]
         )
@@ -143,6 +143,6 @@ class TestTheClosingSummary:
         assert "Authorization, X-Api-Key" in out
 
     def test_the_byte_counts_are_printed(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """For a tunnel they are the only facts the gate has."""
+        """For a tunnel they are the only facts QED has."""
         _print_http_stats(HttpProxyStats(tunnels=1, bytes_to_upstream=656, bytes_to_client=4415))
         assert "656 bytes out, 4415 bytes in" in capsys.readouterr().out

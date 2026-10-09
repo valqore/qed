@@ -1,6 +1,6 @@
 # Delegation — tokens, actors, budgets
 
-SPEC §6. An identity provider says who the person is. The gate turns that into
+SPEC §6. An identity provider says who the person is. QED turns that into
 a **narrower, budgeted, short-lived token** that names both the person and the
 agent acting for them, and every action taken with it is charged against the
 budget written into it.
@@ -22,18 +22,18 @@ that works by asking politely.
 
 | | |
 |---|---|
-| `gate/core/delegation/` | Pure. Decides whether claims are acceptable and what they grant. No key fetch, no clock of its own. |
-| `gate/infra/tokens.py`, `gate/infra/jwks.py` | Resolves `kid` to a key, checks the signature, fetches and caches JWKS. |
+| `qed/core/delegation/` | Pure. Decides whether claims are acceptable and what they grant. No key fetch, no clock of its own. |
+| `qed/infra/tokens.py`, `qed/infra/jwks.py` | Resolves `kid` to a key, checks the signature, fetches and caches JWKS. |
 
 The split is enforced by `tests/core/test_no_network.py`, which AST-scans
-`gate.core` for anything that can reach a socket. A token layer that behaves
+`qed.core` for anything that can reach a socket. A token layer that behaves
 differently when the network is down is a token layer an air-gapped install
 cannot rely on.
 
 ## Signing in
 
 ```bash
-gate login --issuer https://keycloak.example/realms/gate --client-id gate-cli
+qed login --issuer https://keycloak.example/realms/qed --client-id qed-cli
 ```
 
 RFC 8628 device flow: the CLI prints a URL and a short code, you approve in a
@@ -47,7 +47,7 @@ browser that can reach it; over SSH or inside a container that is a series of
 workarounds.
 
 ```bash
-gate token --issuer https://keycloak.example/realms/gate --adapter adp_laptop
+qed token --issuer https://keycloak.example/realms/qed --adapter adp_laptop
 ```
 
 Adapters call this transparently when their cached token is close to expiry.
@@ -61,8 +61,8 @@ anywhere on the internet.
 
 ```http
 POST /v1/token
-x-gate-adapter-id: adp_laptop
-x-gate-signature: ...
+x-qed-adapter-id: adp_laptop
+x-qed-signature: ...
 
 {
   "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -75,7 +75,7 @@ x-gate-signature: ...
 
 ```json
 {
-  "access_token": "<the minted gate token, a compact JWS>",
+  "access_token": "<the minted qed token, a compact JWS>",
   "token_type": "Bearer",
   "expires_in": 899,
   "scope": "read write",
@@ -102,11 +102,11 @@ under a capped ceiling takes the ceiling, and two caps take the smaller.
 
 ```yaml
 delegation:
-  self_issuer: https://gate.internal      # the `iss` of tokens this gate mints
+  self_issuer: https://qed.internal      # the `iss` of tokens this qed mints
   token_ttl_default_seconds: 900
   offline: false                          # true: never fetch JWKS, cache only
   issuers:
-    - issuer: https://keycloak.example/realms/gate
+    - issuer: https://keycloak.example/realms/qed
       jwks_uri: ...                       # optional; discovered when absent
       algorithms: [RS256]                 # never read from the token
       scopes_by_group:
@@ -119,16 +119,16 @@ With no `issuers`, `/v1/token` answers **501** rather than minting tokens
 nobody asked for. A deployment that never exchanges tokens should not be made
 to hold a token key.
 
-## Verifying a token the gate issued
+## Verifying a token QED issued
 
 ```bash
-curl -s http://gate:8710/.well-known/jwks.json
+curl -s http://qed:8710/.well-known/jwks.json
 ```
 
 Unauthenticated, and deliberately **outside `/v1`**: every `/v1` route refuses
 an unsigned request and the test that asserts it has no exemption list.
 
-Gate tokens are signed `alg: Ed25519` — not `EdDSA`, which RFC 9864
+QED tokens are signed `alg: Ed25519` — not `EdDSA`, which RFC 9864
 deprecates. The evidence chain is unaffected; that is raw Ed25519, not JOSE.
 
 ## Keys
@@ -149,7 +149,7 @@ the cache file in.
 An unknown `kid` forces **one** refetch — that is what a key rotation looks
 like from this side, and waiting out the TTL would refuse every token signed
 with the new key until it expired. It is rate limited separately from the TTL
-refresh, so junk tokens cannot turn the gate into a request amplifier pointed
+refresh, so junk tokens cannot turn QED into a request amplifier pointed
 at the identity provider.
 
 ## Trying it
@@ -190,7 +190,7 @@ Three things that fixtures had hidden, all now covered by
    the `basic` client scope. A token with no subject cannot name anybody, so it
    is refused — but the realm in `deploy/keycloak/` now requests that scope.
 3. **A token must not declare its own kind.** `TokenClaims` had a `token_type`
-   field defaulting to `"gate"`, so an IdP token — which carries no such claim
-   — arrived looking gate-issued and was handed to the narrowing check as its
-   own parent. Whether a token is gate-issued is now decided by *which key
+   field defaulting to `"qed"`, so an IdP token — which carries no such claim
+   — arrived looking qed-issued and was handed to the narrowing check as its
+   own parent. Whether a token is qed-issued is now decided by *which key
    verified it*, which is the same rule as never reading `alg` from the token.

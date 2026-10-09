@@ -1,11 +1,11 @@
 # Evidence format 1.0 (draft)
 
-`schema_version: "1.0"`. This document describes what `gate-verify` checks. It
+`schema_version: "1.0"`. This document describes what `qed-verify` checks. It
 is **draft** until SPEC §22 week 12 freezes it; until then a change here is a
 `schema_version` bump plus an ADR (SPEC §25.6).
 
 An auditor needs three things and nothing else: the records, the public keys,
-and `gate-verify`. No access to the instance, no cooperation from the operator,
+and `qed-verify`. No access to the instance, no cooperation from the operator,
 no trust in either.
 
 ## A record
@@ -86,7 +86,7 @@ overwritten — see `docs/adr/0005-record-encoding.md`.
 
 ## Masking
 
-Masking runs **before** hashing (`gate/core/evidence/masking.py`). A secret
+Masking runs **before** hashing (`qed/core/evidence/masking.py`). A secret
 therefore never reaches `payload_hash` in the clear and no later purge is needed
 to remove it. Because masking happens before the hash, the pattern set is part
 of the format: changing it changes record hashes for future records.
@@ -110,7 +110,7 @@ would be a hash cycle). They land in the `checkpoints` table and appear in the
 
 `key_rotated` carries `old_key_id`, `new_key_id` and `new_public_pem`, and is
 signed by the **old** key. That single rule is what makes rotation one
-verifiable chain instead of two unrelated ones. `gate-verify` reports
+verifiable chain instead of two unrelated ones. `qed-verify` reports
 `rotation_discontinuity` if a rotation record is signed by the new key.
 
 ## Retention and personal data
@@ -120,7 +120,7 @@ verifiable chain instead of two unrelated ones. `gate-verify` reports
 as salted hashes; the hash-to-identity mapping lives in the erasable
 `principals` table, outside the chain (ADR-005).
 
-## What `gate-verify` reports
+## What `qed-verify` reports
 
 | Code | Meaning |
 |---|---|

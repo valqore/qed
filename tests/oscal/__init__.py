@@ -23,13 +23,13 @@ def _pattern(validator: Any, patrn: str, instance: Any, schema: Any) -> Iterator
 
     JSON Schema says patterns are ECMA-262 regexes, and the NIST schema uses
     Unicode property escapes (``\\p{L}``) from ES2018 -- for instance in
-    ``TokenDatatype``, which constrains every ``target-id`` gate emits. CPython's
+    ``TokenDatatype``, which constrains every ``target-id`` qed emits. CPython's
     ``re`` raises ``bad escape \\p`` on those, so a stock ``jsonschema`` run
     cannot evaluate the real schema at all.
 
     ``regex`` supports them. Swapping the engine makes the check *stricter* than
     skipping those patterns would be, which is the point: the NCName constraint
-    on control ids is exactly the one gate has to satisfy.
+    on control ids is exactly the one qed has to satisfy.
     """
     if not validator.is_type(instance, "string"):
         return

@@ -1,6 +1,6 @@
-"""``gate serve`` and the container (SPEC §14, §20.4).
+"""``qed serve`` and the container (SPEC §14, §20.4).
 
-``gate serve`` is started for real here, as a subprocess bound to a loopback
+``qed serve`` is started for real here, as a subprocess bound to a loopback
 port, and probed over HTTP. The in-process ``TestClient`` tests cover the
 handlers; this covers the thing that is easy to get wrong and invisible to a
 TestClient -- that the CLI wires the config, the bind address and the lifespan
@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gate.infra.keys.file import init_keys
+from qed.infra.keys.file import init_keys
 
 REPO = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO / "deploy" / "Dockerfile"
@@ -54,7 +54,7 @@ def wait_for(url: str, *, deadline: float) -> tuple[int, bytes]:
 
 
 class Served:
-    """A running ``gate serve``, plus whatever it printed."""
+    """A running ``qed serve``, plus whatever it printed."""
 
     def __init__(self, base: str, process: subprocess.Popen[bytes], log: Path) -> None:
         self.base = base
@@ -75,9 +75,9 @@ def served(tmp_path: Path) -> Iterator[Served]:
     suite runs with ``filterwarnings = ["error"]``, where an unclosed pipe at
     teardown is a test error rather than a warning.
     """
-    directory = tmp_path / "gate"
+    directory = tmp_path / "qed"
     init_keys(directory)
-    config = tmp_path / "gate.yaml"
+    config = tmp_path / "qed.yaml"
     config.write_text(yaml.safe_dump({"mode": "shadow"}), encoding="utf-8")
 
     port = free_port()
@@ -87,7 +87,7 @@ def served(tmp_path: Path) -> Iterator[Served]:
             [
                 sys.executable,
                 "-c",
-                "from gate.cli import main; main()",
+                "from qed.cli import main; main()",
                 "serve",
                 "--dir",
                 str(directory),
@@ -154,7 +154,7 @@ class TestGateServe:
             assert probe.connect_ex((external, port)) != 0
 
     def test_it_refuses_an_unknown_mode_rather_than_guessing(self, tmp_path: Path) -> None:
-        directory = tmp_path / "gate"
+        directory = tmp_path / "qed"
         init_keys(directory)
         config = tmp_path / "bad.yaml"
         config.write_text(yaml.safe_dump({"mode": "advisory-ish"}), encoding="utf-8")
@@ -162,7 +162,7 @@ class TestGateServe:
             [
                 sys.executable,
                 "-c",
-                "from gate.cli import main; main()",
+                "from qed.cli import main; main()",
                 "serve",
                 "--dir",
                 str(directory),

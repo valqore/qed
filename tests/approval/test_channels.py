@@ -1,8 +1,8 @@
 """Approval channels (SPEC §9.5): Slack signatures, rendering, webhooks.
 
-The signature verifier lives in `gate.api.slack_auth`, not with the Slack
+The signature verifier lives in `qed.api.slack_auth`, not with the Slack
 client: it authenticates an inbound request, and the no-HMAC invariant scans
-`gate/core` and `gate/infra` with no exemption list.
+`qed/core` and `qed/infra` with no exemption list.
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ from typing import Any
 import httpx
 import pytest
 
-from gate.api.slack_auth import (
+from qed.api.slack_auth import (
     MAX_SIGNATURE_AGE,
     SlackSignatureError,
     verify_slack_signature,
 )
-from gate.infra.channels.slack import SlackChannel, SlackError, render_blocks
-from gate.infra.channels.webhook import WebhookChannel, webhook_payload
+from qed.infra.channels.slack import SlackChannel, SlackError, render_blocks
+from qed.infra.channels.webhook import WebhookChannel, webhook_payload
 
 SECRET = "s" * 32
 
@@ -202,7 +202,7 @@ class TestSlackIdentity:
 
 class TestWebhook:
     def test_parameters_never_leave_in_a_webhook(self) -> None:
-        """A webhook goes somewhere the gate does not control. The request
+        """A webhook goes somewhere QED does not control. The request
         detail stays behind the API, where it can be authenticated."""
         body = webhook_payload("approval_requested", VIEW)
         assert "params_redacted" not in body

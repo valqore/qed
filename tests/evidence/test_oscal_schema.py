@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 
-from gate.core.evidence.export.oscal import OSCAL_VERSION, control_token, to_oscal
-from gate.core.policy.engine import evaluate
-from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import (
+from qed.core.evidence.export.oscal import OSCAL_VERSION, control_token, to_oscal
+from qed.core.policy.engine import evaluate
+from qed.core.policy.model import PolicyBundle
+from qed.core.schemas import (
     Assurance,
     BudgetState,
     EvalContext,
@@ -33,9 +33,9 @@ from gate.core.schemas import (
     Mode,
     SigningKeyInfo,
 )
-from gate.infra.chain_writer import ChainWriter
-from gate.infra.keys.file import FileSigner
-from gate.infra.storage.sqlite import SqliteStore
+from qed.infra.chain_writer import ChainWriter
+from qed.infra.keys.file import FileSigner
+from qed.infra.storage.sqlite import SqliteStore
 from tests.conftest import NOW, make_proposal
 from tests.oscal import build_validator
 
@@ -91,9 +91,9 @@ def validator() -> Any:
 @pytest.fixture
 def chain(tmp_path: Path, baseline_bundle: PolicyBundle) -> list[EvidenceRecord]:
     """A real chain: genesis, proposals, verdicts, a result and a checkpoint."""
-    store = SqliteStore(tmp_path / "gate.db")
+    store = SqliteStore(tmp_path / "qed.db")
     signer = FileSigner.generate()
-    writer = ChainWriter(store, signer, instance_id="gate-test")
+    writer = ChainWriter(store, signer, instance_id="qed-test")
     records: list[EvidenceRecord] = []
 
     for patch in CASES:
@@ -159,7 +159,7 @@ def keys() -> list[SigningKeyInfo]:
 def export(records: list[EvidenceRecord], keys: list[SigningKeyInfo]) -> dict[str, Any]:
     return to_oscal(
         records,
-        instance_id="gate-test",
+        instance_id="qed-test",
         generated_at=GENERATED_AT,
         signing_keys=keys,
         policy_hash="a" * 64,

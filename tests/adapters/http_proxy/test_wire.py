@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.adapters.http_proxy.wire import (
+from qed.adapters.http_proxy.wire import (
     HOP_BY_HOP,
     MAX_HEADERS,
     MalformedRequest,
@@ -256,7 +256,7 @@ class TestBuildingTheForwardedRequest:
     def test_connection_close_and_via_are_always_set(self) -> None:
         out = self.build("GET http://api.test/ HTTP/1.1")
         assert "Connection: close\r\n" in out
-        assert "Via: 1.1 gate\r\n" in out
+        assert "Via: 1.1 qed\r\n" in out
 
     def test_an_ordinary_header_survives_with_its_spelling(self) -> None:
         out = self.build("GET http://api.test/ HTTP/1.1", "user-AGENT: claude-code")
@@ -292,10 +292,13 @@ class TestResponses:
     def test_a_refusal_carries_the_explanation_in_the_body(self) -> None:
         """The reader is an agent or its HTTP library, and the body of a 403 is
         the one place the explanation reliably survives."""
-        out = response(403, "[gate BLOCK] AG-BLR-001: no.\n").decode()
+        body = "[qed BLOCK] AG-BLR-001: no.\n"
+        out = response(403, body).decode()
         assert out.startswith("HTTP/1.1 403 Forbidden\r\n")
-        assert out.endswith("[gate BLOCK] AG-BLR-001: no.\n")
-        assert "Content-Length: 29\r\n" in out
+        assert out.endswith(body)
+        # Measured, not written down. A literal length breaks on any change to
+        # the message, which is how the rename found this assertion.
+        assert f"Content-Length: {len(body.encode())}\r\n" in out
 
     def test_an_empty_response_declares_a_zero_length_and_no_type(self) -> None:
         out = response(503).decode()
@@ -306,7 +309,7 @@ class TestResponses:
         """RFC 9110 §9.3.6 forbids it, and a Content-Length: 0 makes some
         clients wait for a body that never comes."""
         out = connect_established().decode()
-        assert out == "HTTP/1.1 200 Connection Established\r\nVia: 1.1 gate\r\n\r\n"
+        assert out == "HTTP/1.1 200 Connection Established\r\nVia: 1.1 qed\r\n\r\n"
         assert "Content-Length" not in out
 
 

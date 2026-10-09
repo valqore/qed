@@ -13,10 +13,10 @@ from typing import Any
 
 import pytest
 
-from gate.core.policy.loader import baseline_pack_dir, load_bundle
-from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import ActionProposal, BudgetState, Decision, EvalContext
-from gate.infra.keys.file import FileSigner
+from qed.core.policy.loader import baseline_pack_dir, load_bundle
+from qed.core.policy.model import PolicyBundle
+from qed.core.schemas import ActionProposal, BudgetState, Decision, EvalContext
+from qed.infra.keys.file import FileSigner
 
 NOW = "2026-10-07T12:00:00.000Z"
 
@@ -96,10 +96,10 @@ def signer() -> FileSigner:
 
 
 @pytest.fixture
-def gate_dir(tmp_path: Path) -> Path:
-    from gate.infra.keys.file import init_keys
+def qed_dir(tmp_path: Path) -> Path:
+    from qed.infra.keys.file import init_keys
 
-    directory = tmp_path / "gate"
+    directory = tmp_path / "qed"
     init_keys(directory)
     return directory
 

@@ -1,23 +1,23 @@
 # The MCP proxy
 
-`gate mcp` sits between an agent and an MCP server. It speaks MCP to the agent
+`qed mcp` sits between an agent and an MCP server. It speaks MCP to the agent
 on one side and MCP to the upstream on the other, and asks the kernel about
 every `tools/call` in between.
 
 ```bash
-gate keys init --dir .gate
+qed keys init --dir .qed
 
-gate mcp --human you@example.com --env prod \
+qed mcp --human you@example.com --env prod \
          --target-template 'db:{env}/{args.table}' \
          -- npx -y @some/mcp-server
 ```
 
-Then point the agent at `gate mcp ...` instead of at the server. For a remote
+Then point the agent at `qed mcp ...` instead of at the server. For a remote
 server, `--upstream-url https://host/mcp` replaces everything after `--`.
 
 Nothing about the agent changes. `initialize` reports the **upstream's** own
 `serverInfo`, and the proxy adds one line to `instructions` rather than renaming
-the server — an agent whose tool list suddenly came from `gate-proxy` would have
+the server — an agent whose tool list suddenly came from `qed-proxy` would have
 to be reconfigured to be governed, and the point is that it does not.
 
 ## Shadow first
@@ -27,10 +27,10 @@ evidence chain, and then forwarded regardless of the verdict. Nothing is
 blocked. That is deliberate and it is the whole onboarding story:
 
 1. Run in shadow for a week. The agent behaves exactly as before.
-2. Read what *would* have happened: `gate export --format oscal`, or
+2. Read what *would* have happened: `qed export --format oscal`, or
    `verdict.would_decision` in the chain.
 3. Tune the policy against real traffic instead of against a guess.
-4. Switch `mode: enforce` in `gate.yaml` when the answer stops surprising you.
+4. Switch `mode: enforce` in `qed.yaml` when the answer stops surprising you.
 
 Only step 4 can break anything, and by then you have the evidence to argue
 about. Enforcement is week 10 of the build order for this reason.
@@ -55,7 +55,7 @@ it in week 10, when enforcement began blocking everything.
 So identity is explicit:
 
 - `--human you@example.com` — attended. Hashed with
-  `gate.core.evidence.hashing.principal_hash`, the same function week 3's token
+  `qed.core.evidence.hashing.principal_hash`, the same function week 3's token
   verification will use, so a chain written across both attributes to one
   person rather than two. `--issuer` names the identity provider.
 - `--mandate signed.json` — unattended. Passed to the kernel as-is.
@@ -72,7 +72,7 @@ The protocol hands the proxy a tool name and a JSON object. Neither says "this
 writes" or "this deletes", so the adapter derives the three hints SPEC §3.1 asks
 for and the kernel does the rest.
 
-| Derived by the adapter (`gate/adapters/mcp/intent.py`) | Decided by the kernel |
+| Derived by the adapter (`qed/adapters/mcp/intent.py`) | Decided by the kernel |
 |---|---|
 | `writes`, `deletes` from the verb, in the name *and* in the arguments | the 0–100 blast-radius score |
 | `scope`: `single_resource`, `multi_resource`, `account` | which rules match |
@@ -117,12 +117,12 @@ In enforce mode, a refused call comes back as an MCP tool error, which is what a
 client shows to its model:
 
 ```
-[gate BLOCK] AG-DAT-001: The parameters of this action contain secret material.
+[qed BLOCK] AG-DAT-001: The parameters of this action contain secret material.
 Fix: Reference the secret from the credential broker instead of passing it inline.
 ```
 
 ```
-[gate APPROVAL PENDING] AG-BLR-003: Destructive change to a production resource.
+[qed APPROVAL PENDING] AG-BLR-003: Destructive change to a production resource.
 Fix: Run it against staging first, or request approval with an explicit intent.
 No approval route is configured in this build (approvals land in week 4).
 ```

@@ -1,4 +1,4 @@
-"""Loading `upstreams.yaml`, and what `gate doctor` says about it (SPEC §7)."""
+"""Loading `upstreams.yaml`, and what `qed doctor` says about it (SPEC §7)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from gate.cli import app
-from gate.config import GateConfig, load_config
-from gate.infra.upstreams import UpstreamsError, load_upstreams
+from qed.cli import app
+from qed.config import QedConfig, load_config
+from qed.infra.upstreams import UpstreamsError, load_upstreams
 
 runner = CliRunner()
 
@@ -38,7 +38,7 @@ def write(tmp_path: Path, upstreams: dict[str, object] | str) -> Path:
         path.write_text(upstreams, encoding="utf-8")
     else:
         path.write_text(yaml.safe_dump(upstreams), encoding="utf-8")
-    config = tmp_path / "gate.yaml"
+    config = tmp_path / "qed.yaml"
     config.write_text(
         yaml.safe_dump({"mode": "enforce", "broker": {"upstreams_file": "upstreams.yaml"}}),
         encoding="utf-8",
@@ -48,7 +48,7 @@ def write(tmp_path: Path, upstreams: dict[str, object] | str) -> Path:
 
 class TestLoading:
     def test_nothing_configured_is_an_empty_set(self) -> None:
-        assert load_upstreams(GateConfig()).upstreams == []
+        assert load_upstreams(QedConfig()).upstreams == []
 
     def test_a_valid_file_loads(self, tmp_path: Path) -> None:
         config = write(tmp_path, UPSTREAMS)
@@ -56,7 +56,7 @@ class TestLoading:
         assert [u.id for u in loaded.upstreams] == ["github", "wiki"]
 
     def test_a_relative_path_resolves_next_to_the_config(self, tmp_path: Path) -> None:
-        """Not against the working directory: a gate started by systemd runs
+        """Not against the working directory: a qed started by systemd runs
         from somewhere nobody chose."""
         config = write(tmp_path, UPSTREAMS)
         loaded = load_upstreams(load_config(config).config, base=config)
@@ -66,7 +66,7 @@ class TestLoading:
         """Carrying on with no upstreams would quietly turn every enforcing
         adapter advisory, and the symptom is one nobody notices until it
         matters."""
-        config = tmp_path / "gate.yaml"
+        config = tmp_path / "qed.yaml"
         config.write_text(
             yaml.safe_dump({"broker": {"upstreams_file": "nope.yaml"}}), encoding="utf-8"
         )
@@ -93,15 +93,15 @@ class TestLoading:
 
 
 class TestDoctor:
-    def gate_dir(self, tmp_path: Path) -> Path:
-        from gate.infra.keys.file import init_keys
+    def qed_dir(self, tmp_path: Path) -> Path:
+        from qed.infra.keys.file import init_keys
 
-        directory = tmp_path / "gate"
+        directory = tmp_path / "qed"
         init_keys(directory)
         return directory
 
     def test_with_nothing_configured_it_says_everything_is_advisory(self, tmp_path: Path) -> None:
-        directory = self.gate_dir(tmp_path)
+        directory = self.qed_dir(tmp_path)
         result = runner.invoke(app, ["doctor", "--dir", str(directory)])
         assert result.exit_code == 0, result.output
         assert "ADVISORY" in result.output.upper()
@@ -110,7 +110,7 @@ class TestDoctor:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("TEST_GH_TOKEN", "ghp_" + "x" * 26)
-        directory = self.gate_dir(tmp_path)
+        directory = self.qed_dir(tmp_path)
         config = write(tmp_path, UPSTREAMS)
         result = runner.invoke(
             app, ["doctor", "--dir", str(directory), "--config", str(config), "--json"]
@@ -127,7 +127,7 @@ class TestDoctor:
         """Config that claims more than it can deliver is worse than config
         that admits the gap, because the claim ends up in the evidence."""
         monkeypatch.delenv("TEST_GH_TOKEN", raising=False)
-        directory = self.gate_dir(tmp_path)
+        directory = self.qed_dir(tmp_path)
         config = write(tmp_path, UPSTREAMS)
         report = json.loads(
             runner.invoke(
@@ -143,7 +143,7 @@ class TestDoctor:
     ) -> None:
         secret = "ghp_thisMustNotAppearAnywhere"
         monkeypatch.setenv("TEST_GH_TOKEN", secret)
-        directory = self.gate_dir(tmp_path)
+        directory = self.qed_dir(tmp_path)
         config = write(tmp_path, UPSTREAMS)
         output = runner.invoke(
             app, ["doctor", "--dir", str(directory), "--config", str(config), "--json"]
@@ -164,13 +164,13 @@ class TestDoctor:
                     "match": {"mcp_server": "postgres"},
                     "credential": {
                         "source": "vault",
-                        "ref": "secret/data/gate/pg#DATABASE_URL",
+                        "ref": "secret/data/qed/pg#DATABASE_URL",
                         "inject": {"type": "env", "name": "DATABASE_URL"},
                     },
                 }
             ]
         }
-        directory = self.gate_dir(tmp_path)
+        directory = self.qed_dir(tmp_path)
         config = write(tmp_path, vaulted)
         report = json.loads(
             runner.invoke(

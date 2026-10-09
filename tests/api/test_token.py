@@ -22,10 +22,10 @@ from fastapi.testclient import TestClient
 from joserfc import jwt
 from joserfc.jwk import RSAKey
 
-from gate.api.app import create_app
-from gate.core.schemas import EvidenceType, utcnow
-from gate.infra.keys.file import init_keys
-from gate.infra.storage.sqlite import SqliteStore
+from qed.api.app import create_app
+from qed.core.schemas import EvidenceType, utcnow
+from qed.infra.keys.file import init_keys
+from qed.infra.storage.sqlite import SqliteStore
 from tests.api.conftest import ADAPTER_ID, SECRET, SECRET_ENV, Signer
 
 IDP = "https://idp.example"
@@ -40,7 +40,7 @@ def idp_token(**claims: Any) -> str:
     payload: dict[str, Any] = {
         "iss": IDP,
         "sub": "ali@example.com",
-        "aud": "gate",
+        "aud": "qed",
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=30)).timestamp()),
         "jti": "01JB000000000000000000IDP0",
@@ -52,7 +52,7 @@ def idp_token(**claims: Any) -> str:
 
 @pytest.fixture
 def delegation_dir(tmp_path: Path) -> Path:
-    directory = tmp_path / "gate"
+    directory = tmp_path / "qed"
     init_keys(directory)
     # Seed the JWKS cache on disk so the app never needs the network. This is
     # the air-gapped path, exercised by default rather than as a special case.
@@ -68,15 +68,15 @@ def delegation_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def delegation_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(SECRET_ENV, SECRET)
-    path = tmp_path / "gate.yaml"
+    path = tmp_path / "qed.yaml"
     path.write_text(
         yaml.safe_dump(
             {
-                "instance_id": "gate-local",
+                "instance_id": "qed-local",
                 "mode": "shadow",
                 "adapters": [{"adapter_id": ADAPTER_ID, "secret_env": SECRET_ENV, "kind": "mcp"}],
                 "delegation": {
-                    "self_issuer": "https://gate.test",
+                    "self_issuer": "https://qed.test",
                     "offline": True,
                     "token_ttl_default_seconds": 900,
                     "issuers": [
@@ -116,10 +116,10 @@ def ledger(directory: Path) -> Iterator[SqliteStore]:
     """A connection of our own.
 
     The app's connection belongs to the event-loop thread (see the note at the
-    top of `gate/api/routers/proposals.py`); reaching into it from the test
+    top of `qed/api/routers/proposals.py`); reaching into it from the test
     thread is what sqlite3 refuses, and rightly.
     """
-    with SqliteStore(directory / "gate.db") as store:
+    with SqliteStore(directory / "qed.db") as store:
         yield store
 
 
@@ -153,7 +153,7 @@ class TestHappyPath:
         self, signed: Signer, client: TestClient
     ) -> None:
         """The whole point of publishing the key: a third party can check a
-        token this gate issued without asking the gate."""
+        token this qed issued without asking QED."""
         from joserfc.jwk import KeySet, OKPKey
 
         token = exchange(signed).json()["access_token"]
@@ -161,7 +161,7 @@ class TestHappyPath:
         keyset = KeySet([OKPKey.import_key(published["keys"][0])])
         decoded = jwt.decode(token, keyset, algorithms=["Ed25519"])
         assert decoded.claims["sub"] == "ali@example.com"
-        assert decoded.claims["iss"] == "https://gate.test"
+        assert decoded.claims["iss"] == "https://qed.test"
 
     def test_the_jwks_endpoint_needs_no_credential(self, client: TestClient) -> None:
         assert client.get("/.well-known/jwks.json").status_code == 200
@@ -255,7 +255,7 @@ class TestRefusals:
             {
                 "iss": IDP,
                 "sub": "attacker@example.com",
-                "aud": "gate",
+                "aud": "qed",
                 "iat": int(now.timestamp()),
                 "exp": int((now + timedelta(minutes=5)).timestamp()),
                 "jti": "01JB000000000000000000IDPX",

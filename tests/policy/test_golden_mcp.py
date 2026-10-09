@@ -22,11 +22,11 @@ from typing import Any
 
 import pytest
 
-from gate.adapters.mcp.proxy import ProxyOptions, UpstreamSpec, build_tool_proposal
-from gate.core.evidence.hashing import principal_hash
-from gate.core.policy.engine import evaluate
-from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import (
+from qed.adapters.mcp.proxy import ProxyOptions, UpstreamSpec, build_tool_proposal
+from qed.core.evidence.hashing import principal_hash
+from qed.core.policy.engine import evaluate
+from qed.core.policy.model import PolicyBundle
+from qed.core.schemas import (
     BudgetState,
     Decision,
     Enforcement,
@@ -281,7 +281,7 @@ def test_golden_mcp_case_is_order_independent(
 
 def test_the_proposal_the_adapter_builds_is_schema_valid_and_bounded() -> None:
     """A proposal the API would refuse is a call that leaves no record."""
-    from gate.adapters.common import MAX_PARAMS_BYTES, MAX_PROPOSAL_BYTES
+    from qed.adapters.common import MAX_PARAMS_BYTES, MAX_PROPOSAL_BYTES
 
     proposal, _ = build_tool_proposal(
         upstream=UPSTREAM,
@@ -292,13 +292,13 @@ def test_the_proposal_the_adapter_builds_is_schema_valid_and_bounded() -> None:
     )
     body = proposal.model_dump_json()
     assert len(body) <= MAX_PROPOSAL_BYTES
-    from gate.core import jcs
+    from qed.core import jcs
 
     assert len(jcs.dumps(proposal.action.params_redacted)) <= MAX_PARAMS_BYTES
 
 
 def test_every_mcp_case_names_a_rule_that_exists(baseline_bundle: PolicyBundle) -> None:
-    from gate.core.policy.engine import SYNTHETIC_RULES
+    from qed.core.policy.engine import SYNTHETIC_RULES
 
     known = {rule.rule_id for rule in baseline_bundle.rules} | set(SYNTHETIC_RULES)
     for case in CASES:

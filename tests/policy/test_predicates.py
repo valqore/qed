@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.core.policy.predicates import (
+from qed.core.policy.predicates import (
     MISSING,
     PredicateError,
     evaluate_predicate,

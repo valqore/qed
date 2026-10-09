@@ -1,7 +1,7 @@
 """No package in this repository may shadow a standard-library module.
 
 This is here because it already happened. The HTTP forward proxy arrived as
-``gate/adapters/http/`` with its tests in ``tests/adapters/http/``, and every
+``qed/adapters/http/`` with its tests in ``tests/adapters/http/``, and every
 test that ran ``python tests/adapters/upstream_server.py`` as a subprocess
 started failing with::
 
@@ -23,8 +23,8 @@ is caught when somebody creates the directory rather than a week later.
 Two names predate this test and are kept
 ----------------------------------------
 
-``gate/infra/secrets`` and ``gate/api/routers/token.py`` are both named in
-GATE_SPEC (§7 and §12.6), and ``secrets`` is the right word for what that
+``qed/infra/secrets`` and ``qed/api/routers/token.py`` are both named in
+QED_SPEC (§7 and §12.6), and ``secrets`` is the right word for what that
 module does. They are safe for one specific reason: nothing in either
 directory is ever executed as a file, so neither directory reaches
 ``sys.path``. :func:`test_an_allowed_name_still_has_no_runnable_script` holds
@@ -43,7 +43,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 #: Where a shadowing name would do damage: anywhere a file might be run from.
-SEARCHED = ("gate", "tests", "packages")
+SEARCHED = ("qed", "tests", "packages")
 
 STDLIB = frozenset(sys.stdlib_module_names)
 
@@ -51,8 +51,8 @@ STDLIB = frozenset(sys.stdlib_module_names)
 #: Every entry needs a reason in the module docstring above, and stays valid
 #: only while the directory holds nothing runnable.
 ALLOWED = {
-    Path("gate/infra/secrets"),
-    Path("gate/api/routers/token.py"),
+    Path("qed/infra/secrets"),
+    Path("qed/api/routers/token.py"),
 }
 
 

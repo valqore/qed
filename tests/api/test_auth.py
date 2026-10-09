@@ -17,8 +17,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from gate.api.app import create_app
-from gate.api.auth import (
+from qed.api.app import create_app
+from qed.api.auth import (
     HEADER_ADAPTER,
     HEADER_SIGNATURE,
     HEADER_TIMESTAMP,
@@ -26,8 +26,8 @@ from gate.api.auth import (
     canonical_string,
     sign,
 )
-from gate.config import load_config
-from gate.core.schemas import rfc3339_ms, utcnow
+from qed.config import load_config
+from qed.core.schemas import rfc3339_ms, utcnow
 from tests.api.conftest import ADAPTER_ID, SECRET, SECRET_ENV, Signer
 from tests.conftest import BASE_PROPOSAL
 
@@ -148,7 +148,7 @@ class TestConfiguration:
         self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(SECRET_ENV, raising=False)
-        config = config_file(tmp_path / "gate.yaml")
+        config = config_file(tmp_path / "qed.yaml")
         with TestClient(create_app(directory=api_dir, config_path=config)) as client:
             blockers = client.get("/readyz").json()["blockers"]
             assert any(SECRET_ENV in blocker for blocker in blockers)
@@ -158,7 +158,7 @@ class TestConfiguration:
     ) -> None:
         """A shared secret somebody typed is a password, not a key."""
         monkeypatch.setenv(SECRET_ENV, "hunter2")
-        config = config_file(tmp_path / "gate.yaml")
+        config = config_file(tmp_path / "qed.yaml")
         with TestClient(create_app(directory=api_dir, config_path=config)) as client:
             blockers = client.get("/readyz").json()["blockers"]
             assert any("shorter than" in blocker for blocker in blockers)

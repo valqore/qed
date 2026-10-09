@@ -1,0 +1,24 @@
+# agent-baseline — identity and delegation (SPEC §4.6, AG-IDN-*)
+#
+# AG-IDN-002 (expired), 003 (chain not narrowing), 004 (scope mismatch) and
+# 005 (unknown adapter) land in week 3 with the delegation layer: they need a
+# verified JWT, not just a proposal. AG-IDN-006 and 007 are synthetic — the
+# engine raises them directly (qed/core/policy/engine.py) because a mandate
+# breach must not be overridable by a policy file.
+
+- rule_id: AG-IDN-001
+  name: Action proposed without a delegation token
+  severity: CRITICAL
+  mode: enforce
+  when:
+    any:
+      - { field: principal.token_jti, equals: "" }
+      - { field: principal.token_jti, exists: false }
+  verdict: BLOCK
+  message: "No delegation token: there is no record of who this agent acts for."
+  fix: "Run `qed login`, then let the adapter attach the token automatically."
+  compliance:
+    - { framework: eu_ai_act, control: "Art. 14" }
+    - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
+    - { framework: owasp_agentic, control: "ASI02" }
+    - { framework: soc2, control: "CC6.1" }

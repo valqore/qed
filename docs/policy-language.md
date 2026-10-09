@@ -109,7 +109,7 @@ to watch, not the block count.
 ## Shadow
 
 `mode: shadow` on a rule means it is evaluated and recorded but does not decide.
-`mode: shadow` on the *service* (`gate.yaml`) means nothing is enforced at all.
+`mode: shadow` on the *service* (`qed.yaml`) means nothing is enforced at all.
 Both land in the chain, so "we have been observing since this date" is something
 you can show rather than claim.
 
@@ -145,13 +145,13 @@ switched off and who said so.
 
 ## Lint
 
-`gate policy lint` reports: `duplicate_rule_id`, `missing_rule_id`,
+`qed policy lint` reports: `duplicate_rule_id`, `missing_rule_id`,
 `invalid_rule`, `invalid_regex`, `unknown_field_path`, `invalid_predicate`,
 `allow_rule`, `override_target_missing`, `override_hardening`,
 `invalid_override`, `disabled_without_reason` as **errors**;
 `approval_without_approvers` and `unknown_framework` as **warnings**.
 
-`gate check` refuses to decide anything against a bundle with errors.
+`qed check` refuses to decide anything against a bundle with errors.
 
 ## The bundle hash
 

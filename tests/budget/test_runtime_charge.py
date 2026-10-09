@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from gate.core.schemas import Budget, BudgetState, Decision, EvidenceType, Mode
-from gate.runtime import Session, check_proposal, open_session
+from qed.core.schemas import Budget, BudgetState, Decision, EvidenceType, Mode
+from qed.runtime import Session, check_proposal, open_session
 from tests.conftest import make_proposal
 
 NOW = datetime.fromisoformat("2026-10-07T12:00:00+00:00")
@@ -33,8 +33,8 @@ DESTRUCTIVE: dict[str, object] = {
 
 
 @pytest.fixture
-def session(gate_dir: Path) -> Iterator[Session]:
-    opened = open_session(directory=gate_dir)
+def session(qed_dir: Path) -> Iterator[Session]:
+    opened = open_session(directory=qed_dir)
     try:
         yield opened
     finally:
@@ -61,16 +61,16 @@ class TestWhenAChargeHappens:
         assert state is not None
         assert state.steps_used == 1
 
-    def test_a_blocked_action_in_enforce_mode_is_not_charged(self, gate_dir: Path) -> None:
+    def test_a_blocked_action_in_enforce_mode_is_not_charged(self, qed_dir: Path) -> None:
         """It did not run, so it cost nothing. Charging here would let a
         rejected agent burn the budget of the human who delegated to it.
 
         Enforce has to be asked for. The shipped default is shadow, which means
         the common case is that everything is charged.
         """
-        config = gate_dir.parent / "gate.yaml"
+        config = qed_dir.parent / "qed.yaml"
         config.write_text("mode: enforce\n", encoding="utf-8")
-        session = open_session(directory=gate_dir, config_path=config)
+        session = open_session(directory=qed_dir, config_path=config)
         try:
             assert session.config.mode is Mode.enforce
             outcome = check_proposal(session, make_proposal({**ident(2), **DESTRUCTIVE}), now=NOW)

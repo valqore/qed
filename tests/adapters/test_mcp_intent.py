@@ -1,4 +1,4 @@
-"""Tool-call classification (``gate/adapters/mcp/intent.py``).
+"""Tool-call classification (``qed/adapters/mcp/intent.py``).
 
 The module exists because of one bug, so the first class of tests is that bug:
 a mild verb in the tool name with a destructive statement in the arguments must
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from gate.adapters.mcp.intent import classify
+from qed.adapters.mcp.intent import classify
 
 
 class TestTheCarriedForwardBug:

@@ -1,4 +1,4 @@
-"""Invariant §1.4.2: `gate.core` imports no network client.
+"""Invariant §1.4.2: `qed.core` imports no network client.
 
 An AST scan, not a runtime check: an import that only happens on one code path
 still means the kernel can reach the network, and a kernel that can reach the
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-CORE = Path(__file__).resolve().parents[2] / "gate" / "core"
+CORE = Path(__file__).resolve().parents[2] / "qed" / "core"
 
 FORBIDDEN_ROOTS = frozenset(
     {
@@ -69,5 +69,5 @@ def test_core_module_imports_nothing_that_can_reach_the_network(path: Path) -> N
     offenders = _module_roots(path) & FORBIDDEN_ROOTS
     assert not offenders, (
         f"{path.relative_to(CORE.parents[1])} imports {sorted(offenders)}; "
-        "I/O belongs in gate.infra, and the decision path must stay pure"
+        "I/O belongs in qed.infra, and the decision path must stay pure"
     )

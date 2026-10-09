@@ -5,8 +5,8 @@ loaded, and once against the same rules shuffled. ADR-002.2 requires the result
 to be independent of rule order, and the second pass is the only thing that
 actually proves it.
 
-The comparison itself lives in ``gate.core.policy.cases`` and is shared with
-``gate policy test``. Two comparison routines would drift, and the one that
+The comparison itself lives in ``qed.core.policy.cases`` and is shared with
+``qed policy test``. Two comparison routines would drift, and the one that
 drifted would be the user's -- ours is the one with a CI job behind it.
 """
 
@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 import yaml
 
-from gate.core.policy.cases import CaseFile, run_case, uncovered_rules
-from gate.core.policy.engine import evaluate
-from gate.core.policy.model import PolicyBundle
-from gate.core.schemas import ActionProposal, BudgetState, EvalContext, Mandate
+from qed.core.policy.cases import CaseFile, run_case, uncovered_rules
+from qed.core.policy.engine import evaluate
+from qed.core.policy.model import PolicyBundle
+from qed.core.schemas import ActionProposal, BudgetState, EvalContext, Mandate
 from tests.conftest import BASE_PROPOSAL, NOW, make_proposal
 
 CASES_FILE = Path(__file__).parent / "golden" / "cases.yaml"
@@ -94,7 +94,7 @@ def test_the_shared_runner_builds_the_same_inputs_the_engine_sees(
 ) -> None:
     """Guards the refactor above: the shared builder must produce the same
     verdict as building the inputs by hand, or the golden suite would be
-    testing something other than what `gate check` does."""
+    testing something other than what `qed check` does."""
     case = next(c for c in CASES if c["id"] == "def-001-plain-read-allows")
     proposal, budget, ctx = _build(case)
     by_hand = evaluate(proposal, baseline_bundle, budget, ctx)
