@@ -5,10 +5,22 @@ The decision path is the same one ``qed approve`` uses: both call
 own decision would be a channel where separation of duties worked differently,
 which is the one place a second implementation must not exist.
 
-Approver identity comes from the caller, not from the body. An endpoint that
-let the request say who was approving would make the whole control decorative
--- which is why the approver fields are read from the adapter envelope and
-documented as such rather than accepted as JSON.
+Approver identity comes from the caller, never from the body. An endpoint that
+let the request say who was approving would make the whole control decorative.
+
+There are two kinds of caller, and they are not equally trustworthy:
+
+* a **person on a verified OIDC bearer** (the web page, SPEC §19). The approver
+  is the token's subject, as the identity provider asserted it. ``AG-SOD-001``
+  and ``AG-SOD-002`` are then decided on evidence.
+* an **adapter with a signature** (the CLI, Slack, a webhook). The approver
+  travels in ``X-QED-Approver``, which is the adapter's assertion about a
+  person it resolved by some other means -- a Slack ``users.info`` lookup, or a
+  logged-in shell. Honest, and weaker, and the chain records which it was.
+
+A bearer caller's ``X-QED-Approver`` is **not read**, and a bearer request that
+sends one disagreeing with its own token is refused rather than resolved: there
+is no innocent reason to present two different approvers in one request.
 """
 
 from __future__ import annotations
@@ -19,7 +31,7 @@ from typing import Any, Final
 from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 
-from qed.api.app_state import authenticate, qed_state
+from qed.api.app_state import authenticate_caller, qed_state
 from qed.api.problems import Problem
 from qed.core.approval.model import (
     ApprovalStatus,
@@ -43,7 +55,7 @@ HEADER_APPROVER_GROUPS: Final = "x-qed-approver-groups"
 
 @router.get("/approvals")
 async def list_approvals(request: Request) -> JSONResponse:
-    authenticate(request, b"")
+    authenticate_caller(request, b"", now=utcnow())
     session = qed_state(request).require()
     wanted = request.query_params.get("status")
     if wanted is not None and wanted not in {s.value for s in ApprovalStatus}:
@@ -59,7 +71,7 @@ async def list_approvals(request: Request) -> JSONResponse:
 
 @router.get("/approvals/{approval_id}")
 async def get_approval(approval_id: str, request: Request) -> JSONResponse:
-    authenticate(request, b"")
+    authenticate_caller(request, b"", now=utcnow())
     session = qed_state(request).require()
     found = session.store.load_approval(approval_id)
     if found is None:
@@ -89,24 +101,53 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
             title="The request body is too large",
             detail=f"this endpoint accepts at most {_MAX_BODY_BYTES} bytes",
         )
-    authenticate(request, raw)
+    now = utcnow()
+    caller = authenticate_caller(request, raw, now=now)
     session = qed_state(request).require()
 
-    approver = request.headers.get(HEADER_APPROVER, "").strip()
-    if not approver:
-        raise Problem(
-            status=400,
-            code="no-approver",
-            title="The approver is not identified",
-            detail=(
-                f"send the approver's subject in {HEADER_APPROVER}. It is a header "
-                "and not a body field on purpose: an endpoint that let the request "
-                "name its own approver would make separation of duties decorative."
-            ),
-        )
-    groups = [
-        g.strip() for g in request.headers.get(HEADER_APPROVER_GROUPS, "").split(",") if g.strip()
-    ]
+    asserted = request.headers.get(HEADER_APPROVER, "").strip()
+    if caller.human is not None:
+        human = caller.human
+        if asserted and asserted not in {human.subject, human.email}:
+            # Refused rather than resolved. Reading the token and ignoring the
+            # header would be safe but silent, and a request presenting two
+            # different approvers is either a bug worth finding or an attempt
+            # worth recording.
+            raise Problem(
+                status=400,
+                code="approver-mismatch",
+                title="The request names a different approver than its token",
+                detail=(
+                    f"the bearer token is for {human.subject} and {HEADER_APPROVER} says "
+                    f"{asserted!r}. A bearer caller's approver comes from the token; drop "
+                    "the header."
+                ),
+            )
+        approver = human.subject
+        approver_hash = human.principal_hash
+        groups = list(human.groups)
+        identity = f"oidc:{human.issuer}"
+    else:
+        if not asserted:
+            raise Problem(
+                status=400,
+                code="no-approver",
+                title="The approver is not identified",
+                detail=(
+                    f"send the approver's subject in {HEADER_APPROVER}, or authenticate as "
+                    "a person with an OIDC bearer. It is a header and not a body field on "
+                    "purpose: an endpoint that let the request name its own approver would "
+                    "make separation of duties decorative."
+                ),
+            )
+        approver = asserted
+        approver_hash = principal_hash(approver)
+        groups = [
+            g.strip()
+            for g in request.headers.get(HEADER_APPROVER_GROUPS, "").split(",")
+            if g.strip()
+        ]
+        identity = f"adapter-asserted:{caller.adapter_id}"
 
     body: dict[str, Any] = {}
     if raw.strip():
@@ -144,12 +185,11 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
 
     minutes = body.get("window_minutes")
     window = parse_duration(f"{int(minutes)}m") if isinstance(minutes, int | float) else None
-    now = utcnow()
     try:
         decision = decide(
             found,
             kind=kind,
-            approver_hash=principal_hash(approver),
+            approver_hash=approver_hash,
             approver_subject=approver,
             approver_groups=groups,
             now=now,
@@ -168,7 +208,8 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
                 "approval_id": approval_id,
                 "refused": violation.rule_id,
                 "detail": str(violation),
-                "attempted_by_hash": principal_hash(approver),
+                "attempted_by_hash": approver_hash,
+                "identity": identity,
             },
             approval_id=approval_id,
             ts=now,
@@ -207,6 +248,11 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
             "approval_id": approval_id,
             "decision": decision.kind.value,
             "approver_hash": decision.approver_hash,
+            # Whether the approver was verified by an identity provider or
+            # asserted by an adapter. ADR-001's distinction, applied to
+            # identity rather than to enforcement: an auditor reading this row
+            # should not have to know which channel wrote it.
+            "identity": identity,
             "reason": decision.reason,
             "window_until": (
                 None if decision.window_until is None else decision.window_until.isoformat()

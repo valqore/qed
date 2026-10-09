@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import Request
 
 from qed.api.auth import AdapterAuth
+from qed.api.human_auth import Human, bearer_token, human_from_claims
 from qed.api.problems import Problem
 from qed.config import IssuerConfig
 from qed.core.delegation.claims import TokenClaims, TokenVerificationError
@@ -23,7 +24,14 @@ from qed.infra.jwks import JwksCache, discover_jwks_uri
 from qed.infra.tokens import QED_ALG, TokenIssuer, decode_unverified_header, verify_token
 from qed.runtime import Session
 
-__all__ = ["QedState", "authenticate", "qed_state", "require_session"]
+__all__ = [
+    "Caller",
+    "QedState",
+    "authenticate",
+    "authenticate_caller",
+    "qed_state",
+    "require_session",
+]
 
 
 @dataclass
@@ -137,6 +145,74 @@ def qed_state(request: Request) -> QedState:
 
 def require_session(request: Request) -> Session:
     return qed_state(request).require()
+
+
+@dataclass(frozen=True)
+class Caller:
+    """Who is making this request: an adapter, or a person.
+
+    Exactly one of the two is set. Routes that only adapters use keep calling
+    :func:`authenticate`; routes a browser reaches call
+    :func:`authenticate_caller` and read this.
+    """
+
+    adapter_id: str | None = None
+    human: Human | None = None
+
+    @property
+    def is_human(self) -> bool:
+        return self.human is not None
+
+    def describe(self) -> str:
+        """For the `client_fingerprint` field and for log lines. Advisory."""
+        if self.human is not None:
+            return f"oidc:{self.human.issuer}:{self.human.subject}"
+        return f"adapter:{self.adapter_id}"
+
+
+def authenticate_caller(request: Request, body: bytes, *, now: datetime) -> Caller:
+    """An adapter signature or a verified human bearer. One or the other.
+
+    A request carrying neither is refused exactly as before, so the sweep in
+    ``tests/api/test_auth.py`` that walks every ``/v1`` route and asserts an
+    unsigned request cannot get a 2xx still holds: a bearer is a credential,
+    not the absence of one.
+
+    The bearer is tried first, and only when one is actually present. An
+    adapter that also happens to send an ``Authorization`` header for its own
+    reasons is not quietly reinterpreted as a person.
+    """
+    state = qed_state(request)
+    headers = {key.lower(): value for key, value in request.headers.items()}
+
+    token = bearer_token(headers)
+    if token is not None:
+        if state.jwks is None and state.token_issuer is None:
+            raise Problem(
+                status=501,
+                code="no-human-auth",
+                title="Human authentication is not configured",
+                detail=(
+                    "a bearer token arrived but no identity provider is configured under "
+                    "`delegation.issuers`, so there is nothing to verify it against. "
+                    "Adapters authenticate with a signature instead (SPEC §13)."
+                ),
+            )
+        try:
+            claims, _, _ = state.verify_subject_token(token, now=now)
+        except TokenVerificationError as exc:
+            # Same shape as the adapter refusal: a caller who cannot
+            # authenticate does not get to learn which issuers exist.
+            raise Problem(
+                status=401,
+                code="bad-token",
+                title="The bearer token was not accepted",
+                detail=str(exc),
+                extra={"rule_id": "AG-IDN-005"},
+            ) from exc
+        return Caller(human=human_from_claims(claims, state.require().config))
+
+    return Caller(adapter_id=authenticate(request, body))
 
 
 def authenticate(request: Request, body: bytes) -> str:
