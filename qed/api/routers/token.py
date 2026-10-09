@@ -241,6 +241,47 @@ async def jwks(request: Request) -> JSONResponse:
     return JSONResponse({"keys": [state.token_issuer.public_jwk()]})
 
 
+@public_router.get("/.well-known/qed-configuration")
+async def ui_configuration(request: Request) -> JSONResponse:
+    """What a browser needs to begin an OIDC login (SPEC §19, ADR-0007).
+
+    Public, and necessarily so: a login page cannot authenticate before it has
+    logged in. Nothing here is a secret. An issuer URL and a public client id
+    are what every single-page app ships in plain JavaScript, and PKCE is what
+    makes a public client safe without one. The sibling
+    ``/.well-known/jwks.json`` already publishes this instance's verification
+    key, so the disclosure bar was set in week 3.
+
+    An issuer with no ``ui_client_id`` is listed with ``client_id: null``
+    rather than omitted. The pages can then say "this issuer is configured but
+    not for browser login", which is a fixable state an operator should see,
+    instead of behaving as though the issuer did not exist.
+    """
+    state = qed_state(request)
+    session = state.session
+    issuers = [] if session is None else session.config.delegation.issuers
+    return JSONResponse(
+        {
+            "instance_id": "" if session is None else session.config.instance_id,
+            "issuers": [
+                {
+                    "issuer": configured.issuer,
+                    "client_id": configured.ui_client_id,
+                    # The discovery document, not a guessed authorization
+                    # endpoint. `/protocol/openid-connect/auth` is Keycloak's
+                    # path and nobody else's; Entra, Okta and Auth0 all differ.
+                    # The browser reads `authorization_endpoint` out of this,
+                    # which is what discovery is for.
+                    "discovery": (
+                        f"{configured.issuer.rstrip('/')}/.well-known/openid-configuration"
+                    ),
+                }
+                for configured in issuers
+            ],
+        }
+    )
+
+
 def _claim_list(claims: TokenClaims, name: str) -> list[str]:
     value = getattr(claims, name, None)
     if isinstance(value, list):

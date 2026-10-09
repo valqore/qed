@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -120,7 +121,7 @@ def verify_token(
     parent: TokenClaims | None = None,
     skew: timedelta = DEFAULT_SKEW,
     max_depth: int = MAX_CHAIN_DEPTH,
-    audience: str = AUDIENCE,
+    audience: str | Collection[str] = AUDIENCE,
 ) -> tuple[TokenClaims, Principal]:
     """Check the signature, then run every §6.1 check against the claims.
 

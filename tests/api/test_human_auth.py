@@ -46,6 +46,7 @@ OTHER_IDP = "https://not-configured.example"
 IDP_KEY = RSAKey.generate_key(2048, parameters={"kid": "idp-1"})
 IMPOSTOR_KEY = RSAKey.generate_key(2048, parameters={"kid": "idp-1"})
 
+UI_CLIENT = "qed-ui"
 APPROVER = "dana@example.com"
 REQUESTER = "ali@example.com"
 SUMMARY = "db.drop_table wants to delete db:prod/orders"
@@ -101,7 +102,14 @@ def write_config(path: Path, *, issuers: bool = True, **approvals: object) -> Pa
         body["delegation"] = {
             "self_issuer": "https://qed.test",
             "offline": True,
-            "issuers": [{"issuer": IDP, "jwks_uri": f"{IDP}/jwks", "algorithms": ["RS256"]}],
+            "issuers": [
+                {
+                    "issuer": IDP,
+                    "jwks_uri": f"{IDP}/jwks",
+                    "algorithms": ["RS256"],
+                    "ui_client_id": UI_CLIENT,
+                }
+            ],
         }
     path.write_text(yaml.safe_dump(body), encoding="utf-8")
     return path
@@ -452,3 +460,144 @@ class TestTheQueue:
     def test_an_unknown_status_filter_is_refused(self, client: TestClient) -> None:
         response = client.get("/v1/approvals?status=maybe", headers=bearer(token_for()))
         assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# The audience, which is where this nearly shipped broken
+# --------------------------------------------------------------------------
+
+
+class TestTheAudience:
+    """An **id_token's `aud` is the client id**, by OIDC definition.
+
+    The week-3 audience check expected `aud` to include `qed`, the service.
+    That is right for an access token or an exchange subject token, and it can
+    never be true of an id_token: the pages log in as a public PKCE client, so
+    their token carries that client's id. Pointing the page at a real Keycloak
+    is what found it -- the realm answered `aud: qed-cli` and every request was
+    refused with "a token minted for another service must not be usable here".
+
+    The fix is a closed set built from configuration: `qed` plus every
+    `ui_client_id` the operator declared. These tests hold both halves -- the
+    client id is accepted, and anything nobody declared still is not.
+    """
+
+    def test_the_service_audience_is_accepted(self, client: TestClient) -> None:
+        response = client.get("/v1/approvals", headers=bearer(token_for(aud="qed")))
+        assert response.status_code == 200
+
+    def test_the_configured_ui_client_is_accepted(self, client: TestClient) -> None:
+        """What a real id_token actually carries."""
+        response = client.get("/v1/approvals", headers=bearer(token_for(aud=UI_CLIENT)))
+        assert response.status_code == 200
+
+    def test_a_token_carrying_both_is_accepted(self, client: TestClient) -> None:
+        response = client.get(
+            "/v1/approvals", headers=bearer(token_for(aud=[UI_CLIENT, "something-else"]))
+        )
+        assert response.status_code == 200
+
+    def test_an_audience_nobody_declared_is_still_refused(self, client: TestClient) -> None:
+        """The control this check exists for. Widening it to "any audience"
+        would have made a token minted for an unrelated service replayable
+        here, which is the whole thing it is meant to stop."""
+        response = client.get("/v1/approvals", headers=bearer(token_for(aud="some-other-service")))
+        assert response.status_code == 401
+        assert "includes none of" in response.json()["detail"]
+
+    def test_the_refusal_names_what_was_expected(self, client: TestClient) -> None:
+        response = client.get("/v1/approvals", headers=bearer(token_for(aud="nope")))
+        detail = response.json()["detail"]
+        assert "qed" in detail
+        assert UI_CLIENT in detail
+
+    def test_an_issuer_without_a_ui_client_accepts_only_the_service(
+        self, qed_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No `ui_client_id` means no browser login against that issuer, so
+        the set does not grow by accident."""
+        monkeypatch.setenv(SECRET_ENV, SECRET)
+        path = tmp_path / "no-client.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "instance_id": "qed-local",
+                    "mode": "enforce",
+                    "adapters": [
+                        {"adapter_id": ADAPTER_ID, "secret_env": SECRET_ENV, "kind": "mcp"}
+                    ],
+                    "delegation": {
+                        "self_issuer": "https://qed.test",
+                        "offline": True,
+                        "issuers": [
+                            {"issuer": IDP, "jwks_uri": f"{IDP}/jwks", "algorithms": ["RS256"]}
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        with TestClient(create_app(directory=qed_dir, config_path=path)) as bare:
+            assert (
+                bare.get("/v1/approvals", headers=bearer(token_for(aud="qed"))).status_code == 200
+            )
+            refused = bare.get("/v1/approvals", headers=bearer(token_for(aud=UI_CLIENT)))
+        assert refused.status_code == 401
+
+
+class TestTheBrowserConfiguration:
+    """``/.well-known/qed-configuration``, which is how a page starts a login."""
+
+    def test_it_is_public(self, client: TestClient) -> None:
+        """A login page cannot authenticate before it has logged in. Nothing
+        here is a secret: an issuer URL and a public client id are what every
+        single-page app ships in plain JavaScript."""
+        assert client.get("/.well-known/qed-configuration").status_code == 200
+
+    def test_it_names_the_issuer_and_the_client(self, client: TestClient) -> None:
+        payload = client.get("/.well-known/qed-configuration").json()
+        row = payload["issuers"][0]
+        assert row["issuer"] == IDP
+        assert row["client_id"] == UI_CLIENT
+
+    def test_it_points_at_discovery_rather_than_a_guessed_endpoint(
+        self, client: TestClient
+    ) -> None:
+        """`/protocol/openid-connect/auth` is Keycloak's path and nobody
+        else's. The browser reads `authorization_endpoint` out of the
+        discovery document, which is what discovery is for."""
+        row = client.get("/.well-known/qed-configuration").json()["issuers"][0]
+        assert row["discovery"] == f"{IDP}/.well-known/openid-configuration"
+        assert "authorization_endpoint" not in row
+
+    def test_it_carries_no_secret(self, client: TestClient) -> None:
+        body = client.get("/.well-known/qed-configuration").text
+        assert SECRET not in body
+        assert "secret" not in body.lower()
+
+    def test_an_issuer_without_a_client_is_listed_as_null_not_omitted(
+        self, qed_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """So the page can say "configured, but not for browser login", which
+        is a fixable state an operator should see, rather than behave as
+        though the issuer did not exist."""
+        monkeypatch.setenv(SECRET_ENV, SECRET)
+        path = tmp_path / "no-client2.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "instance_id": "qed-local",
+                    "delegation": {
+                        "offline": True,
+                        "issuers": [
+                            {"issuer": IDP, "jwks_uri": f"{IDP}/jwks", "algorithms": ["RS256"]}
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        with TestClient(create_app(directory=qed_dir, config_path=path)) as bare:
+            payload = bare.get("/.well-known/qed-configuration").json()
+        assert len(payload["issuers"]) == 1
+        assert payload["issuers"][0]["client_id"] is None

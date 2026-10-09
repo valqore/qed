@@ -84,6 +84,12 @@ class IssuerConfig(Frozen):
     algorithms: list[str] = Field(default_factory=lambda: ["RS256", "ES256"])
     #: IdP group -> scopes the group may request (SPEC §6.2).
     scopes_by_group: dict[str, list[str]] = Field(default_factory=dict)
+    #: The **public** OAuth client the web pages log in as (SPEC §19 SSO).
+    #: A browser cannot keep a secret, so this is a public client using PKCE
+    #: and the value is not one: every single-page app ships its client id in
+    #: plain JavaScript. Unset means the pages cannot sign anybody in against
+    #: this issuer, which `qed serve --ui` says out loud.
+    ui_client_id: str | None = None
 
 
 class DelegationConfig(Frozen):

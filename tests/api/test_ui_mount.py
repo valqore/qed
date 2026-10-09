@@ -58,9 +58,16 @@ class TestTheApacheWheelHasNoUi:
 
 
 class TestWhenItIsNotInstalled:
-    def test_the_assets_lookup_says_what_to_install(self) -> None:
-        """The package genuinely is not installed in this environment, which
-        is the normal state: it is an optional extra."""
+    def test_the_assets_lookup_says_what_to_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Absence is simulated rather than assumed.
+
+        The first version of this test just called `ui_assets()` and expected
+        it to fail, which held in CI and stopped holding the moment somebody
+        installed the extra on a dev box to look at the pages. A test whose
+        result depends on what happens to be in the environment is not testing
+        the code.
+        """
+        monkeypatch.setattr("qed.api.ui.find_spec", lambda name: None)
         with pytest.raises(UiUnavailable, match="not installed"):
             ui_assets()
 

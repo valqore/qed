@@ -12,6 +12,7 @@ I/O. :mod:`qed.infra.tokens` does that and then calls in here.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -142,20 +143,30 @@ def validate_claims(
     now: datetime,
     issuers: frozenset[str] | set[str] | list[str],
     skew: timedelta = DEFAULT_SKEW,
-    audience: str = AUDIENCE,
+    audience: str | Collection[str] = AUDIENCE,
 ) -> None:
     """SPEC §6.1 step 2. Raises on the first failure, returns None otherwise.
 
     The checks are ordered cheapest-and-most-damning first, so a token from an
     unknown issuer is refused before any effort goes into its time windows.
+
+    ``audience`` may name more than one acceptable value, because an instance
+    can own more than one. ``qed`` is the service; a browser login adds the
+    public OAuth client the pages use, since an **id_token's ``aud`` is the
+    client id by OIDC definition** and can never contain the service name. The
+    set is still closed and still comes from configuration -- it is the
+    operator's own ``ui_client_id``, not "any audience" -- so the control this
+    check exists for holds: a token minted for a service nobody here declared
+    is refused.
     """
     if claims.iss not in set(issuers):
         raise TokenVerificationError(
             f"issuer {claims.iss!r} is not configured; add it to `delegation.issuers`"
         )
-    if audience not in _audiences(claims.aud):
+    expected = {audience} if isinstance(audience, str) else set(audience)
+    if not expected & set(_audiences(claims.aud)):
         raise TokenVerificationError(
-            f"token audience {claims.aud!r} does not include {audience!r}; "
+            f"token audience {claims.aud!r} includes none of {sorted(expected)}; "
             "a token minted for another service must not be usable here"
         )
     if claims.exp <= now - skew:
@@ -274,7 +285,7 @@ def verify(
     parent: TokenClaims | None = None,
     skew: timedelta = DEFAULT_SKEW,
     max_depth: int = MAX_CHAIN_DEPTH,
-    audience: str = AUDIENCE,
+    audience: str | Collection[str] = AUDIENCE,
 ) -> Principal:
     """All of §6.1 in the order the spec gives, returning the principal.
 

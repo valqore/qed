@@ -17,7 +17,7 @@ from qed.api.auth import AdapterAuth
 from qed.api.human_auth import Human, bearer_token, human_from_claims
 from qed.api.problems import Problem
 from qed.config import IssuerConfig
-from qed.core.delegation.claims import TokenClaims, TokenVerificationError
+from qed.core.delegation.claims import AUDIENCE, TokenClaims, TokenVerificationError
 from qed.core.schemas import Principal
 from qed.infra.channels.slack import SlackChannel
 from qed.infra.jwks import JwksCache, discover_jwks_uri
@@ -70,6 +70,30 @@ class QedState:
             )
         return self.session
 
+    @property
+    def owned_audiences(self) -> frozenset[str]:
+        """Every ``aud`` value a token for *this instance* may carry.
+
+        ``qed`` is the service. Each configured ``ui_client_id`` is added
+        because an **id_token's ``aud`` is the client id by OIDC definition**:
+        the browser pages log in as a public PKCE client, so their token can
+        never carry the service name, and refusing it would mean the pages
+        could not sign anybody in. Found by pointing the page at a real
+        Keycloak, which answered `aud: qed-cli` and was refused.
+
+        The set is closed and comes from configuration, so the control the
+        audience check exists for is intact: a token minted for a service
+        nobody here declared is still refused.
+        """
+        session = self.session
+        if session is None:
+            return frozenset({AUDIENCE})
+        return frozenset({AUDIENCE}) | {
+            configured.ui_client_id
+            for configured in session.config.delegation.issuers
+            if configured.ui_client_id
+        }
+
     def verify_subject_token(
         self, token: str, *, now: datetime
     ) -> tuple[TokenClaims, Principal, bool]:
@@ -98,6 +122,7 @@ class QedState:
                 now=now,
                 issuers=frozenset({delegation.self_issuer}),
                 algorithms=(QED_ALG,),
+                audience=self.owned_audiences,
             )
             return claims, principal, True
 
@@ -119,6 +144,7 @@ class QedState:
                     now=now,
                     issuers=frozenset({configured.issuer}),
                     algorithms=tuple(configured.algorithms),
+                    audience=self.owned_audiences,
                 )
             except TokenVerificationError as exc:
                 last = exc
