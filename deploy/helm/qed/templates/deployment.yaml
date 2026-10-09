@@ -1,0 +1,153 @@
+{{- $postgres := eq .Values.evidence.backend "postgres" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "qed.fullname" . }}
+  labels:
+    {{- include "qed.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- if not $postgres }}
+  # One writer, one volume. `Recreate` because a rolling update would briefly
+  # run two pods against the same SQLite file, which is the forked chain the
+  # install-time check refuses two replicas over.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "qed.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qed.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # A policy change is a config change, and the chain records
+        # `policy_hash` with every verdict. Rolling the pods on a ConfigMap
+        # change is what makes the hash in the evidence match the rules that
+        # are actually deployed.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "qed.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: qed
+          image: "{{ .Values.image.repository }}:{{ include "qed.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+            - --dir
+            - /var/lib/qed
+            - --config
+            - /etc/qed/qed.yaml
+            - --host
+            - 0.0.0.0
+            - --port
+            - {{ .Values.service.port | quote }}
+          env:
+            {{- if $postgres }}
+            - name: {{ .Values.evidence.postgres.env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.evidence.postgres.existingSecret }}
+                  key: {{ .Values.evidence.postgres.secretKey }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          # Liveness and readiness answer different questions, and conflating
+          # them is how a missing key becomes a crash loop: restarting the
+          # container will not conjure up a signing key.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/qed
+              readOnly: true
+            # Its own directory, not nested inside the writable state mount.
+            # `evidence.signing_key` in qed.yaml points at it, so the key and
+            # the chain can live on different kinds of storage -- which is what
+            # they are: a secret that must not be writable, and a database that
+            # must be.
+            - name: signing-key
+              mountPath: /etc/qed/keys
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/qed
+            {{- if .Values.policies.existingConfigMap }}
+            - name: policies
+              mountPath: {{ .Values.policies.mountPath }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "qed.fullname" . }}-config
+        - name: signing-key
+          secret:
+            secretName: {{ .Values.signingKey.existingSecret }}
+            defaultMode: 0400
+        - name: state
+          {{- if $postgres }}
+          # The chain is in Postgres; what is left on disk is scratch, and the
+          # root filesystem is read-only.
+          emptyDir: {}
+          {{- else if .Values.evidence.sqlite.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.evidence.sqlite.persistence.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "qed.fullname" . }}-state
+          {{- end }}
+        {{- if .Values.policies.existingConfigMap }}
+        - name: policies
+          configMap:
+            name: {{ .Values.policies.existingConfigMap }}
+        {{- end }}

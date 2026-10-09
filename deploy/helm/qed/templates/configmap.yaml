@@ -1,0 +1,28 @@
+{{/*
+qed.yaml.
+
+Mounted read-only, and never holding a credential: everything secret is named
+by environment variable, so `kubectl get configmap -o yaml` on this is safe
+and the file stays reviewable in a pull request.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "qed.fullname" . }}-config
+  labels:
+    {{- include "qed.labels" . | nindent 4 }}
+data:
+  qed.yaml: |
+    {{- $config := deepCopy .Values.config }}
+    {{- $evidence := default dict (get $config "evidence") }}
+    {{- if eq .Values.evidence.backend "postgres" }}
+    {{- /* `store_env` and not `store`: the DSN carries a password. */}}
+    {{- $_ := set $evidence "store_env" .Values.evidence.postgres.env }}
+    {{- end }}
+    {{- /* The key is a secret mount; the chain is a volume or a database. */}}
+    {{- $_ := set $evidence "signing_key" (printf "/etc/qed/keys/%s" .Values.signingKey.privateKeyKey) }}
+    {{- $_ := set $config "evidence" $evidence }}
+    {{- if .Values.policies.existingConfigMap }}
+    {{- $_ := set $config "policies" (list .Values.policies.mountPath) }}
+    {{- end }}
+    {{- toYaml $config | nindent 4 }}

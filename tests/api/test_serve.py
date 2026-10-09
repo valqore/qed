@@ -6,9 +6,10 @@ handlers; this covers the thing that is easy to get wrong and invisible to a
 TestClient -- that the CLI wires the config, the bind address and the lifespan
 together, and that uvicorn actually comes up.
 
-The Dockerfile checks are static. Building an image needs a daemon that CI for
-this repo does not have, so what is asserted is the set of properties SPEC §20.4
-fixes: distroless, non-root, no shell in the runtime stage.
+The container's own tests are in `tests/deploy/test_container.py`: the static
+properties SPEC §20.4 fixes, and -- when a Docker daemon is available -- a real
+build that is actually started, because the static checks once passed on an
+image that could not import `pydantic`.
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ import yaml
 from qed.infra.keys.file import init_keys
 
 REPO = Path(__file__).resolve().parents[2]
-DOCKERFILE = REPO / "deploy" / "Dockerfile"
 STARTUP_TIMEOUT = 45.0
 
 
@@ -177,38 +177,3 @@ class TestQedServe:
         )
         assert result.returncode != 0
         assert b"mode" in result.stderr
-
-
-class TestTheContainerIsWhatTheSpecAsksFor:
-    """SPEC §20.4: distroless, non-root."""
-
-    def test_there_is_a_dockerfile(self) -> None:
-        assert DOCKERFILE.is_file()
-
-    def test_the_runtime_stage_is_distroless(self) -> None:
-        text = DOCKERFILE.read_text(encoding="utf-8")
-        runtime = text.split("AS runtime", 1)[0].rsplit("FROM ", 1)[1]
-        assert "distroless" in runtime
-
-    def test_it_runs_as_a_non_root_user(self) -> None:
-        text = DOCKERFILE.read_text(encoding="utf-8")
-        assert "USER 65532:65532" in text
-        assert "USER root" not in text
-
-    def test_the_build_stage_is_separate_from_the_runtime_stage(self) -> None:
-        """pip and a compiler must not be in the shipped image."""
-        text = DOCKERFILE.read_text(encoding="utf-8")
-        assert text.count("FROM ") == 2
-        assert "COPY --from=builder" in text
-        assert "pip install" not in text.split("AS runtime", 1)[1]
-
-    def test_the_entrypoint_is_exec_form(self) -> None:
-        """Shell form needs a shell, and distroless has none."""
-        text = DOCKERFILE.read_text(encoding="utf-8")
-        entrypoint = next(line for line in text.splitlines() if line.startswith("ENTRYPOINT"))
-        assert entrypoint.startswith("ENTRYPOINT [")
-
-    def test_it_declares_no_anonymous_volume_for_the_chain(self) -> None:
-        """A VOLUME line is how an evidence chain disappears on `docker run`."""
-        text = DOCKERFILE.read_text(encoding="utf-8")
-        assert not any(line.startswith("VOLUME") for line in text.splitlines())

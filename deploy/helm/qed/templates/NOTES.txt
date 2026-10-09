@@ -1,0 +1,46 @@
+{{ include "qed.fullname" . }} is installed.
+
+  mode            : {{ .Values.config.mode }}
+  evidence store  : {{ .Values.evidence.backend }}
+  replicas        : {{ .Values.replicaCount }}{{ if eq .Values.evidence.backend "sqlite" }}  (SQLite: one writer, by design){{ end }}
+  image           : {{ .Values.image.repository }}:{{ include "qed.imageTag" . }}
+
+Check it can decide:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "qed.fullname" . }} {{ .Values.service.port }}
+  curl -s localhost:{{ .Values.service.port }}/readyz | jq
+
+`ready: false` is the service telling you it will not decide yet, and
+`blockers` says why. The two usual answers are a signing key it cannot read and
+a policy bundle with errors -- deciding against a broken bundle would apply
+rules nobody wrote.
+
+{{ if eq .Values.config.mode "shadow" }}
+This release is in SHADOW mode: every decision is recorded, and nothing is
+refused. That is the right way to start -- run it for a week, read the
+evidence, and only then set `config.mode: enforce`:
+
+  kubectl --namespace {{ .Release.Namespace }} exec deploy/{{ include "qed.fullname" . }} -- \
+    python -c "from qed.cli import main; main()" status --dir /var/lib/qed
+{{- else }}
+This release is ENFORCING. Proposals that match a BLOCK rule will be refused.
+{{- end }}
+
+{{ if eq .Values.evidence.backend "postgres" }}
+HA is on the Postgres path (SPEC §104, ADR-0009): every replica serves the API
+and decides, and exactly one holds the advisory lock and drains the outbox into
+the chain. Watch `chain_lag_records` in /v1/status -- a depth that keeps
+growing means the leader is gone, or is losing the lock faster than it can
+drain.
+{{- else }}
+SQLite is one process writing for itself. `replicaCount` above 1 is refused at
+install time: two writers would read the same chain tip and either collide on
+the hash primary key or fork the chain. Switch to
+`evidence.backend: postgres` for more than one replica.
+{{- end }}
+
+The evidence only means something to somebody who verifies it themselves:
+
+  kubectl --namespace {{ .Release.Namespace }} exec deploy/{{ include "qed.fullname" . }} -- \
+    python -c "from qed.cli import main; main()" export --dir /var/lib/qed > evidence.jsonl
+  qed-verify evidence.jsonl --keys ./qed-keys/public

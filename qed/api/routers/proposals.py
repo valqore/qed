@@ -44,8 +44,9 @@ from qed.core.schemas import (
     EvidenceType,
     Frozen,
     Mandate,
+    rfc3339_ms,
 )
-from qed.runtime import DuplicateProposal, check_proposal
+from qed.runtime import DuplicateProposal, Session, check_proposal
 
 router = APIRouter(prefix="/v1", tags=["proposals"])
 
@@ -114,14 +115,40 @@ async def post_proposal(request: Request) -> Response:
         "evidence_ref": outcome.records[-1].ref,
         "evidence_seq": [record.seq for record in outcome.records],
         "evidence_pending": any(record.deferred for record in outcome.records),
-        # The approval service is week 4. `null` and not an empty object: there
-        # is no approval, rather than an approval with nothing in it.
-        "approval": None,
+        # SPEC §13's optional `approval?`. `null` and not an empty object when
+        # there is none: there is no approval, rather than an approval with
+        # nothing in it. When there is one, the adapter gets what it needs to
+        # wait for it and what to show the person who has to act -- without a
+        # second round trip to `GET /v1/approvals/{id}`, which is the call an
+        # adapter would otherwise have to make before it could say anything
+        # useful at all.
+        "approval": _approval_summary(session, outcome.verdict.approval_id),
     }
     # SPEC §13: 202 for REQUIRE_APPROVAL. Only when it is actually being
     # enforced -- in shadow mode nothing is pending and the adapter proceeds.
     status = 202 if outcome.effective_decision is Decision.REQUIRE_APPROVAL else 200
     return JSONResponse(payload, status_code=status)
+
+
+def _approval_summary(session: Session, approval_id: str | None) -> dict[str, object] | None:
+    """What an adapter needs about a pending approval, or None.
+
+    Deliberately a subset of `GET /v1/approvals/{id}`: no stored proposal view,
+    because the adapter already has the proposal it just submitted, and no
+    approver identities beyond the groups the rule named.
+    """
+    if approval_id is None:
+        return None
+    request = session.store.load_approval(approval_id)
+    if request is None:  # pragma: no cover - written in the same transaction
+        return None
+    return {
+        "approval_id": request.id,
+        "status": request.status.value,
+        "approvers": list(request.approvers),
+        "expires_at": rfc3339_ms(request.expires_at),
+        "poll": f"/v1/approvals/{request.id}",
+    }
 
 
 @router.get("/proposals/{proposal_id}", summary="Fetch a proposal and its verdict.")

@@ -234,6 +234,31 @@ class TestTheStoreBehavesTheSame:
         assert state is not None
         assert state.steps_used == 5
 
+    def test_the_daily_rollup_accumulates(self, postgres: PostgresStore) -> None:
+        """`principal_hash` is what makes this a second write, to
+        `budget_daily`, and it is the only upsert in the store that *adds* to
+        the existing row rather than replacing it.
+
+        It was missed here once, because this test used to omit
+        `principal_hash` -- so the branch never ran on PostgreSQL and the
+        statement's bare `steps_used = steps_used + excluded.steps_used`, which
+        SQLite accepts and PostgreSQL calls ambiguous, reached a container. The
+        argument is the whole point of the test.
+        """
+        from qed.core.budget import Charge
+        from qed.core.schemas import Budget
+
+        now = utcnow()
+        postgres.upsert_budget_caps("jti-daily", Budget(steps=10, money_cents=500))
+        for _ in range(3):
+            postgres.charge_budget(
+                "jti-daily",
+                Charge(steps=1, tokens=7, money_cents=11),
+                now=now,
+                principal_hash="principal-abc",
+            )
+        assert postgres.daily_usage("principal-abc", rfc3339_ms(now)[:10]) == (3, 21, 33)
+
     def test_migrations_are_recorded_once(self, postgres: PostgresStore) -> None:
         """Opening a second store against the same database must not re-run
         them -- 0002 onwards are plain ALTERs and would fail."""
@@ -302,3 +327,105 @@ class TestLeadership:
         assert postgres.try_become_leader() is False
         leader.close()  # as a crashed replica's connection would
         assert postgres.try_become_leader() is True
+
+
+class TestTheWholeDecisionPathRunsOnPostgres:
+    """The net under every other test in this file.
+
+    The tests above assert that the *chain* is byte-identical across backends.
+    They do not exercise most of the forty-odd repository methods, and a
+    statement SQLite accepts and PostgreSQL refuses is invisible until the
+    method runs. One did: `charge_budget`'s daily rollup reached a container
+    before anybody noticed.
+
+    So this drives a real decision through `check_proposal`, with a budget, a
+    mandate and an approval, against PostgreSQL -- the same call the API makes
+    on every request. It is not a substitute for a focused test; it is the
+    thing that fails first when a new statement is dialect-specific.
+    """
+
+    @pytest.fixture(autouse=True)
+    def clean(self) -> Iterator[None]:
+        store = PostgresStore(DSN)
+        _wipe(store)
+        store.close()
+        yield
+
+    def session(self, directory: Path, config: Path):  # type: ignore[no-untyped-def]
+        import yaml
+
+        from qed.infra.keys.file import init_keys
+        from qed.runtime import open_session
+
+        init_keys(directory)
+        config.write_text(
+            yaml.safe_dump(
+                {"instance_id": INSTANCE, "evidence": {"store_env": "QED_TEST_POSTGRES_DSN"}}
+            ),
+            encoding="utf-8",
+        )
+        return open_session(directory=directory, config_path=config)
+
+    def test_a_proposal_with_a_budget_is_decided_and_charged(self, tmp_path: Path) -> None:
+        from qed.core.budget import Charge
+        from qed.core.schemas import ActionProposal, Budget, BudgetState
+        from qed.runtime import check_proposal, settle
+        from tests.conftest import BASE_PROPOSAL, deep_merge
+
+        session = self.session(tmp_path / "qed", tmp_path / "qed.yaml")
+        try:
+            proposal = ActionProposal.model_validate(
+                deep_merge(BASE_PROPOSAL, {"id": "01JBPGPATH0000000000000001"})
+            )
+            session.store.upsert_budget_caps(
+                proposal.principal.token_jti, Budget(steps=10, money_cents=1000)
+            )
+            outcome = check_proposal(
+                session,
+                proposal,
+                budget=BudgetState(token_jti=proposal.principal.token_jti, steps_used=0),
+            )
+            assert outcome.verdict.decision.value in {"ALLOW", "BLOCK", "REQUIRE_APPROVAL"}
+            assert outcome.records, "a decision with no evidence"
+
+            # The daily rollup: the write that was missing from this file.
+            session.store.charge_budget(
+                proposal.principal.token_jti,
+                Charge(steps=1),
+                now=utcnow(),
+                principal_hash="principal-xyz",
+            )
+
+            settle(session)
+            assert session.store.count_evidence() >= 3
+        finally:
+            session.close(settle_chain=False)
+
+    def test_the_resulting_chain_verifies(self, tmp_path: Path) -> None:
+        from qed_verify.verify import load_jsonl, verify_records
+
+        from qed.core.evidence.export.jsonl import to_jsonl
+        from qed.core.schemas import ActionProposal
+        from qed.infra.keys.file import PUBLIC_DIR_NAME, load_public_keys
+        from qed.runtime import check_proposal, settle
+        from tests.conftest import BASE_PROPOSAL, deep_merge
+
+        directory = tmp_path / "qed"
+        session = self.session(directory, tmp_path / "qed.yaml")
+        try:
+            for index in range(3):
+                check_proposal(
+                    session,
+                    ActionProposal.model_validate(
+                        deep_merge(BASE_PROPOSAL, {"id": f"01JBPGPATH000000000000000{index}"})
+                    ),
+                )
+            settle(session)
+            report = verify_records(
+                load_jsonl(to_jsonl(session.store.iter_evidence())),
+                load_public_keys(directory / PUBLIC_DIR_NAME),
+                instance_id=INSTANCE,
+            )
+            assert report.ok, report.summary()
+        finally:
+            session.close(settle_chain=False)

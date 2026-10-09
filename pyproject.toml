@@ -79,7 +79,16 @@ qed = "qed.cli:main"
 include = ["qed*"]
 
 [tool.setuptools.package-data]
-qed = ["core/policy/packs/*/*.yaml", "infra/storage/migrations/*.sql"]
+# Every non-Python file `qed` reads at runtime. Each one is a FileNotFoundError
+# in an installed wheel if it is missing here, and the wheel is how the
+# container is built -- so a file left out of this list is a container that
+# builds cleanly and dies on startup. `tests/test_packaging.py` checks the list
+# against what is actually on disk rather than trusting it.
+qed = [
+    "core/policy/packs/*/*.yaml",
+    "infra/storage/migrations/*.sql",
+    "compliance/*.yaml",
+]
 
 [tool.ruff]
 line-length = 100
@@ -122,3 +131,8 @@ pythonpath = [".", "packages/qed-verify"]
 filterwarnings = ["error"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    # Builds a container image, so it is minutes rather than seconds and needs
+    # a Docker daemon. Run with `-m slow`; deselect with `-m "not slow"`.
+    "slow: needs a container build or another external service",
+]

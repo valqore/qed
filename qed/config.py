@@ -55,6 +55,11 @@ class EvidenceConfig(Frozen):
     store: str | None = None
     #: Environment variable holding the connection URL. Wins over `store`.
     store_env: str | None = None
+    #: Path to the Ed25519 private key, when it does not live in the state
+    #: directory. A container's chain is on a writable volume while its key
+    #: arrives from a read-only secret mount, and nesting the one inside the
+    #: other to satisfy a fixed filename works until a kubelet orders the
+    #: mounts differently. Unset means `<state dir>/evidence-key.pem`.
     signing_key: str | None = None
     masking: MaskingProfile = "default"
 

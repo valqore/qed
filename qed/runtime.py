@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Final
 
 from ulid import ULID
 
@@ -46,13 +47,19 @@ from qed.infra.keys.file import PUBLIC_DIR_NAME, FileSigner, load_signer
 from qed.infra.storage.store import SqliteStore, SqlStore
 
 __all__ = [
+    "EXIT_ALLOW",
+    "EXIT_APPROVAL",
+    "EXIT_BLOCK",
+    "EXIT_ERROR",
     "CheckOutcome",
     "DuplicateProposal",
     "PolicyErrors",
     "Session",
     "check_proposal",
     "open_session",
+    "open_signer",
     "open_store",
+    "settle",
 ]
 
 logger = logging.getLogger("qed.runtime")
@@ -121,6 +128,32 @@ def open_store(config: QedConfig, directory: Path) -> SqlStore:
     )
 
 
+def open_signer(config: QedConfig, directory: Path) -> FileSigner:
+    """The evidence signing key, from `evidence.signing_key` or the state dir.
+
+    Two paths because the key and the chain want different storage. On a
+    laptop they live together and `qed keys init` puts them there. In a
+    container the chain is on a writable volume (or in Postgres) while the key
+    arrives from a secret mounted read-only, and nesting that mount inside the
+    writable one to satisfy a fixed filename is the sort of arrangement that
+    works until a kubelet orders the mounts differently.
+
+    So `evidence.signing_key` names the private key wherever it is. Only the
+    private key: the public half is derived from it, and the `public/`
+    directory exists for `qed-verify`, which reads an export rather than a
+    running instance.
+    """
+    configured = config.evidence.signing_key
+    if not configured:
+        return load_signer(directory)
+    path = Path(configured).expanduser()
+    if path.is_dir():
+        # A directory is the laptop layout, so accept it rather than making
+        # somebody read this function to find out which one is meant.
+        return load_signer(path)
+    return FileSigner.load(path)
+
+
 def open_session(
     *,
     directory: Path = DEFAULT_DIR,
@@ -144,7 +177,7 @@ def open_session(
     # belongs to another instance, a policy error. The store has to be closed on
     # every one of those paths or the CLI leaks a file handle per invocation.
     try:
-        signer = load_signer(directory)
+        signer = open_signer(config, directory)
         writer = ChainWriter(
             store,
             signer,
@@ -217,6 +250,21 @@ def _record_bundle_once(session: Session) -> None:
     )
 
 
+#: Exit codes for the commands that carry a verdict (SPEC §12.5). Named
+#: because a CI job branches on them, and because the numbers are a contract:
+#: changing one silently turns somebody's `if [ $? -eq 3 ]` into the opposite
+#: of what they wrote.
+#:
+#: 1 is kept for "QED could not decide" -- a missing key, an unreadable
+#: proposal, a broken bundle -- so a pipeline can tell a refusal from a
+#: malfunction. Conflating them would let a misconfigured runner look like a
+#: policy that allows everything.
+EXIT_ALLOW: Final = 0
+EXIT_ERROR: Final = 1
+EXIT_BLOCK: Final = 2
+EXIT_APPROVAL: Final = 3
+
+
 #: Used when no rule named a timeout. Long enough for somebody to look, short
 #: enough that an unanswered request stops blocking an agent for a whole shift.
 APPROVAL_TIMEOUT_DEFAULT = timedelta(minutes=15)
@@ -236,10 +284,17 @@ class CheckOutcome:
 
     @property
     def exit_code(self) -> int:
-        """0 allow, 2 approval needed, 3 blocked. Shadow mode always allows."""
-        return {Decision.ALLOW: 0, Decision.REQUIRE_APPROVAL: 2, Decision.BLOCK: 3}[
-            self.effective_decision
-        ]
+        """SPEC §12.5: 0 ALLOW, 2 BLOCK, 3 REQUIRE_APPROVAL.
+
+        Shadow mode always exits 0, because `effective_decision` is ALLOW
+        there: a pipeline that failed in shadow mode would make shadow mode
+        useless as a way to find out what a policy would do.
+        """
+        return {
+            Decision.ALLOW: EXIT_ALLOW,
+            Decision.BLOCK: EXIT_BLOCK,
+            Decision.REQUIRE_APPROVAL: EXIT_APPROVAL,
+        }[self.effective_decision]
 
 
 def _resolve_approval(

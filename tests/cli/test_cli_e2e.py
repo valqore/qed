@@ -24,7 +24,10 @@ from qed.core.schemas import Decision
 runner = CliRunner()
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "proposals" / "prod-db-drop.json"
 
-ALLOW_EXIT, APPROVAL_EXIT, BLOCK_EXIT, ERROR_EXIT = 0, 2, 3, 1
+# SPEC §12.5. Imported rather than restated would be circular-ish here: the
+# point of writing the numbers out is that a CI job writes them out too, so a
+# change to the constants has to fail a test rather than quietly agree.
+ALLOW_EXIT, BLOCK_EXIT, APPROVAL_EXIT, ERROR_EXIT = 0, 2, 3, 1
 
 
 def write_proposal(path: Path, patch: dict[str, object] | None = None) -> Path:

@@ -161,6 +161,19 @@ def test_enforce_mode_answers_202_for_an_approval(
     assert response.json()["enforced"] is True
     assert response.json()["effective_decision"] == "REQUIRE_APPROVAL"
 
+    # SPEC §13's optional `approval?`. Without it an adapter holding a 202
+    # would have to call `GET /v1/approvals/{id}` before it could say anything
+    # useful at all -- and it does not know the id yet, which is the point.
+    approval = response.json()["approval"]
+    assert approval is not None, "a 202 with no approval is a 202 nobody can act on"
+    assert approval["approval_id"] == response.json()["verdict"]["approval_id"]
+    assert approval["status"] == "pending"
+    assert approval["poll"] == f"/v1/approvals/{approval['approval_id']}"
+    assert approval["expires_at"].endswith("Z")
+    assert approval["approvers"], "the rule named who may decide; so must this"
+    # Not the approver view: the adapter already has the proposal it submitted.
+    assert "request" not in approval
+
 
 def test_a_replayed_proposal_id_is_a_conflict(signed: Signer) -> None:
     """SPEC §17: ids are single-use, and the second attempt writes nothing."""

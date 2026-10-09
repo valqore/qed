@@ -1,0 +1,172 @@
+# Defaults for the qed chart.
+#
+# Two choices here are deliberately *not* convenient, and both are the same
+# choice twice: the chart will not invent an evidence signing key, and it will
+# not run more than one replica on SQLite. Everything else has a working
+# default.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/valqore/qed
+  # Empty means "use .Chart.AppVersion". A chart whose default is `latest`
+  # installs something different every week, and the chain records
+  # `engine_version` for every decision it makes.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# qed.yaml
+# ---------------------------------------------------------------------------
+# Rendered into a ConfigMap and mounted read-only. Anything the schema accepts
+# goes here *except* secrets: every credential is named by environment
+# variable, so this file stays safe to commit and to read with `kubectl get
+# configmap -o yaml`.
+config:
+  instance_id: qed
+  # `shadow` on purpose. A kernel installed in enforce mode starts refusing
+  # actions before anybody has seen what its rules do, and the first thing an
+  # operator learns about QED should not be an outage. SPEC §22 week 2's
+  # criterion is shadow→enforce as a config change, which is this line.
+  mode: shadow
+  default_verdict: ALLOW
+  environment_profile: prod
+  evidence:
+    masking: default
+
+# Extra environment variables, for the credentials `config` refers to by name:
+#   extraEnv:
+#     - name: QED_ADAPTER_SECRET
+#       valueFrom:
+#         secretKeyRef: {name: qed-adapters, key: mcp-proxy}
+extraEnv: []
+extraEnvFrom: []
+
+# ---------------------------------------------------------------------------
+# Evidence signing key (SPEC §17)
+# ---------------------------------------------------------------------------
+# `readyz` is false without one, and the pod will say so rather than start
+# deciding. The chart does not generate one: a key created by an install hook
+# lives in whatever the hook wrote it to, and a key created per pod would start
+# a new chain on every restart whose genesis claimed to be the same instance.
+#
+#   qed keys init --dir ./qed-keys
+#   kubectl create secret generic qed-signing-key \
+#     --from-file=evidence-key.pem=./qed-keys/evidence-key.pem
+#
+# Keep ./qed-keys/public/ -- that is what an auditor verifies an export
+# with, and it is the half that is safe to publish.
+signingKey:
+  # Name of an existing secret holding the private key. Required.
+  existingSecret: ""
+  # The key within that secret. Only the private half is mounted: the
+  # public one is derived from it, and the `public/` directory exists for
+  # `qed-verify`, which reads an export rather than a running instance.
+  privateKeyKey: evidence-key.pem
+
+# ---------------------------------------------------------------------------
+# Evidence store
+# ---------------------------------------------------------------------------
+# `sqlite` is one process writing for itself: zero configuration, and a hard
+# ceiling of one replica. `postgres` is what SPEC §15 and §104 are about --
+# every replica decides, exactly one holds the advisory lock and drains the
+# outbox into the chain (ADR-0009).
+evidence:
+  backend: sqlite # sqlite | postgres
+
+  sqlite:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      existingClaim: ""
+
+  postgres:
+    # The DSN never appears in a manifest: it carries a password, and the
+    # config file names the variable instead (`store_env`).
+    existingSecret: ""
+    secretKey: dsn
+    env: QED_DATABASE_URL
+
+# ---------------------------------------------------------------------------
+# Policies
+# ---------------------------------------------------------------------------
+# The baseline pack ships in the image and is always loaded. These are the
+# operator's own rules on top of it.
+policies:
+  # Name of a ConfigMap whose keys are YAML rule files.
+  existingConfigMap: ""
+  mountPath: /etc/qed/policies
+
+service:
+  type: ClusterIP
+  port: 8710
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: qed.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    memory: 512Mi
+
+# Matches the container's own `USER 65532:65532` (distroless nonroot). Set
+# here as well so a cluster with a restrictive admission policy sees it
+# declared rather than inherited.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# `readyz` is the gate: it is false without a signing key and false with a
+# broken policy bundle, so a bad rollout stops at the first pod instead of
+# replacing a working deployment with one that cannot decide.
+probes:
+  liveness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 5
+
+podDisruptionBudget:
+  # Only meaningful above one replica, which only Postgres allows.
+  enabled: false
+  minAvailable: 1
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

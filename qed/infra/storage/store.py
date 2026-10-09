@@ -651,10 +651,18 @@ class SqlStore:
                 self._conn.execute(
                     "INSERT INTO budget_daily (principal_hash, day, steps_used, "
                     "tokens_used, money_used_cents) VALUES (?,?,?,?,?) "
+                    # The existing row's columns are qualified with the table
+                    # name. SQLite accepts the bare name; PostgreSQL calls it
+                    # ambiguous and refuses the statement, because `excluded`
+                    # has a column of the same name -- which is exactly what
+                    # the expression is adding. The only upsert in this file
+                    # that accumulates rather than replaces, and so the only
+                    # one where the distinction arises.
                     "ON CONFLICT(principal_hash, day) DO UPDATE SET "
-                    "steps_used = steps_used + excluded.steps_used, "
-                    "tokens_used = tokens_used + excluded.tokens_used, "
-                    "money_used_cents = money_used_cents + excluded.money_used_cents",
+                    "steps_used = budget_daily.steps_used + excluded.steps_used, "
+                    "tokens_used = budget_daily.tokens_used + excluded.tokens_used, "
+                    "money_used_cents = budget_daily.money_used_cents "
+                    "+ excluded.money_used_cents",
                     (
                         principal_hash,
                         stamp[:10],

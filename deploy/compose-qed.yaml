@@ -1,0 +1,22 @@
+# qed.yaml for the docker-compose HA stack. See docker-compose.yml.
+instance_id: qed-compose
+
+# Shadow on purpose: the point of the stack is to watch two replicas write one
+# chain, not to have a laptop refuse things.
+mode: shadow
+default_verdict: ALLOW
+environment_profile: dev
+
+evidence:
+  # Named, not inlined: a DSN carries a password, and a config file is a file
+  # somebody commits.
+  store_env: QED_DATABASE_URL
+  masking: default
+
+# One adapter, so the stack is usable end to end. The secret is named, never
+# written here: `qed check --server` and the SDK both read it from the
+# environment, which is the same discipline a cluster uses.
+adapters:
+  - adapter_id: adp_compose
+    secret_env: QED_ADAPTER_SECRET
+    kind: mcp

@@ -1,0 +1,95 @@
+# The HA path, on a laptop (SPEC §15, §104, §797).
+#
+# Two qed replicas and a PostgreSQL. Both replicas serve the API and decide;
+# exactly one holds `pg_try_advisory_lock(1734440037)` and drains the evidence
+# outbox into the chain (ADR-0009). Kill the leader and watch the other take
+# over -- the whole point of the arrangement is that nothing has to be done
+# about it.
+#
+# This is a development stack. Two things here would be wrong in production and
+# are called out below: the database password is in this file, and both
+# replicas share one signing key from a bind mount.
+#
+#   # once, to create the key pair the replicas share
+#   qed keys init --dir ./state
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#   curl -s localhost:8710/readyz | jq
+#   curl -s localhost:8711/readyz | jq
+#
+#   # which one is draining:
+#   curl -s localhost:8710/v1/status
+#
+#   # kill the leader; the chain continues on the other replica
+#   docker compose -f deploy/docker-compose.yml kill qed-a
+#
+# For the Keycloak stack (OIDC delegation and the approval page's human login)
+# see deploy/keycloak/docker-compose.yml.
+
+name: qed
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      # Development only. In a cluster this is a Secret the chart reads by
+      # name, and the DSN never appears in a manifest at all.
+      POSTGRES_PASSWORD: qed-dev
+      POSTGRES_DB: qed
+    ports:
+      # Not 5432: a developer machine usually already has one, and a stack
+      # that refuses to start because of a port clash is a stack nobody tries
+      # twice.
+      - "55433:5432"
+    healthcheck:
+      # The replicas' `depends_on` waits for this: a qed that starts before the
+      # database is ready would fail its first migration and restart, which
+      # looks like a broken image rather than a race.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d qed"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - qed-pgdata:/var/lib/postgresql/data
+
+  qed-a: &replica
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      QED_DATABASE_URL: postgresql://postgres:qed-dev@postgres:5432/qed
+      # Development only. Both replicas share it because they are one
+      # instance as far as an adapter is concerned.
+      QED_ADAPTER_SECRET: compose-dev-secret-not-for-anything-real
+    ports:
+      - "8710:8710"
+    volumes:
+      # One key, shared, because the chain is one chain: whichever replica is
+      # leading signs, and a record signed by a key the others do not have
+      # would make the export unverifiable from the next record on.
+      #
+      # In a cluster this is a Secret mounted read-only; here it is a bind
+      # mount so `qed keys init` on the host is enough to get started.
+      - ./state:/var/lib/qed:ro
+      - ./compose-qed.yaml:/etc/qed/qed.yaml:ro
+    command:
+      - serve
+      - --dir
+      - /var/lib/qed
+      - --config
+      - /etc/qed/qed.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8710"
+
+  qed-b:
+    <<: *replica
+    ports:
+      - "8711:8710"
+
+volumes:
+  qed-pgdata:

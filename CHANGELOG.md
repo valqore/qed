@@ -6,6 +6,182 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - the outbox and one chain leader (SPEC 10.3, 15, 104; week 6)
+
+PostgreSQL made it possible to share a chain between replicas. This makes it
+safe.
+
+The chain is the obstacle. Every record carries `seq` and `prev_hash`, so
+appending means reading the tip, computing the next link and writing -- and two
+replicas doing that concurrently read the same tip. Either the primary key on
+`hash` refuses the loser, and a decision that was already delivered has no
+evidence, or both commit and the chain forks. **A forked chain still verifies
+record by record.** It just stops being a chain, and nothing says so until
+somebody walks it.
+
+Holding the lock across each decision would fix that and lose the reason for
+having replicas: decision latency would become chain latency plus contention,
+against SPEC 18's p95 < 50 ms. So the two guarantees are separated. "No
+decision without a record" is satisfied by **durability**, not by chaining.
+
+- **`ChainWriter` gained a `write_mode`.** In `deferred` mode `append()` masks
+  the payload, writes it to `evidence_outbox` and returns an `Appended`
+  carrying a reference instead of a record. Masking happens at enqueue time
+  because the outbox is durable storage like any other.
+- **The backend chooses the mode**, not a flag. Postgres exists in this design
+  for more than one replica, and more than one direct writer forks the chain; a
+  flag would be a way to configure the fork back into existence.
+- **`qed/infra/chain_drain.py`** assigns `seq`, `prev_hash`, `hash` and the
+  signature in batches of at most 100, one transaction per batch, reading the
+  tip inside that transaction. A row it cannot parse rolls the batch back and
+  is reported; it is never deleted. Dropping it would turn a parsing bug into a
+  missing record, which is the one outcome the chain must never produce
+  quietly.
+- **`qed/api/leader.py`** is the loop around that drain, started from the app's
+  lifespan on the deferred path only. It re-asks `pg_try_advisory_lock` every
+  two seconds rather than remembering leadership: the lock can be lost without
+  this process being told -- a connection reset, a failover, an administrator
+  running `pg_advisory_unlock_all` -- and a replica appending on a stale belief
+  is precisely the fork the lock exists to prevent. It never *blocks* on the
+  lock either; a follower that blocked would hold a connection waiting for a
+  leader to die, then wake up holding it with no idea how long it had waited.
+- **Genesis and checkpoints stay direct**, even in deferred mode. Record 0 has
+  nothing to be ordered against, and a chain whose first record was queued
+  behind others would be a chain with no beginning.
+- **`runtime.settle()`** drains on the way out of a one-shot command. `qed
+  check` enqueues and exits, so without this a CLI-only Postgres deployment
+  would have a chain that never advanced.
+
+Verified against a real PostgreSQL 17 and then against two real containers.
+`tests/evidence/test_ha_outbox.py` runs two connections and asserts the
+property: no gaps, no duplicate sequence numbers, nothing lost, a leader killed
+mid-stream and taken over by the survivor, and an export of the result
+verifying through `qed-verify` -- which has never heard of replicas, outboxes
+or leaders. ADR-0009 records the design and the three alternatives rejected.
+
+### Changed - `evidence_ref` is a reference, not always a sequence number
+
+`GET /v1/evidence/by-ref/{ref}` now resolves both shapes, and answers
+`200 {"seq": null, "pending": true}` for a record that is queued. Not 404: the
+record exists and is durable, a 404 would tell a caller their evidence was
+lost, and an integration retrying on 404 would give up on a record that was
+about to arrive.
+
+`chain_status` -- so `qed status` and `GET /v1/status` both -- now reports
+`store`, `write_mode` and `chain_lag_records`, which is SPEC 18's
+`qed_chain_lag_records` until there is a `/metrics` endpoint to carry it. A
+depth that keeps growing means the leader is gone, or is losing the lock faster
+than it can drain.
+
+### Changed - `qed check` exit codes now match SPEC 12.5
+
+**`2` is BLOCK and `3` is REQUIRE_APPROVAL.** They were the other way round
+since week 1, which was a guess made before the spec section was read closely,
+and it also disagreed with the Claude Code hook's own `EXIT_BLOCK = 2`. Nothing
+is released, so this is corrected rather than documented as a deviation.
+
+`1` remains "QED could not decide" -- a missing key, an unreadable proposal, an
+unreachable instance. That distinction is the one a pipeline cannot do without:
+a refusal is not a malfunction, and conflating them lets a misconfigured runner
+look like a policy that allows everything.
+
+### Added - `qed check` in CI (SPEC 12.5)
+
+- **`--server URL`** decides on an instance instead of locally, over a
+  HMAC-signed request (`qed/adapters/remote.py`). This is the mode that makes
+  sense in CI: no evidence signing key in the runner, the evidence outlives the
+  build, and the rules that gate CI are the rules that gate everything else. An
+  instance that cannot be reached exits `1` and never `0` -- "probably allowed"
+  is the failure this project exists to prevent.
+- **`--evidence-out PATH`** writes the chain as JSONL after a local decision,
+  so an ephemeral runner leaves something `qed-verify` can check. The whole
+  chain, not just the verdict: verification walks linkage from genesis.
+- `docs/ci.md` has the exit-code table, both modes and a GitHub Actions
+  workflow.
+
+### Added - Helm chart (`deploy/helm/qed`, SPEC 104, 24)
+
+Four things it **refuses to install**, because each is otherwise discovered at
+runtime where the symptom is a CrashLoop or a forked chain:
+
+- no evidence signing key -- and the chart will not generate one, because a key
+  created by an install hook lives wherever the hook wrote it and one created
+  per pod starts a new chain on every restart;
+- `replicaCount > 1` on SQLite;
+- `evidence.backend: postgres` with no secret holding the DSN;
+- SQLite with persistence disabled.
+
+Defaults chosen to be safe rather than convenient: `mode: shadow`, the image
+tag pinned to the chart's `appVersion` rather than `latest`, a read-only root
+filesystem with one writable mount, `helm.sh/resource-policy: keep` on the
+evidence volume, a ConfigMap checksum that rolls the pods when the policy
+bundle changes, and no service account token. `tests/deploy/test_helm_chart.py`
+renders the chart with `helm template` and parses it.
+
+`deploy/docker-compose.yml` is the same topology on a laptop: two replicas, one
+PostgreSQL, one chain. Kill the leader and watch the other take over.
+
+### Added - `evidence.signing_key`
+
+The config field existed and was never read. It now names the private key
+wherever it is, which is what a container needs: the chain is on a writable
+volume or in a database, the key arrives from a read-only secret mount, and
+nesting one inside the other to satisfy a fixed filename is the sort of
+arrangement that works until a kubelet orders the mounts differently.
+
+### Fixed - the container had never actually run
+
+Both of these passed every check in the repository and failed the moment
+anybody started the image.
+
+- **The runtime base was `distroless/python3-debian12`, which ships Python
+  3.11**, while the builder installed wheels for 3.12. The 3.12 extension
+  modules landed beside a 3.11 interpreter that could not load them, and the
+  first symptom was `ImportError: cannot import name 'ArgsKwargs' from
+  'pydantic_core._pydantic_core' (unknown location)`. The runtime is now
+  `distroless/base-debian12` with the interpreter copied from the builder and
+  its shared-library closure computed by `ldd` (`deploy/stage-libs.sh`) rather
+  than listed -- a hand-written list of Debian libraries goes stale on the next
+  base bump and fails at import time in production.
+- **`qed/compliance/frameworks.yaml` was missing from `package-data`**, so it
+  was absent from the wheel, so the image started, bound its port and died on
+  the first request with a `FileNotFoundError` pointing inside site-packages.
+  `tests/test_packaging.py` now checks the `package-data` patterns against what
+  is on disk, so a new data file that is not listed fails here instead of in
+  somebody's cluster.
+
+The image also now includes the `postgres` extra: which backend an operator
+uses is a property of the deployment, not of the artifact they were handed.
+
+`tests/deploy/test_container.py` builds the image and starts it -- CLI, every
+runtime import, the packaged data files, and a decision whose chain is verified
+on the host. Marked `slow` and skipped without a Docker daemon; CI runs it in
+its own `deploy` job.
+
+### Fixed - `charge_budget`'s daily rollup was refused by PostgreSQL
+
+`ON CONFLICT ... DO UPDATE SET steps_used = steps_used + excluded.steps_used`.
+SQLite accepts the bare column; PostgreSQL calls it ambiguous, because
+`excluded` has a column of the same name -- which is exactly what the
+expression is adding. The existing column is now qualified with the table name.
+
+It is the only upsert in the store that accumulates rather than replaces, and
+the cross-backend test that should have caught it called `charge_budget`
+without a `principal_hash`, so the branch never ran. The argument is now the
+point of that test, and a second test drives a whole decision -- the same
+`check_proposal` the API calls -- against PostgreSQL, so the next
+dialect divergence in any method on that path fails in CI rather than in a
+container.
+
+### Added - a 202 now carries the approval it opened
+
+`POST /v1/proposals` filled `"approval": null` unconditionally, a week-1
+placeholder that week 4 never came back to. SPEC 13's optional `approval?` is
+now populated with the id, status, approvers, expiry and poll path. Without it
+an adapter holding a 202 would have to call `GET /v1/approvals/{id}` before it
+could say anything useful -- and it does not know the id yet, which is the
+point.
+
 ### Added - the PostgreSQL backend (SPEC 15, week 6)
 
 ```yaml

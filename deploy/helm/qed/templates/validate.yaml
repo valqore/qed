@@ -1,0 +1,28 @@
+{{/*
+Install-time refusals.
+
+Each of these is something the pod would otherwise discover at runtime, where
+the symptom is a CrashLoop or -- far worse -- a chain that forks. `helm
+install` is the last moment at which the answer can be a sentence instead of a
+pager.
+*/}}
+
+{{- if not .Values.signingKey.existingSecret }}
+{{- fail "\nsigningKey.existingSecret is required.\n\nQED refuses to start without an evidence signing key (SPEC §17): an unsigned decision is not evidence, and `readyz` stays false.\n\nThe chart will not generate one. A key created by an install hook lives wherever the hook wrote it, and a key created per pod starts a new chain on every restart whose genesis claims to be the same instance.\n\n  qed keys init --dir ./qed-keys\n  kubectl create secret generic qed-signing-key \\\n    --from-file=evidence-key.pem=./qed-keys/evidence-key.pem\n\nKeep ./qed-keys/public/ -- that is what an auditor verifies an export with.\n" }}
+{{- end }}
+
+{{- if not (has .Values.evidence.backend (list "sqlite" "postgres")) }}
+{{- fail (printf "evidence.backend must be sqlite or postgres, got %q" .Values.evidence.backend) }}
+{{- end }}
+
+{{- if and (eq .Values.evidence.backend "sqlite") (gt (int .Values.replicaCount) 1) }}
+{{- fail (printf "\nreplicaCount is %d with evidence.backend=sqlite.\n\nSQLite is one process writing for itself. Two replicas would each read the chain tip, each compute the same next `seq` and `prev_hash`, and either collide on the hash primary key -- losing the evidence for a decision already delivered -- or, worse, fork the chain. A forked chain still verifies record by record; it just stops being a chain.\n\nFor more than one replica use evidence.backend=postgres, where exactly one replica holds pg_try_advisory_lock(1734440037) and drains the outbox (SPEC §104, ADR-0009).\n" (int .Values.replicaCount)) }}
+{{- end }}
+
+{{- if and (eq .Values.evidence.backend "postgres") (not .Values.evidence.postgres.existingSecret) }}
+{{- fail "\nevidence.postgres.existingSecret is required when evidence.backend=postgres.\n\nThe DSN carries a password, so it is never rendered into a manifest; qed.yaml names the environment variable instead.\n\n  kubectl create secret generic qed-db --from-literal=dsn='postgresql://user:pass@host:5432/qed'\n" }}
+{{- end }}
+
+{{- if and (eq .Values.evidence.backend "sqlite") (not .Values.evidence.sqlite.persistence.enabled) }}
+{{- fail "\nevidence.backend=sqlite with persistence disabled would put the evidence chain on an ephemeral filesystem, where it is deleted with the pod.\n\nSet evidence.sqlite.persistence.enabled=true, or use evidence.backend=postgres.\n" }}
+{{- end }}

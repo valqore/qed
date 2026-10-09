@@ -30,7 +30,7 @@ hardware, including air-gapped.
 
 ## Status
 
-**Weeks 1–5 of the §22 build order are complete**, bar the week-4 web approval page. What works today:
+**Weeks 1–6 of the §22 build order are complete.** What works today:
 
 | Capability | Entry point |
 |---|---|
@@ -49,12 +49,16 @@ hardware, including air-gapped.
 | **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
 | **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
 | **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
+| **Web approval page** with OIDC human login | `qed/api/ui.py`, [`valqore/qed-ui`](https://github.com/valqore/qed-ui) |
+| **HA**: evidence outbox + one chain leader on Postgres | `qed/infra/chain_drain.py`, `qed/api/leader.py` |
+| **`qed check --server`** and `--evidence-out` for CI | `docs/ci.md` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
+| **Helm chart** and a two-replica compose stack | `deploy/helm/qed`, `deploy/docker-compose.yml` |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint` | `qed/cli.py` |
 
-Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2), the chain
-leader's outbox drain, Helm, `mode: mitm` for the HTTP proxy, compliance packs
-beyond the baseline, and SPEC §19's live-stream and budget pages.
+Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
+`mode: mitm` for the HTTP proxy, compliance packs beyond the baseline, and
+SPEC §19's live-stream and budget pages.
 
 ## Quick start
 
@@ -172,6 +176,30 @@ they did not, an export from a Postgres deployment would fail verification
 against records written on SQLite, and nobody would notice until an auditor
 did.
 
+### Run more than one replica
+
+```bash
+helm install qed ./deploy/helm/qed   --set signingKey.existingSecret=qed-signing-key   --set replicaCount=3   --set evidence.backend=postgres   --set evidence.postgres.existingSecret=qed-db
+```
+
+Every replica serves the API and decides. The decider writes its record
+durably to an outbox and answers immediately; exactly one replica holds
+`pg_try_advisory_lock(1734440037)` and turns those records into chain entries
+afterwards (ADR-0009). So **decision latency is independent of chain latency**,
+and `evidence_ref` may be an outbox id until the leader catches up —
+`GET /v1/evidence/by-ref/{ref}` resolves either shape.
+
+Kill the leader and its connection drops, the lock is released, and another
+replica takes over on its next tick. Nothing has to notice, announce or hand
+over. `deploy/docker-compose.yml` is the same arrangement on a laptop, if you
+would rather watch it happen than read about it.
+
+The chart **refuses** `replicaCount > 1` on SQLite. Two writers would read the
+same chain tip and either collide on the hash primary key — losing the evidence
+for a decision already delivered — or fork the chain, which still verifies
+record by record and has simply stopped being a chain. `docs/deployment.md` has
+the rest.
+
 ### Run the API
 
 ```bash
@@ -181,6 +209,24 @@ curl -s localhost:8710/readyz | jq
 
 `/readyz` answers 503 until there is a signing key and a way to authenticate
 adapters (SPEC §17). Adapters sign each request; see `docs/api.md`.
+
+### Put it in your pipeline
+
+```bash
+export QED_URL=https://qed.internal
+export QED_ADAPTER_ID=adp_ci QED_ADAPTER_SECRET=...
+qed check deploy-proposal.json
+```
+
+Exit `0` ALLOW, `2` BLOCK, `3` REQUIRE_APPROVAL — and `1` when QED could not
+decide at all, which is the distinction a pipeline cannot do without: a runner
+that could not reach the instance has not been refused anything, and reading
+that as an allow is the failure this whole project exists to prevent.
+
+`--server` keeps the evidence signing key out of CI and the evidence itself
+alive after the job. Without an instance, `--evidence-out qed-evidence.jsonl`
+leaves the chain behind as an artifact anyone can check with the public key.
+`docs/ci.md` has the Actions workflow.
 
 ## Reading order
 
@@ -193,6 +239,8 @@ adapters (SPEC §17). Adapters sign each request; see `docs/api.md`.
 5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
    `docs/assurance-classes.md`, `docs/policy-testing.md`.
+6. Running it: `docs/deployment.md` (process, container, Helm, HA) and
+   `docs/ci.md` (`qed check` in a pipeline).
 
 `ARCHITECTURE_PLAN.md` is **superseded**; only its §16 (Valqore site/README
 fixes) is still live, and that work belongs to the Valqore repos, not here.

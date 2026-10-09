@@ -5,8 +5,10 @@ missing ones are absent rather than stubbed -- a command that prints "not
 implemented" is worse than one that does not exist, because it ends up in
 somebody's script.
 
-``check`` exit codes: 0 ALLOW, 2 REQUIRE_APPROVAL, 3 BLOCK, 1 error. In shadow
-mode the decision is recorded and the exit code is 0 (ADR-003).
+``check`` exit codes (SPEC §12.5): 0 ALLOW, 2 BLOCK, 3 REQUIRE_APPROVAL, 1
+error. In shadow mode the decision is recorded and the exit code is 0
+(ADR-003), because a pipeline that failed in shadow mode would make shadow mode
+useless as a way to find out what a policy would do.
 
 ``mcp`` is the one command that must not print to stdout: stdout is the MCP
 transport, and a stray line of status text there is a protocol error that
@@ -16,6 +18,7 @@ presents to the user as "the server crashed". Everything it says goes to stderr.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, cast
@@ -38,11 +41,16 @@ from qed.core.schemas import (
 )
 from qed.infra.keys.file import PUBLIC_DIR_NAME, MissingSigningKey, init_keys
 from qed.runtime import (
+    EXIT_ALLOW,
+    EXIT_APPROVAL,
+    EXIT_BLOCK,
     DuplicateProposal,
     PolicyErrors,
+    Session,
     chain_status,
     check_proposal,
     open_session,
+    settle,
 )
 
 if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
@@ -123,12 +131,57 @@ def check(
     ] = None,
     mandate_file: Annotated[Path | None, typer.Option("--mandate", help="Mandate as JSON.")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit the verdict as JSON.")] = False,
+    server: Annotated[
+        str | None,
+        typer.Option(
+            "--server",
+            envvar="QED_URL",
+            help="Decide on a QED instance instead of locally. The evidence lives there.",
+        ),
+    ] = None,
+    adapter_id: Annotated[
+        str | None,
+        typer.Option("--adapter-id", envvar="QED_ADAPTER_ID", help="With --server."),
+    ] = None,
+    adapter_secret_env: Annotated[
+        str,
+        typer.Option(
+            "--adapter-secret-env",
+            help="Environment variable holding the adapter secret. With --server.",
+        ),
+    ] = "QED_ADAPTER_SECRET",
+    evidence_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--evidence-out",
+            help=(
+                "Write the chain to this file as JSONL after deciding locally, so an "
+                "ephemeral runner leaves something `qed-verify` can check."
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Decide one proposal, append proposal and verdict to the chain."""
+    """Decide one proposal, append proposal and verdict to the chain.
+
+    Exit 0 ALLOW, 2 BLOCK, 3 REQUIRE_APPROVAL, 1 if QED could not decide at
+    all (SPEC §12.5). The last one is separate on purpose: a pipeline has to
+    be able to tell a refusal from a misconfigured runner, and conflating them
+    would let a missing signing key read as a policy that allows everything.
+    """
     try:
         proposal = ActionProposal.model_validate_json(proposal_file.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         _fail(f"cannot read proposal: {exc}")
+        return
+
+    if server:
+        _check_remote(
+            proposal,
+            server=server,
+            adapter_id=adapter_id,
+            adapter_secret_env=adapter_secret_env,
+            as_json=as_json,
+        )
         return
 
     budget = (
@@ -192,8 +245,100 @@ def check(
             if hit.fix:
                 typer.echo(f"      fix: {hit.fix}")
 
+    if evidence_out is not None:
+        _write_evidence_artifact(session, evidence_out, as_json=as_json)
+
     session.close()
     raise typer.Exit(outcome.exit_code)
+
+
+def _check_remote(
+    proposal: ActionProposal,
+    *,
+    server: str,
+    adapter_id: str | None,
+    adapter_secret_env: str,
+    as_json: bool,
+) -> None:
+    """``qed check --server`` (SPEC §12.5): somebody else decides and keeps the record.
+
+    This is the mode that makes sense in CI. The local path needs a signing key
+    in the runner and leaves the chain in a workspace that is deleted with the
+    build, so the evidence for a decision that gated a deployment would live
+    for the length of one job.
+    """
+    from qed.adapters.remote import RemoteError, submit
+
+    secret = os.environ.get(adapter_secret_env, "")
+    if not adapter_id or not secret:
+        _fail(
+            f"--server needs an adapter identity: --adapter-id (or QED_ADAPTER_ID) and "
+            f"the secret in ${adapter_secret_env}. Register it on the instance first "
+            f"with `qed adapters add` (SPEC §12.6); an unknown adapter is refused "
+            f"with AG-IDN-005."
+        )
+        return
+
+    try:
+        remote = submit(proposal, url=server, adapter_id=adapter_id, adapter_secret=secret)
+    except RemoteError as exc:
+        # Exit 1 and not 2. An instance that could not be reached has not
+        # refused anything, and a pipeline that read this as a BLOCK would
+        # report a policy violation that no policy produced.
+        _fail(str(exc))
+        return
+
+    if as_json:
+        typer.echo(json.dumps(remote.raw, indent=2))
+    else:
+        colour = {
+            Decision.ALLOW: typer.colors.GREEN,
+            Decision.REQUIRE_APPROVAL: typer.colors.YELLOW,
+            Decision.BLOCK: typer.colors.RED,
+        }[remote.decision]
+        typer.secho(remote.decision.value, fg=colour, bold=True)
+        if not remote.enforced:
+            typer.echo("  (shadow mode on the server: recorded, not enforced)")
+        typer.echo(f"  decided by   : {server}")
+        typer.echo(f"  evidence ref : {remote.evidence_ref}")
+        if remote.approval_id:
+            typer.echo(f"  approval     : {remote.approval_id}")
+        verdict = remote.raw.get("verdict")
+        if isinstance(verdict, dict):
+            for hit in verdict.get("hits", []):
+                if isinstance(hit, dict):
+                    typer.echo(f"  ! {hit.get('rule_id')} {hit.get('message')}")
+
+    raise typer.Exit(
+        {
+            Decision.ALLOW: EXIT_ALLOW,
+            Decision.BLOCK: EXIT_BLOCK,
+            Decision.REQUIRE_APPROVAL: EXIT_APPROVAL,
+        }[remote.effective_decision]
+    )
+
+
+def _write_evidence_artifact(session: Session, path: Path, *, as_json: bool) -> None:
+    """Export the chain so the decision outlives the runner (SPEC §12.5).
+
+    The whole chain and not just this verdict: `qed-verify` walks linkage from
+    genesis, so a file holding only the last two records is a file that cannot
+    be verified. A CI chain is short by nature -- it starts at genesis in a
+    fresh workspace -- so there is nothing to trim.
+    """
+    # Queued records have no sequence number yet, and an export missing them
+    # would be a gap `qed-verify` reports as a broken chain.
+    settle(session)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(to_jsonl(session.store.iter_evidence()), encoding="utf-8")
+    except OSError as exc:
+        # Loud, and not fatal: the verdict has already been printed and the
+        # exit code is about the policy, not about a full disk.
+        typer.secho(f"could not write {path}: {exc}", fg=typer.colors.RED, err=True)
+        return
+    if not as_json:
+        typer.echo(f"  evidence     : {path} ({session.store.count_evidence()} records)")
 
 
 # -------------------------------------------------------------------- policy
