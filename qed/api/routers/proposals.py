@@ -303,6 +303,15 @@ def _parse_result(body: bytes) -> dict[str, object]:
     error = raw.get("error")
     if isinstance(error, str) and error:
         report["error"] = error[:2048]
+    # Not in SPEC §13's list, which predates two of the three adapters. The MCP
+    # proxy and the HTTP proxy both record `duration_ms` when they write to the
+    # chain directly, so an adapter reporting through the API could not and an
+    # auditor would see the field on some execution_result rows and not others
+    # for no reason a reader could explain. Still an allowlist: an adapter does
+    # not get to put arbitrary keys in the chain.
+    duration = raw.get("duration_ms")
+    if isinstance(duration, int | float) and not isinstance(duration, bool) and duration >= 0:
+        report["duration_ms"] = round(float(duration), 3)
     cost = raw.get("cost_actual")
     if isinstance(cost, dict):
         report["cost_actual"] = {

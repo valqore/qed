@@ -33,14 +33,23 @@ store arriving in week 3 needs no protocol change.
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import hmac
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
 
+# The canonical string and the MAC are a wire format shared with every adapter
+# that signs, so they have one definition and it is not here -- see
+# `qed/adapters/signing.py` for why it sits outside `qed.api`.
+from qed.adapters.signing import (
+    HEADER_ADAPTER,
+    HEADER_NONCE,
+    HEADER_SIGNATURE,
+    HEADER_TIMESTAMP,
+    canonical_string,
+    sign,
+)
 from qed.api.problems import Problem
 from qed.config import AdapterCredential, QedConfig
 from qed.core.schemas import utcnow
@@ -56,11 +65,6 @@ __all__ = [
     "sign",
 ]
 
-HEADER_ADAPTER: Final = "x-qed-adapter-id"
-HEADER_TIMESTAMP: Final = "x-qed-timestamp"
-HEADER_NONCE: Final = "x-qed-nonce"
-HEADER_SIGNATURE: Final = "x-qed-signature"
-
 #: Environment variable prefix used when an adapter is not in ``qed.yaml``.
 #: ``QED_ADAPTER_SECRET_ADP_LAPTOP_ALI`` for adapter id ``adp_laptop_ali``.
 ENV_PREFIX: Final = "QED_ADAPTER_SECRET_"
@@ -68,18 +72,6 @@ ENV_PREFIX: Final = "QED_ADAPTER_SECRET_"
 #: Shortest secret accepted. 32 bytes of entropy, hex or base64, is 43+ chars;
 #: anything shorter is a password someone typed and is not worth guarding.
 MIN_SECRET_LENGTH: Final = 32
-
-
-def canonical_string(*, method: str, path: str, timestamp: str, nonce: str, body: bytes) -> bytes:
-    """The exact bytes both sides MAC. Documented in ``docs/api.md``."""
-    digest = hashlib.sha256(body).hexdigest()
-    return "\n".join([method.upper(), path, timestamp, nonce, digest]).encode("utf-8")
-
-
-def sign(secret: str, canonical: bytes) -> str:
-    """base64url, no padding -- safe in a header without quoting."""
-    mac = hmac.new(secret.encode("utf-8"), canonical, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(mac).decode("ascii").rstrip("=")
 
 
 @dataclass(frozen=True)

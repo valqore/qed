@@ -6,6 +6,86 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - the Python SDK (SPEC 12.4, week 6)
+
+```python
+from qed.sdk import Qed, guard
+
+qed = Qed.from_env()
+
+
+@guard(qed, target=lambda account_id, **_: f"crm:accounts/{account_id}", deletes=True)
+def delete_account(account_id: str) -> None: ...
+```
+
+The fourth adapter, for the action that has no front: a function in your own
+application. The decorator proposes before the call, raises `QedBlocked` or
+`QedApprovalPending` if the answer was no, runs the function, and reports what
+happened. A refused action never runs, and a test asserts the body was not
+entered.
+
+- **`QedUnavailable` is a separate exception from a refusal.** "The policy says
+  no" and "I could not find out what the policy says" are different facts, and
+  an application that treats them the same will eventually treat an outage as
+  permission.
+- **It fails closed by default**, unlike the coding-agent hook. An application
+  has no human watching, so a QED it cannot reach must stop the action.
+  `fail_mode="open"` is a deliberate decision, not a default.
+- **Advisory by default** (ADR-001 class A): whoever can edit the code can
+  delete the decorator. `enforcement="enforcing"` is for when the credential
+  the function needs comes from the broker, so going around QED leaves the
+  function unable to authenticate.
+- `target`, `summary`, `intent` and `params` may each be callables taking the
+  wrapped function's own arguments, because an approver needs to know *which*
+  account is being deleted rather than which function was called.
+- `writes=True` by default. A hint that under-reports the damage routes a
+  destructive call past the blast-radius score; one that over-reports asks a
+  person about a harmless call. Only one of those is recoverable.
+- The wrapped function's own exception is reported and **re-raised untouched**.
+  The application's failure is the application's to handle.
+- `Verdict` is a thin view over the kernel's JSON rather than a second model,
+  so there is nothing here to drift out of step with `qed.core.schemas`.
+- `report()` is the one place in the SDK that swallows an error: the action has
+  already happened, and raising would replace the application's own result with
+  a reporting failure.
+- `examples/sdk/` has governed LangGraph and CrewAI tools. Both run whether or
+  not those frameworks are installed, because a framework tool is an ordinary
+  Python function and that is what `@guard` wraps -- which is also why there is
+  no `qed-langgraph` package to keep in step with somebody else's API.
+
+### Changed - the request signing moved out of `qed/api`
+
+`canonical_string` and `sign` now live in `qed/adapters/signing.py`, with
+`qed/api/auth.py` re-exporting them. The SDK has to sign, and importing
+`qed.api.auth` to do it pulled FastAPI, Starlette, Click and Pydantic into
+whatever application embedded the SDK. An SDK that drags a web framework into
+a LangGraph worker is an SDK people route around, and routing around it means
+their actions stop being recorded.
+
+It cannot live in `qed/core` or `qed/infra`, which are scanned for any mention
+of HMAC so that the evidence chain stays Ed25519-only. Adapter authentication
+is a different problem with a different right answer, and keeping it out of
+those trees is what lets that invariant stay absolute.
+
+`tests/sdk/test_sdk_is_light.py` holds both halves: `import qed.sdk` loads no
+server, and the signer and the verifier still agree byte for byte.
+
+### Fixed - two fields that were on some rows and not others
+
+- `execution_result` reported through `POST /v1/proposals/{id}/result` could
+  not carry `duration_ms`, while both proxies record it when they write to the
+  chain directly. An auditor would have found the field on some rows and not
+  others for no reason a reader could explain. Still an allowlist -- an adapter
+  does not get to put arbitrary keys in the chain.
+- `approval_decided` written by `qed approve` had no `identity`, which the API
+  path has carried since the week-4 work. It now records
+  `cli-asserted:--by`, beside the API's `oidc:<issuer>` and
+  `adapter-asserted:<id>`. Three paths, three strengths, one field. Found by
+  reading the chain after a live SDK run.
+
+82 new tests, 1,764 total.
+
+
 ### Added - the Claude Code hook and `qed install` (SPEC 12.2, week 6)
 
 ```

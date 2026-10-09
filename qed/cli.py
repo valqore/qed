@@ -593,6 +593,12 @@ def approve(
                 payload={
                     "approval_id": approval_id,
                     "refused": violation.rule_id,
+                    # How the approver was established. The API router records
+                    # `oidc:<issuer>` or `adapter-asserted:<id>`; this path is
+                    # whoever ran the command, which is weaker and should say
+                    # so. A field present on some approval_decided rows and
+                    # absent on others would leave an auditor guessing.
+                    "identity": "cli-asserted:--by",
                     "detail": str(violation),
                     "attempted_by_hash": principal_hash(by),
                 },
@@ -618,6 +624,7 @@ def approve(
                 "approval_id": approval_id,
                 "decision": decision.kind.value,
                 "approver_hash": decision.approver_hash,
+                "identity": "cli-asserted:--by",
                 "reason": decision.reason,
                 "window_until": (
                     None if decision.window_until is None else decision.window_until.isoformat()

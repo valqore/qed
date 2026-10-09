@@ -601,3 +601,81 @@ class TestTheBrowserConfiguration:
             payload = bare.get("/.well-known/qed-configuration").json()
         assert len(payload["issuers"]) == 1
         assert payload["issuers"][0]["client_id"] is None
+
+
+class TestEveryApprovalRecordSaysHowTheApproverWasEstablished:
+    """One field, present on every `approval_decided` row.
+
+    Three code paths write that record -- the API with a bearer, the API with
+    an adapter signature, and `qed approve` on the command line -- and the
+    first version of this work left `identity` on the first two and absent on
+    the third. An auditor reading the chain would have found the field on some
+    rows and missing on others, with nothing to tell them whether that meant
+    "asserted by a CLI" or "written before the field existed".
+
+    The three values are deliberately different strengths, which is the point
+    of recording it at all:
+
+    * `oidc:<issuer>` -- an identity provider verified this person;
+    * `adapter-asserted:<adapter_id>` -- an adapter says so, having resolved
+      it some other way (a Slack lookup, a logged-in shell);
+    * `cli-asserted:--by` -- whoever ran the command typed it.
+    """
+
+    def test_a_bearer_decision(self, client: TestClient, qed_dir: Path) -> None:
+        request = pending(client, qed_dir)
+        client.post(
+            f"/v1/approvals/{request.id}",
+            json={"decision": "approve_once"},
+            headers=bearer(token_for()),
+        )
+        assert decided_records(qed_dir)[-1]["identity"] == f"oidc:{IDP}"
+
+    def test_an_adapter_decision(self, client: TestClient, qed_dir: Path) -> None:
+        request = pending(client, qed_dir)
+        Signer(client).post(
+            f"/v1/approvals/{request.id}",
+            {"decision": "approve_once"},
+            headers={"X-QED-Approver": APPROVER, "X-QED-Approver-Groups": "db-oncall"},
+        )
+        assert decided_records(qed_dir)[-1]["identity"] == f"adapter-asserted:{ADAPTER_ID}"
+
+    def test_a_command_line_decision(self, qed_dir: Path, tmp_path: Path) -> None:
+        """`qed approve` goes through `decide` and writes its own record, so it
+        needed the field adding rather than inheriting it."""
+        from typer.testing import CliRunner
+
+        from qed.cli import app
+
+        config = write_config(tmp_path / "cli.yaml")
+        request = pending(None, qed_dir)  # type: ignore[arg-type]
+        result = CliRunner().invoke(
+            app,
+            [
+                "approve",
+                request.id,
+                "--dir",
+                str(qed_dir),
+                "--config",
+                str(config),
+                "--by",
+                APPROVER,
+                "--groups",
+                "db-oncall",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert decided_records(qed_dir)[-1]["identity"] == "cli-asserted:--by"
+
+    def test_a_refusal_records_it_too(self, client: TestClient, qed_dir: Path) -> None:
+        """An attempt to approve one's own action is what an investigation
+        looks for, so the refusal carries the same field."""
+        request = pending(client, qed_dir, principal=REQUESTER)
+        client.post(
+            f"/v1/approvals/{request.id}",
+            json={"decision": "approve_once"},
+            headers=bearer(token_for(REQUESTER)),
+        )
+        payload = decided_records(qed_dir)[-1]
+        assert payload["refused"] == "AG-SOD-001"
+        assert payload["identity"] == f"oidc:{IDP}"

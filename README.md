@@ -45,16 +45,16 @@ hardware, including air-gapped.
 | **MCP proxy** (stdio and Streamable HTTP), shadow mode | `qed/adapters/mcp/` |
 | **HTTP forward proxy** (`CONNECT` and plain HTTP) | `qed/adapters/http_proxy/` |
 | **Claude Code hook** + `qed install` | `qed/adapters/hooks/` |
+| **Python SDK** (`@guard`) | `qed/sdk/` |
 | **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
 | **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
 | **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint` | `qed/cli.py` |
 
-Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2), the Python
-SDK, Postgres and the chain leader/outbox, Helm, `mode: mitm` for the HTTP
-proxy, compliance packs beyond the baseline, and SPEC §19's live-stream and
-budget pages.
+Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2), Postgres
+and the chain leader/outbox, Helm, `mode: mitm` for the HTTP proxy, compliance
+packs beyond the baseline, and SPEC §19's live-stream and budget pages.
 
 ## Quick start
 
@@ -103,6 +103,28 @@ This adapter is **advisory and always will be** — whoever can edit the setting
 can delete the entry that calls it, so the chain records it as advisory and
 never claims the call could not have happened. `docs/hooks.md` has the
 hardening, and why an ALLOW verdict deliberately prints nothing at all.
+
+### Put it in front of your own function
+
+```python
+from qed.sdk import Qed, guard
+
+qed = Qed.from_env()
+
+
+@guard(qed, target=lambda account_id, **_: f"crm:accounts/{account_id}", deletes=True)
+def delete_account(account_id: str) -> None: ...
+```
+
+For the action that has no front: a function in your own application that
+charges a card or deletes a tenant. The decorator proposes before the call,
+raises `QedBlocked` or `QedApprovalPending` if the answer was no, runs the
+function, and reports what happened. A refused action never runs.
+
+It fails **closed** by default, unlike the hook: an application has no human
+watching, so a QED it cannot reach must stop the action rather than wave it
+through. `examples/sdk/` has governed LangGraph and CrewAI tools that run
+whether or not those frameworks are installed.
 
 ### Put it in front of everything else
 
@@ -162,6 +184,8 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 | Masking never rewrites a kernel-generated identifier | `tests/masking/test_masking.py` |
 | No package shadows a standard-library module | `tests/test_no_stdlib_shadowing.py` |
 | The hook never emits `allow`, and never exits 1 | `tests/adapters/test_claude_code_hook.py` |
+| `import qed.sdk` loads no web framework | `tests/sdk/test_sdk_is_light.py` |
+| One signing implementation, shared by signer and verifier | `tests/sdk/test_sdk_is_light.py` |
 | An adapter's `execution_result` records the enforcement its proposal did | `tests/adapters/http_proxy/test_proxy_e2e.py` |
 | The OSCAL export validates against the NIST schema | `tests/evidence/test_oscal_schema.py` |
 | Tool-call classification imports nothing that can fail | `tests/adapters/test_import_boundary.py` |
