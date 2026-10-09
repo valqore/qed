@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -35,6 +35,15 @@ DSN = os.environ.get("QED_TEST_POSTGRES_DSN", "")
 #: Named rather than inlined: a DSN carries a password, and the point of
 #: `store_env` is that it never reaches a config file somebody commits.
 DSN_ENV = "QED_TEST_POSTGRES_DSN"
+
+
+def factory(directory: Path, config: Path | None = None) -> Callable[[], Session]:
+    """How the loop opens its own session, as the app does it.
+
+    A session is a database connection and a `sqlite3` connection belongs to
+    the thread that opened it, so `start()` refuses without this.
+    """
+    return lambda: open_session(directory=directory, config_path=config, strict_policy=False)
 
 
 def enqueue(session: Session, note: str) -> str:
@@ -81,11 +90,11 @@ class TestOnSqliteThereIsNoElection:
     async def test_stopping_without_a_lock_is_quiet(self, qed_dir: Path) -> None:
         session = open_session(directory=qed_dir)
         try:
-            loop = LeaderLoop(session, tick=0.01)
+            loop = LeaderLoop(session, tick=0.01, own_session=factory(qed_dir))
             loop.start()
-            assert loop._task is not None
+            assert loop._thread is not None
             await loop.stop()
-            assert loop._task is None
+            assert loop._thread is None
         finally:
             session.close()
 
@@ -112,7 +121,9 @@ class TestOnPostgres:
 
     @pytest.fixture
     def session(self, qed_dir: Path, tmp_path: Path) -> Iterator[Session]:
-        config = tmp_path / "qed.yaml"
+        self.directory = qed_dir
+        self.config = tmp_path / "qed.yaml"
+        config = self.config
         config.write_text(yaml.safe_dump({"evidence": {"store_env": DSN_ENV}}), encoding="utf-8")
         session = open_session(directory=qed_dir, config_path=config)
         # Opening a session queues `policy_loaded` for a bundle hash this
@@ -207,9 +218,9 @@ class TestOnPostgres:
         """Correctness does not need this -- closing the connection releases
         the lock -- but a replica that resigns on the way out saves the next
         one from waiting for the server to notice a dead connection."""
-        loop = LeaderLoop(session, tick=0.01)
+        loop = LeaderLoop(session, tick=0.01, own_session=factory(self.directory, self.config))
         loop.start()
-        assert loop._task is not None
+        assert loop._thread is not None
 
         for _ in range(300):
             if loop.leading:
@@ -218,7 +229,7 @@ class TestOnPostgres:
         assert loop.leading is True, "the loop never took the lock"
 
         await loop.stop()
-        assert loop._task is None
+        assert loop._thread is None
         assert loop.leading is False
         assert session.store.holds_leadership() is False
 
@@ -232,7 +243,7 @@ class TestOnPostgres:
     async def test_the_running_loop_drains_on_its_own(self, session: Session) -> None:
         """What makes the deferred path work in a server: nobody calls the
         drain, the loop notices."""
-        loop = LeaderLoop(session, tick=0.01)
+        loop = LeaderLoop(session, tick=0.01, own_session=factory(self.directory, self.config))
         loop.start()
         try:
             ref = enqueue(session, "queued while running")

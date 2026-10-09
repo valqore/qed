@@ -26,6 +26,7 @@ removal.
 from __future__ import annotations
 
 import json
+import time
 from typing import Final
 
 from fastapi import APIRouter, Request, Response
@@ -34,6 +35,7 @@ from starlette.responses import JSONResponse
 
 from qed.adapters.common import MAX_PROPOSAL_BYTES
 from qed.api.app_state import authenticate, qed_state
+from qed.api.observe import record_decision
 from qed.api.problems import Problem
 from qed.core.schemas import (
     ActionProposal,
@@ -87,6 +89,7 @@ async def post_proposal(request: Request) -> Response:
     envelope = _parse(body)
     proposal = envelope.proposal
 
+    started = time.perf_counter()
     try:
         outcome = check_proposal(
             session, proposal, budget=envelope.budget, mandate=envelope.mandate
@@ -102,6 +105,16 @@ async def post_proposal(request: Request) -> Response:
             detail=str(exc),
             extra={"proposal_id": proposal.id},
         ) from None
+
+    # Measured around the decision only, not the request: SPEC §18's p95 target
+    # is about what qed does, and including transport would make the number
+    # depend on the client's network.
+    record_decision(
+        state.metrics,
+        proposal=proposal,
+        outcome=outcome,
+        seconds=time.perf_counter() - started,
+    )
 
     payload: dict[str, object] = {
         "verdict": outcome.verdict.model_dump(mode="json"),

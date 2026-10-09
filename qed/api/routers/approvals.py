@@ -32,6 +32,7 @@ from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 
 from qed.api.app_state import authenticate_caller, qed_state
+from qed.api.observe import record_approval_decided
 from qed.api.problems import Problem
 from qed.core.approval.model import (
     ApprovalStatus,
@@ -103,7 +104,8 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
         )
     now = utcnow()
     caller = authenticate_caller(request, raw, now=now)
-    session = qed_state(request).require()
+    state = qed_state(request)
+    session = state.require()
 
     asserted = request.headers.get(HEADER_APPROVER, "").strip()
     if caller.human is not None:
@@ -261,6 +263,13 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
         approval_id=approval_id,
         principal_hash=decision.approver_hash,
         ts=now,
+    )
+    # The wait is how long a *person* took, which is the number an operator
+    # uses to argue for more approvers (SPEC §18).
+    record_approval_decided(
+        state.metrics,
+        decision=decision.status.value,
+        waited_seconds=(now - found.created_at).total_seconds(),
     )
     return JSONResponse(
         {

@@ -27,6 +27,7 @@ from qed.api.routers import (
     events,
     evidence,
     health,
+    metrics,
     proposals,
     slack,
     status,
@@ -97,10 +98,20 @@ def create_app(
             channel_name = state.session.config.approvals.slack.channel
             if bot_token and channel_name:
                 state.slack = SlackChannel(bot_token=bot_token, channel=channel_name)
-            # On the deferred path every replica decides and exactly one
-            # chains. This is the task that tries to be that one; it starts
-            # as a follower and costs one round trip per tick until it is not.
-            state.leader = LeaderLoop(state.session)
+            # The chain's background loop: drains the outbox on the HA path,
+            # and checkpoints, publishes and purges on both. It runs on its
+            # own thread with its own session, because a `sqlite3` connection
+            # belongs to the thread that made it and this one was made here.
+            state.leader = LeaderLoop(
+                state.session,
+                own_session=lambda: open_session(
+                    directory=directory,
+                    policy_paths=policy_paths,
+                    config_path=config_path,
+                    dev=dev,
+                    strict_policy=False,
+                ),
+            )
             state.leader.start()
         try:
             yield
@@ -124,6 +135,10 @@ def create_app(
     app.state.qed = state
     install_handlers(app)
     app.include_router(health.router)
+    # Open, like the probes. A scraper is not an adapter and has no signing
+    # secret, and a bearer token in every Prometheus config is the arrangement
+    # that ends with monitoring switched off.
+    app.include_router(metrics.router)
     app.include_router(proposals.router)
     app.include_router(evidence.router)
     app.include_router(approvals.router)

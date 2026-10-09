@@ -22,6 +22,7 @@ from qed.core.delegation.claims import AUDIENCE, TokenClaims, TokenVerificationE
 from qed.core.schemas import Principal
 from qed.infra.channels.slack import SlackChannel
 from qed.infra.jwks import JwksCache, discover_jwks_uri
+from qed.infra.metrics import MetricsRegistry
 from qed.infra.tokens import QED_ALG, TokenIssuer, decode_unverified_header, verify_token
 from qed.runtime import Session
 
@@ -55,6 +56,9 @@ class QedState:
     #: The chain leader loop, on the deferred path. None on SQLite, where the
     #: decider chains its own records and there is nothing to elect.
     leader: LeaderLoop | None = None
+    #: SPEC §18's metrics. On the state and not a module global, so a test can
+    #: make a fresh one and two instances in one process do not share numbers.
+    metrics: MetricsRegistry = field(default_factory=MetricsRegistry)
     #: Why the service is not ready, if it is not. Empty when it is.
     blockers: list[str] = field(default_factory=list)
 

@@ -18,6 +18,20 @@ means holding the lock, which the drain already arranges; on SQLite it is true
 by construction. Splitting them into two loops would mean the second asking the
 first whether it was allowed to run.
 
+**The loop owns its own database connection, on its own thread.** A `sqlite3`
+connection may only be used by the thread that created it, and the API's was
+created by the event loop at startup -- so a tick running anywhere else fails
+with `ProgrammingError: SQLite objects created in a thread can only be used in
+that same thread`. (`asyncio.to_thread` makes that certain rather than likely:
+it uses a pool, so successive ticks can land on different threads.) Giving the
+loop its own session keeps the API's connection single-threaded, which is what
+everything else here assumes.
+
+Two writers against one SQLite file is the arrangement week 1 designed for:
+`append_evidence` re-reads the sequence number inside `BEGIN IMMEDIATE` and
+raises rather than guessing, so the loser of a race fails loudly and the next
+tick retries.
+
 It is deliberately dull. It wakes up, tries the lock, drains if it got it, and
 goes back to sleep. There is no election protocol, no term number and no
 heartbeat, because PostgreSQL already provides the only hard part: a
@@ -43,15 +57,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
-from contextlib import suppress
+from collections.abc import Callable
 from typing import Final
 
 from qed.infra.chain_drain import drain_until_empty
 from qed.infra.maintenance import maintain
 from qed.runtime import Session
 
-__all__ = ["MAINTENANCE_SECONDS", "TICK_SECONDS", "LeaderLoop"]
+__all__ = ["MAINTENANCE_SECONDS", "STOP_TIMEOUT", "TICK_SECONDS", "LeaderLoop"]
 
 logger = logging.getLogger("qed.api.leader")
 
@@ -69,6 +84,13 @@ TICK_SECONDS: Final = 2.0
 #: instance is not reading its own chain tip every two seconds to be told no.
 MAINTENANCE_SECONDS: Final = 30.0
 
+#: How long shutdown waits for a tick in progress. Longer than the git
+#: publisher's own 60s timeout would be, so a slow anchor does not turn into a
+#: container that will not stop; shorter than a container runtime's usual
+#: SIGKILL grace, so the join is the thing that gives up rather than the
+#: orchestrator.
+STOP_TIMEOUT: Final = 15.0
+
 
 class LeaderLoop:
     """Drains the outbox for as long as this replica holds the chain lock."""
@@ -79,10 +101,18 @@ class LeaderLoop:
         *,
         tick: float = TICK_SECONDS,
         maintenance: float = MAINTENANCE_SECONDS,
+        own_session: Callable[[], Session] | None = None,
     ) -> None:
+        #: The session a *synchronous* `tick_once` uses -- the one a test or
+        #: `qed checkpoint` hands over. The background thread does not use it.
         self.session = session
+        #: How the background thread gets a session of its own. Required by
+        #: `start()`: a session is a database connection, and a `sqlite3`
+        #: connection belongs to the thread that made it.
+        self._own_session = own_session
         self.tick = tick
-        self._task: asyncio.Task[None] | None = None
+        self._thread: threading.Thread | None = None
+        self._stopping = threading.Event()
         #: Reported by `/v1/status` so an operator can see which replica is
         #: appending. Advisory: it is what this process last observed.
         self.leading = False
@@ -118,60 +148,109 @@ class LeaderLoop:
         return True
 
     def start(self) -> None:
-        if not self.applicable or self._task is not None:
+        """Start the background thread. Idempotent.
+
+        Requires `own_session`. Sharing the caller's session would work on
+        PostgreSQL and fail on SQLite with `ProgrammingError: SQLite objects
+        created in a thread can only be used in that same thread` -- an error
+        that appears only on the default backend, only once the thread does
+        its first database read, and in a log rather than a test. Refusing up
+        front is the difference between a mistake that is impossible and one
+        that is merely unlikely.
+        """
+        if not self.applicable or self._thread is not None:
             return
-        self._task = asyncio.create_task(self._run(), name="qed-chain-leader")
-        logger.info("chain leader loop started; tick %.1fs", self.tick)
+        if self._own_session is None:
+            raise ValueError(
+                "LeaderLoop.start() needs `own_session`: the loop runs on its own thread "
+                "and a database connection belongs to the thread that opened it. Pass a "
+                "callable that opens a session, or call `tick_once()` synchronously."
+            )
+        self._stopping.clear()
+        # A thread and not a task: every tick is blocking database work, and
+        # one dedicated thread is also what lets the loop keep a connection of
+        # its own. `daemon=False` because `stop()` joins it -- a daemon thread
+        # killed mid-transaction is a half-written chain.
+        self._thread = threading.Thread(target=self._run, name="qed-chain-loop", daemon=False)
+        self._thread.start()
+        logger.info(
+            "chain loop started; tick %.1fs, maintenance every %.0fs",
+            self.tick,
+            self.maintenance_interval,
+        )
 
     async def stop(self) -> None:
-        """Cancel the loop and resign, so a handover takes milliseconds.
+        """Stop the thread and resign, so a handover takes milliseconds.
 
         Resigning is not required for correctness -- closing the connection
         releases the lock -- but a replica that resigns on the way out does not
         make the next one wait for the server to notice a dead connection.
+
+        Awaited from the app's shutdown, and the join is run in a thread so a
+        tick in progress does not block the event loop while it finishes.
         """
-        task, self._task = self._task, None
-        if task is not None:
-            task.cancel()
-            # Suppressing broadly on purpose: this runs during shutdown, and a
-            # drain that failed on the way out has already been logged by
-            # `_run`. Re-raising here would turn a tidy stop into a traceback
-            # and skip the resignation below.
-            with suppress(BaseException):
-                await task
-        if self.leading:
-            resign = getattr(self.session.store, "resign_leadership", None)
-            if resign is not None:
+        self._stopping.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            await asyncio.to_thread(thread.join, STOP_TIMEOUT)
+            if thread.is_alive():  # pragma: no cover - a publisher hung past its timeout
+                logger.error(
+                    "the chain loop did not stop within %.0fs; leaving it to finish",
+                    STOP_TIMEOUT,
+                )
+        self.leading = False
+
+    def _run(self) -> None:
+        """The thread body. Opens its own session, ticks until told to stop."""
+        assert self._own_session is not None, "start() checked this"
+        try:
+            owned = self._own_session()
+        except Exception as exc:
+            # No loop, and the API carries on. A chain that is not being
+            # checkpointed is worse than one that is, and far better than an
+            # instance that refuses to decide because a background task could
+            # not start.
+            self.last_error = f"could not open a session for the chain loop: {exc}"
+            logger.error("%s", self.last_error)
+            return
+        session = owned
+
+        try:
+            while not self._stopping.is_set():
                 try:
-                    resign()
-                except Exception as exc:  # pragma: no cover - the socket may be gone
-                    logger.debug("could not resign cleanly: %s", exc)
-            self.leading = False
+                    self.tick_once(session=session)
+                except Exception as exc:
+                    # Logged and counted, never swallowed silently: a loop that
+                    # stopped working without saying so looks exactly like a
+                    # cluster with nothing to do, and the only symptom would be
+                    # a queue depth nobody was watching.
+                    self.last_error = f"{type(exc).__name__}: {exc}"
+                    logger.error("chain loop tick failed: %s", self.last_error)
+                self._stopping.wait(self.tick)
+        finally:
+            if self.leading:
+                resign = getattr(session.store, "resign_leadership", None)
+                if resign is not None:
+                    try:
+                        resign()
+                    except Exception as exc:  # pragma: no cover - the socket may be gone
+                        logger.debug("could not resign cleanly: %s", exc)
+                self.leading = False
+            # Its own session, so its own close -- and no settle, because
+            # draining is what this loop was doing until a moment ago.
+            owned.close(settle_chain=False)
 
-    async def _run(self) -> None:
-        while True:
-            try:
-                await asyncio.to_thread(self.tick_once)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                # Logged and counted, never swallowed silently: a leader that
-                # stopped draining without saying so would look exactly like a
-                # cluster with nothing to do, and the only symptom would be an
-                # outbox depth nobody was watching.
-                self.last_error = f"{type(exc).__name__}: {exc}"
-                logger.error("chain leader tick failed: %s", self.last_error)
-            await asyncio.sleep(self.tick)
-
-    def tick_once(self) -> int:
+    def tick_once(self, *, session: Session | None = None) -> int:
         """One attempt. Returns how many records were chained.
 
-        Synchronous and run in a thread: the store's connection belongs to
-        whichever thread uses it, and both halves are transactions rather than
-        something to interleave with request handling.
+        `session` is the loop thread's own when it is running, and the one
+        passed to the constructor when a test or a command calls this directly.
+        Both halves are transactions rather than something to interleave with
+        request handling, which is why this is synchronous.
         """
+        active = session if session is not None else self.session
         if self.drains:
-            store = self.session.store
+            store = active.store
             claim = getattr(store, "try_become_leader", None)
             if claim is None:  # pragma: no cover - `drains` checked this
                 return 0
@@ -187,14 +266,14 @@ class LeaderLoop:
             # One process, one chain, no election.
             self.leading = True
 
-        chained = self._drain()
-        self._maintain()
+        chained = self._drain(active)
+        self._maintain(active)
         return chained
 
-    def _drain(self) -> int:
+    def _drain(self, session: Session) -> int:
         if not self.drains:
             return 0
-        result = drain_until_empty(self.session.writer)
+        result = drain_until_empty(session.writer)
         if result.skipped:
             self.last_error = result.skipped
             logger.error("drain stopped: %s", result.skipped)
@@ -203,7 +282,7 @@ class LeaderLoop:
             self.chained += result.chained
         return result.chained
 
-    def _maintain(self) -> None:
+    def _maintain(self, session: Session) -> None:
         """Checkpoint, publish, purge -- each when its own threshold says so.
 
         Run every tick because deciding whether anything is due is cheap: the
@@ -213,7 +292,7 @@ class LeaderLoop:
         if self._next_maintenance > time.monotonic():
             return
         self._next_maintenance = time.monotonic() + self.maintenance_interval
-        result = maintain(self.session)
+        result = maintain(session)
         self.checkpoints += 1 if result.checkpoint is not None else 0
         self.purged += result.purged
         if result.errors:
