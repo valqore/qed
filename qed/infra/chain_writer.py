@@ -64,6 +64,7 @@ __all__ = [
     "Appended",
     "ChainWriter",
     "InstanceMismatch",
+    "KeyDiscontinuity",
     "PendingRecord",
     "WriteMode",
     "signer_info",
@@ -137,6 +138,22 @@ class InstanceMismatch(RuntimeError):
     """The store belongs to a different instance id than the one configured."""
 
 
+class KeyDiscontinuity(RuntimeError):
+    """The active signing key is not the one this chain was left on.
+
+    `qed-verify` reports this as `rotation_discontinuity`, which is the right
+    answer for an auditor and the wrong moment to find out. The same rule is
+    therefore enforced here, at write time: a chain whose last record was
+    signed by one key may only be continued by that key, or by the key a
+    `key_rotated` record introduced.
+
+    The usual causes are a key file restored from a backup taken before a
+    rotation, two deployments pointed at one database with different secrets,
+    and a rotation that was interrupted between appending the record and
+    activating the key.
+    """
+
+
 class ChainWriter:
     def __init__(
         self,
@@ -165,7 +182,41 @@ class ChainWriter:
                 f"this chain was started as {recorded!r}; the genesis hash is bound to that "
                 f"identity and cannot be reused as {instance_id!r}"
             )
+        self._refuse_a_key_the_chain_did_not_expect()
         store.upsert_signing_key(signer_info(signer))
+
+    def _refuse_a_key_the_chain_did_not_expect(self) -> None:
+        """Enforce rotation continuity before anything is appended.
+
+        A silent key change is indistinguishable from a forged chain, and it is
+        silent precisely because nothing in the record format requires the
+        writer to notice. One read of the last record closes it.
+        """
+        last = self.store.last_seq()
+        if last is None:
+            return  # a fresh chain; genesis will be signed by whatever is active
+        record = self.store.evidence_at(last)
+        if record is None:  # pragma: no cover - last_seq said it is there
+            return
+        if record.key_id == self.signer.key_id:
+            return
+        # The one legitimate change: the chain's last act was to introduce
+        # this key. `qed keys rotate` appends that record with the *old* key
+        # and then activates the new one, so this is the state a rotation
+        # leaves behind, and the next append is the first under the new key.
+        payload = record.payload or {}
+        if (
+            record.type is EvidenceType.key_rotated
+            and payload.get("new_key_id") == self.signer.key_id
+        ):
+            return
+        raise KeyDiscontinuity(
+            f"this chain was last signed by {record.key_id!r} at seq {record.seq}, and the "
+            f"active key is {self.signer.key_id!r}. A key change has to be recorded by a "
+            "`key_rotated` record signed by the retiring key, or the chain cannot be verified "
+            "across it. If a rotation was interrupted, the staged key is at "
+            "`evidence-key.pem.incoming`; `qed doctor` says which half completed."
+        )
 
     # ------------------------------------------------------------------ append
 
@@ -284,6 +335,30 @@ class ChainWriter:
         outbox_id = str(ULID())
         self.store.enqueue_outbox(outbox_id, pending.model_dump_json(), created_at=stamp)
         return Appended(ref=outbox_id, type=type_, record=None)
+
+    def append_direct(
+        self,
+        *,
+        type_: EvidenceType,
+        assurance: Assurance,
+        payload: dict[str, object],
+        ts: datetime | None = None,
+    ) -> EvidenceRecord:
+        """Append now, chained, even on the deferred path.
+
+        For the two record types whose meaning depends on *where* they sit in
+        the chain. A checkpoint covers a range ending at the record before it,
+        and a `key_rotated` introduces the key that signs everything after it;
+        queued behind other records, either one would end up describing a
+        position it no longer occupied.
+
+        The caller is responsible for being the only writer -- the leader loop
+        on the HA path, or a CLI holding the chain lock. This method cannot
+        check that, because "am I the only writer" is not a question a writer
+        can answer about itself.
+        """
+        self.ensure_genesis(ts=ts)
+        return self._append(type_=type_, assurance=assurance, payload=payload, ts=ts)
 
     def _append(
         self,

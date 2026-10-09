@@ -9,10 +9,11 @@ the server cannot drift into deciding things differently.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 from ulid import ULID
 
@@ -34,16 +35,23 @@ from qed.core.schemas import (
     BudgetState,
     Decision,
     EvalContext,
+    EvidenceRecord,
     EvidenceType,
     HistoryDerived,
     Mandate,
     Mode,
+    SigningKeyInfo,
     Verdict,
     rfc3339_ms,
     utcnow,
 )
 from qed.infra.chain_writer import Appended, ChainWriter
-from qed.infra.keys.file import PUBLIC_DIR_NAME, FileSigner, load_signer
+from qed.infra.keys.file import (
+    PUBLIC_DIR_NAME,
+    FileSigner,
+    load_signer,
+    public_key_filename,
+)
 from qed.infra.storage.store import SqliteStore, SqlStore
 
 __all__ = [
@@ -54,11 +62,14 @@ __all__ = [
     "CheckOutcome",
     "DuplicateProposal",
     "PolicyErrors",
+    "Rotation",
+    "RotationRefused",
     "Session",
     "check_proposal",
     "open_session",
     "open_signer",
     "open_store",
+    "rotate_signing_key",
     "settle",
 ]
 
@@ -616,6 +627,112 @@ def settle(session: Session) -> int:
         resign = getattr(store, "resign_leadership", None)
         if resign is not None:
             resign()
+
+
+class RotationRefused(RuntimeError):
+    """Rotation would have raced another writer."""
+
+
+@dataclass(frozen=True)
+class Rotation:
+    """What a completed rotation did, for the CLI to report."""
+
+    old_key_id: str
+    new_key_id: str
+    #: Signed by the *retiring* key. That signature is what makes the chain
+    #: verifiable across the rotation.
+    record: EvidenceRecord
+    retired_public_key: Path
+
+
+def rotate_signing_key(session: Session, *, now: datetime | None = None) -> Rotation:
+    """Rotate the evidence signing key (SPEC §10.5, ADR-0010).
+
+    The order is load-bearing, and is why this is one function rather than a
+    CLI command calling three:
+
+    1. generate the new key and write it where a crash cannot lose it;
+    2. append `key_rotated`, **signed by the retiring key**;
+    3. activate the new key, which overwrites the old private key.
+
+    (3) before (2) would leave the chain on the old key with the next record
+    signed by the new one and nothing in between saying so -- a discontinuity
+    indistinguishable from a forged chain. (1) after (2) would mean a crash
+    between them left a chain expecting a key that was never written down.
+    """
+    from qed.infra.keys.rotation import finish_rotation, stage_rotation
+
+    stamp = now if now is not None else utcnow()
+    released = _hold_the_chain_alone(session)
+    try:
+        plan = stage_rotation(session.directory)
+        record = session.writer.append_direct(
+            type_=EvidenceType.key_rotated,
+            assurance=Assurance.kernel,
+            payload=plan.payload,
+            ts=stamp,
+        )
+        finish_rotation(plan)
+    finally:
+        if released is not None:
+            released()
+
+    session.store.upsert_signing_key(
+        SigningKeyInfo(
+            key_id=plan.new.key_id,
+            public_pem=plan.new.public_pem,
+            created_at=stamp,
+        )
+    )
+    session.store.retire_signing_key(plan.old.key_id, at=stamp)
+    # Swap the in-memory signer too. A caller that kept using this session
+    # would otherwise go on signing with a key the chain has just retired, and
+    # the continuity check has already been satisfied for this process.
+    session.writer.signer = plan.new
+    session.signer = plan.new
+
+    return Rotation(
+        old_key_id=plan.old.key_id,
+        new_key_id=plan.new.key_id,
+        record=record,
+        retired_public_key=(
+            session.directory / PUBLIC_DIR_NAME / public_key_filename(plan.old.key_id)
+        ),
+    )
+
+
+def _hold_the_chain_alone(session: Session) -> Callable[[], None] | None:
+    """Make this process the only writer, or refuse.
+
+    On SQLite there is nothing to arrange: one process writes for itself. On
+    the deferred path the chain leader is appending concurrently, and a
+    `key_rotated` written beside it could land after a record the new key had
+    already signed -- which is the one ordering that makes the chain
+    unverifiable.
+
+    A running server holds the lock for its lifetime, so this refuses rather
+    than waiting. Rotation there is an admin operation on the instance
+    (SPEC §13's `POST /admin/keys:rotate`), not something a second process
+    does behind its back.
+    """
+    if not session.writer.deferred:
+        return None
+    claim = getattr(session.store, "try_become_leader", None)
+    resign = getattr(session.store, "resign_leadership", None)
+    if claim is None or resign is None:  # pragma: no cover - deferred implies both
+        return None
+    if not claim():
+        raise RotationRefused(
+            "another process is appending to this chain -- almost certainly a running "
+            "`qed serve`. Rotating from here could place the `key_rotated` record after a "
+            "record the new key had already signed, which no verifier can accept. Stop the "
+            "server and rotate, or rotate through the instance."
+        )
+    # Anything already queued belongs before the rotation: those records were
+    # signed by the old key, and chaining them afterwards would put them
+    # after the record that retired it.
+    settle(session)
+    return cast("Callable[[], None]", resign)
 
 
 def chain_status(session: Session) -> dict[str, object]:

@@ -21,9 +21,10 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
 import typer
+from typer.core import TyperGroup
 
 from qed.config import DEFAULT_DIR
 from qed.core.evidence.export.jsonl import to_csv, to_jsonl
@@ -39,17 +40,21 @@ from qed.core.schemas import (
     Mandate,
     utcnow,
 )
+from qed.infra.chain_writer import InstanceMismatch, KeyDiscontinuity
 from qed.infra.keys.file import PUBLIC_DIR_NAME, MissingSigningKey, init_keys
 from qed.runtime import (
     EXIT_ALLOW,
     EXIT_APPROVAL,
     EXIT_BLOCK,
+    EXIT_ERROR,
     DuplicateProposal,
     PolicyErrors,
+    RotationRefused,
     Session,
     chain_status,
     check_proposal,
     open_session,
+    rotate_signing_key,
     settle,
 )
 
@@ -59,7 +64,35 @@ if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
     from qed.adapters.http_proxy.proxy import HttpProxyStats
     from qed.adapters.mcp.proxy import ProxyStats
 
+#: Failures that are a statement about the operator's chain, not a bug in qed.
+#:
+#: Each already carries a sentence written for a person, and a traceback around
+#: it helps nobody: "this chain was last signed by X" is the whole answer and
+#: the frames above it are noise.
+OPERATOR_ERRORS: Final = (InstanceMismatch, KeyDiscontinuity)
+
+
+class QedGroup(TyperGroup):
+    """The command group, with one exception handler for the whole CLI.
+
+    On the group rather than in :func:`main` because `main` is not the only
+    way in -- the test runner and anything embedding `qed.cli.app` invoke the
+    group directly, and a handler they skip is a handler that is not there.
+
+    It also beats a `try` at each of the fifteen `open_session` call sites: a
+    new command cannot forget to have one.
+    """
+
+    def invoke(self, ctx: Any) -> object:
+        try:
+            return super().invoke(ctx)
+        except OPERATOR_ERRORS as exc:
+            typer.secho(f"qed: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(EXIT_ERROR) from None
+
+
 app = typer.Typer(
+    cls=QedGroup,
     add_completion=False,
     no_args_is_help=True,
     help="Policy and evidence kernel for AI-agent actions.",
@@ -98,23 +131,112 @@ def keys_init(
     try:
         info = init_keys(directory, overwrite=overwrite)
     except FileExistsError as exc:
-        _fail(f"{exc}. Use `qed keys rotate` (week 7) to change keys without breaking the chain.")
+        _fail(f"{exc}. Use `qed keys rotate` to change keys without breaking the chain.")
         return
     typer.echo(f"key_id : {info.key_id}")
     typer.echo(f"private: {directory / 'evidence-key.pem'}  (keep this; 0600)")
     typer.echo(f"public : {directory / PUBLIC_DIR_NAME}  (give this to auditors)")
 
 
-@keys_app.command("export-public")
-def keys_export_public(directory: DirOption = DEFAULT_DIR) -> None:
-    """Print the active public key in PEM form."""
+@keys_app.command("rotate")
+def keys_rotate(
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Do not ask. For a scripted rotation."),
+    ] = False,
+) -> None:
+    """Replace the signing key, keeping the chain verifiable across the change.
+
+    Appends a `key_rotated` record signed by the **retiring** key, then
+    activates the new one (SPEC §10.5, ADR-0010). The old private key is
+    destroyed: rotation exists because a key might have leaked, and leaving the
+    old one on disk would reduce nothing. The old *public* key stays, and must
+    -- without it the chain before this point cannot be verified at all.
+    """
     try:
-        session = open_session(directory=directory)
+        session = open_session(directory=directory, config_path=config, strict_policy=False)
     except MissingSigningKey as exc:
         _fail(str(exc))
         return
-    typer.echo(session.signer.public_pem.rstrip())
+
+    if not yes:
+        typer.echo(f"active key : {session.signer.key_id}")
+        typer.echo("")
+        typer.echo("Rotation will:")
+        typer.echo("  - append `key_rotated` to the chain, signed by the key above")
+        typer.echo("  - generate a new key and make it active")
+        typer.echo("  - DESTROY the old private key (the public key is kept)")
+        typer.echo("")
+        typer.echo("Everything already in the chain stays verifiable, with both public keys.")
+        if not typer.confirm("Rotate now?"):
+            session.close()
+            typer.echo("nothing was changed")
+            return
+
+    try:
+        rotation = rotate_signing_key(session)
+    except RotationRefused as exc:
+        session.close()
+        _fail(str(exc))
+        return
+    except MissingSigningKey as exc:
+        session.close()
+        _fail(str(exc))
+        return
+
     session.close()
+    typer.secho("rotated", fg=typer.colors.GREEN, bold=True)
+    typer.echo(f"  retired : {rotation.old_key_id}")
+    typer.echo(f"  active  : {rotation.new_key_id}")
+    typer.echo(f"  record  : seq {rotation.record.seq} (key_rotated, signed by the old key)")
+    typer.echo(f"  keep    : {rotation.retired_public_key}")
+    typer.echo("")
+    typer.echo(
+        "Give auditors the whole `public/` directory. A chain that spans a rotation "
+        "cannot be verified from the active key alone."
+    )
+
+
+@keys_app.command("export-public")
+def keys_export_public(
+    directory: DirOption = DEFAULT_DIR,
+    active_only: Annotated[
+        bool,
+        typer.Option("--active", help="Only the key signing now."),
+    ] = False,
+) -> None:
+    """Print the public keys an auditor needs, newest last.
+
+    Every key by default, not just the active one: a chain that spans a
+    rotation cannot be verified without the retired keys, and the usual way
+    that goes wrong is somebody sending one PEM because that is what this
+    command used to print.
+    """
+    try:
+        session = open_session(directory=directory, strict_policy=False)
+    except MissingSigningKey as exc:
+        _fail(str(exc))
+        return
+
+    if active_only:
+        typer.echo(session.signer.public_pem.rstrip())
+        session.close()
+        return
+
+    keys = session.store.signing_keys()
+    active = session.signer.key_id
+    session.close()
+    if not keys:  # pragma: no cover - the writer records the active key on open
+        typer.echo(session.signer.public_pem.rstrip())
+        return
+    for key in keys:
+        state = "active" if key.key_id == active else "retired"
+        # A comment line, so the output stays a concatenation of valid PEM:
+        # `qed keys export-public > public.pem` has to be usable as it is.
+        typer.echo(f"# {key.key_id}  {state}")
+        typer.echo(key.public_pem.rstrip())
 
 
 # --------------------------------------------------------------------- check

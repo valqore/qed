@@ -339,6 +339,18 @@ class SqlStore:
             ),
         )
 
+    def retire_signing_key(self, key_id: str, *, at: datetime) -> None:
+        """Mark a key as no longer signing (SPEC §10.5).
+
+        The row is never deleted. An auditor verifying a record from before the
+        rotation needs that public key, and the OSCAL export ships the whole
+        set for exactly that reason.
+        """
+        self._conn.execute(
+            "UPDATE signing_keys SET retired_at = ? WHERE key_id = ?",
+            (rfc3339_ms(at), key_id),
+        )
+
     def signing_keys(self) -> list[SigningKeyInfo]:
         rows = self._conn.execute(
             "SELECT key_id, alg, public_pem, source, created_at, retired_at "
