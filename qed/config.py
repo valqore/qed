@@ -13,12 +13,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import ConfigDict, Field
 
 from qed.core.evidence.masking import MaskingProfile
-from qed.core.schemas import Budget, Decision, Frozen, Mode
+from qed.core.schemas import Budget, Decision, EvidenceType, Frozen, Mode
+
+if TYPE_CHECKING:  # the policy object is pure core; config only names it
+    from qed.core.evidence.retention import RetentionPolicy
 
 __all__ = [
     "DEFAULT_DIR",
@@ -79,6 +83,45 @@ class EvidenceConfig(Frozen):
         if self.store_env:
             return os.environ.get(self.store_env) or ""
         return self.store
+
+
+class RetentionConfig(Frozen):
+    """How long payloads are kept (SPEC §10.6, §16).
+
+    ```yaml
+    retention:
+      payload: 7y          # the default age; `forever` or absent keeps them
+      by_type:
+        proposal: 90d      # per type, which SPEC §10.6 asks for
+        execution_result: 90d
+    ```
+
+    Absent means nothing is ever purged. A kernel that began deleting evidence
+    because nobody had configured retention would be the wrong default by a
+    long way, and the obligation a retention policy comes from is always
+    written down somewhere before it is configured here.
+
+    Some types are never purged whatever this says -- a checkpoint's payload
+    holds its Merkle root, a `key_rotated`'s holds the new public key, and an
+    `admin_action`'s is the record of a purge. See
+    `qed.core.evidence.retention.NEVER_PURGE`.
+    """
+
+    payload: str | None = None
+    by_type: dict[str, str | None] = Field(default_factory=dict)
+
+    def policy(self) -> RetentionPolicy:
+        """Parse into the pure policy the planner takes."""
+        from qed.core.evidence.retention import RetentionPolicy, parse_retention
+
+        return RetentionPolicy(
+            payload=parse_retention(self.payload),
+            by_type={
+                EvidenceType(name): parse_retention(age) for name, age in self.by_type.items()
+            },
+            # Verbatim, so what is reported back is what was written down.
+            declared={"payload": self.payload, **self.by_type},
+        )
 
 
 class AdapterCredential(Frozen):
@@ -195,6 +238,7 @@ class QedConfig(Frozen):
     delegation: DelegationConfig = DelegationConfig()
     approvals: ApprovalsConfig = ApprovalsConfig()
     broker: BrokerConfig = BrokerConfig()
+    retention: RetentionConfig = RetentionConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 

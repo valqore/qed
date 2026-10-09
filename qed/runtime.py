@@ -26,6 +26,7 @@ from qed.core.approval.model import (
     parse_duration,
 )
 from qed.core.budget import charge_for, newly_exhausted
+from qed.core.evidence.retention import PurgePlan, plan_purge
 from qed.core.policy.engine import evaluate
 from qed.core.policy.loader import LoadResult, baseline_pack_dir, load_bundle
 from qed.core.policy.model import LintFinding, PolicyBundle
@@ -62,13 +63,16 @@ __all__ = [
     "CheckOutcome",
     "DuplicateProposal",
     "PolicyErrors",
+    "RetentionResult",
     "Rotation",
     "RotationRefused",
     "Session",
+    "apply_retention",
     "check_proposal",
     "open_session",
     "open_signer",
     "open_store",
+    "plan_retention",
     "rotate_signing_key",
     "settle",
 ]
@@ -735,6 +739,67 @@ def _hold_the_chain_alone(session: Session) -> Callable[[], None] | None:
     return cast("Callable[[], None]", resign)
 
 
+@dataclass(frozen=True)
+class RetentionResult:
+    """What a retention pass did. Empty when there was nothing to do."""
+
+    purged: int
+    plan: PurgePlan
+    #: The `admin_action` record documenting the purge, when one was written.
+    record: EvidenceRecord | None = None
+
+    @property
+    def acted(self) -> bool:
+        return self.purged > 0
+
+
+def plan_retention(session: Session, *, now: datetime | None = None) -> PurgePlan:
+    """What a purge would clear, without clearing it.
+
+    Reported by `qed doctor`. Separate from applying it because a retention
+    policy is a thing an operator should be able to read the consequences of
+    before it runs -- the whole point is that it destroys evidence on purpose.
+    """
+    policy = session.config.retention.policy()
+    if not policy.active:
+        return PurgePlan()
+    return plan_purge(session.store.iter_evidence(), policy=policy, now=now or utcnow())
+
+
+def apply_retention(session: Session, *, now: datetime | None = None) -> RetentionResult:
+    """Clear the payloads the policy has expired, and record that it happened.
+
+    The `admin_action` record is the point. A NULL payload with nothing saying
+    why is indistinguishable from data loss, and "we delete after seven years"
+    is a claim an auditor will want evidence of rather than a sentence in a
+    policy document. SPEC §17: qed governs its own admin operations.
+
+    Appended *after* the purge, so the record is outside the set it describes
+    and cannot purge itself in the same pass -- and `admin_action` is in
+    `NEVER_PURGE` anyway, because erasing the record of what was erased is the
+    one thing retention must not do.
+    """
+    stamp = now if now is not None else utcnow()
+    plan = plan_retention(session, now=stamp)
+    if plan.empty:
+        return RetentionResult(purged=0, plan=plan)
+
+    purged = session.store.purge_payload_seqs(plan.seqs)
+    appended = session.writer.append(
+        type_=EvidenceType.admin_action,
+        assurance=Assurance.kernel,
+        payload={
+            "action": "retention_purge",
+            "policy": session.config.retention.policy().describe(),
+            "purged": purged,
+            **plan.summary(),
+        },
+        ts=stamp,
+    )
+    logger.info("retention purged %d payload(s): %s", purged, plan.summary().get("by_type"))
+    return RetentionResult(purged=purged, plan=plan, record=appended.record)
+
+
 def chain_status(session: Session) -> dict[str, object]:
     """Small posture summary used by the CLI."""
     last = session.store.last_seq()
@@ -744,6 +809,7 @@ def chain_status(session: Session) -> dict[str, object]:
         "records": session.store.count_evidence(),
         "last_seq": last,
         "store": session.store.dialect.name,
+        "retention": session.config.retention.policy().describe(),
         # SPEC §18's `qed_chain_lag_records`, reported here until there is a
         # /metrics endpoint to carry it. Always 0 on the direct path: the
         # record was chained before the caller got an answer, so there is

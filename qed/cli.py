@@ -54,6 +54,7 @@ from qed.runtime import (
     chain_status,
     check_proposal,
     open_session,
+    plan_retention,
     rotate_signing_key,
     settle,
 )
@@ -1019,6 +1020,21 @@ def doctor(
         report["upstreams"] = rows
         report["enforcing"] = sum(1 for r in rows if r["enforcement"] == "enforcing")
         report["advisory"] = sum(1 for r in rows if r["enforcement"] == "advisory")
+
+        # Retention is the only destructive thing qed does to its own chain,
+        # so what it *would* do is posture an operator should be able to read
+        # before it runs rather than after.
+        policy = session.config.retention.policy()
+        pending = plan_retention(session)
+        report["retention"] = {
+            **policy.describe(),
+            "would_purge_now": pending.summary() if not pending.empty else None,
+        }
+
+        from qed.infra.keys.rotation import pending_rotation
+
+        staged = pending_rotation(session.directory)
+        report["interrupted_rotation"] = None if staged is None else str(staged)
     finally:
         session.close()
 
@@ -1029,6 +1045,25 @@ def doctor(
     typer.echo(f"instance   : {report['instance_id']}  (mode {report['mode']})")
     typer.echo(f"signing key: {report['signing_key']}")
     typer.echo(f"policy     : {report['policy_rules']} rules")
+
+    retention = cast("dict[str, object]", report["retention"])
+    keep = retention["payload"] or "forever"
+    typer.echo(f"retention  : payloads {keep}")
+    would = retention["would_purge_now"]
+    if isinstance(would, dict):
+        typer.secho(
+            f"             {would['records']} payload(s) are past it and will be purged "
+            f"on the next maintenance pass",
+            fg=typer.colors.YELLOW,
+        )
+    if report["interrupted_rotation"]:
+        typer.secho(
+            f"rotation   : INTERRUPTED -- a staged key is at "
+            f"{report['interrupted_rotation']}.\n"
+            "             If the chain has no `key_rotated` at its tip the file is safe to "
+            "delete; if it has, that key must be activated.",
+            fg=typer.colors.RED,
+        )
     rows_out = cast("list[dict[str, object]]", report["upstreams"])
     if not rows_out:
         typer.echo("")

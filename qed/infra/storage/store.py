@@ -313,7 +313,7 @@ class SqlStore:
         return int(row["c"])
 
     def purge_payloads(self, *, through_seq: int, types: Sequence[str] | None = None) -> int:
-        """Retention (SPEC §10.6). Hashes and signatures are never touched."""
+        """Retention by range (SPEC §10.6). Hashes and signatures are untouched."""
         sql = "UPDATE evidence SET payload = NULL WHERE seq <= ? AND payload IS NOT NULL"
         params: list[object] = [through_seq]
         if types:
@@ -321,6 +321,34 @@ class SqlStore:
             params.extend(types)
         cursor = self._conn.execute(sql, params)
         return int(cursor.rowcount)
+
+    def purge_payload_seqs(self, seqs: Sequence[int]) -> int:
+        """Retention for an explicit set of records (SPEC §10.6).
+
+        Explicit rather than a range, because retention is per type: the
+        expired set is not contiguous, and a structural record that may never
+        be purged can sit in the middle of an otherwise expired stretch.
+        :func:`qed.core.evidence.retention.plan_purge` decides which; this
+        only carries it out.
+
+        Batched, because a chain with years of history produces a list that is
+        longer than a parameter limit -- SQLite's default is 999, and a single
+        statement with 40,000 placeholders is refused rather than slow.
+        """
+        if not seqs:
+            return 0
+        cleared = 0
+        batch = 400
+        for start in range(0, len(seqs), batch):
+            chunk = list(seqs[start : start + batch])
+            placeholders = ",".join("?" * len(chunk))
+            cursor = self._conn.execute(
+                f"UPDATE evidence SET payload = NULL WHERE payload IS NOT NULL "
+                f"AND seq IN ({placeholders})",
+                chunk,
+            )
+            cleared += int(cursor.rowcount)
+        return cleared
 
     # ------------------------------------------------------------ signing keys
 
