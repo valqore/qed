@@ -395,6 +395,17 @@ jobs:
             exit 1
           fi
 
+      # SPEC 18's p95 budget and SPEC 849's throughput floor. Here rather
+      # than in the matrix because a timing assertion on four parallel jobs on
+      # one runner measures the runner -- and because this job is the only one
+      # with a database, so it covers both backends in one pass.
+      #
+      # The thresholds are loose on purpose: p95 against 50 ms with a measured
+      # 4.5 ms, and a floor of 80 decisions/s against a measured 250. A test
+      # that failed at 45 ms would be a test somebody disables.
+      - name: Decision latency and throughput
+        run: pytest tests/perf -q -m perf -s
+
       # The product, not just the store: decide a proposal against Postgres,
       # export it, and verify the export with the standalone verifier, which
       # has never heard of either backend.

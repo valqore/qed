@@ -148,4 +148,8 @@ markers = [
     # Builds a container image, so it is minutes rather than seconds and needs
     # a Docker daemon. Run with `-m slow`; deselect with `-m "not slow"`.
     "slow: needs a container build or another external service",
+    # SPEC 18's p95 budget and SPEC 849's throughput floor. Timing assertions,
+    # so they are the tests most likely to be noisy on a shared runner -- run
+    # with `-m perf`, skipped by `-m "not perf"`.
+    "perf: a timing assertion",
 ]
