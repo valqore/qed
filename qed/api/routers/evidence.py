@@ -136,25 +136,64 @@ async def get_by_ref(ref: str, request: Request) -> Response:
     authenticate(request, b"")
     session = state.require()
 
-    if not ref.isdigit():
-        raise Problem(
-            status=400,
-            code="bad-request",
-            title="That is not an evidence reference",
-            detail=(
-                "On the SQLite path an evidence_ref is the record's sequence number, so it "
-                "is all digits."
-            ),
+    # Two shapes of reference, because there are two write paths (SPEC §10.3).
+    # Direct: the reference *is* the sequence number. Deferred: it is the
+    # outbox id the API handed back before the leader had chained anything,
+    # and resolving it is this endpoint's reason for existing.
+    if ref.isdigit():
+        record = session.store.evidence_at(int(ref))
+        if record is None:
+            raise Problem(
+                status=404,
+                code="not-found",
+                title="No such evidence record",
+                detail=f"this chain has no record at seq {ref}",
+            )
+        return JSONResponse(
+            {"seq": record.seq, "pending": False, "record": record.model_dump(mode="json")}
         )
-    record = session.store.evidence_at(int(ref))
-    if record is None:
-        raise Problem(
-            status=404,
-            code="not-found",
-            title="No such evidence record",
-            detail=f"this chain has no record at seq {ref}",
+
+    seq = session.store.resolve_outbox_ref(ref)
+    if seq is not None:
+        record = session.store.evidence_at(seq)
+        return JSONResponse(
+            {
+                "seq": seq,
+                "pending": False,
+                "record": None if record is None else record.model_dump(mode="json"),
+            }
         )
-    return JSONResponse({"seq": record.seq, "record": record.model_dump(mode="json")})
+
+    if session.store.outbox_pending(ref):
+        # 200 and not 404: the record exists and is durable, the leader has
+        # simply not chained it yet. A 404 here would tell a caller their
+        # evidence was lost, which is the opposite of true, and an integration
+        # that retried on 404 would give up on a record that was about to
+        # arrive.
+        return JSONResponse(
+            {
+                "seq": None,
+                "pending": True,
+                "record": None,
+                "detail": (
+                    "queued and durable; the chain leader has not assigned a sequence "
+                    "number yet. Poll this reference, or watch "
+                    "`chain_lag_records` in GET /v1/status."
+                ),
+            },
+            status_code=200,
+        )
+
+    raise Problem(
+        status=404,
+        code="not-found",
+        title="No such evidence reference",
+        detail=(
+            f"{ref!r} is neither a sequence number, nor a queued outbox id, nor one this "
+            "instance has chained. A reference from a different instance will not resolve "
+            "here."
+        ),
+    )
 
 
 def _validate_types(types: list[str] | None) -> list[str] | None:

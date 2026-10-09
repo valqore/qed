@@ -189,13 +189,14 @@ def test_a_checkpoint_root_survives_masking(chain, tmp_path: Path) -> None:
     """
     _, writer, _ = chain
     poison = "0ed7e112a9844e97c2928422540476bbfda268f8060f061ffdf8d165b7fb5e0b"
-    record = writer.append(
+    appended = writer.append(
         type_=EvidenceType.checkpoint,
         assurance=Assurance.kernel,
         payload={"from_seq": 0, "to_seq": 4, "merkle_root": poison, "records": 5},
     )
-    assert record.payload is not None
-    assert record.payload["merkle_root"] == poison
+    assert appended.record is not None
+    assert appended.record.payload is not None
+    assert appended.record.payload["merkle_root"] == poison
 
 
 def test_a_tampered_checkpoint_root_is_detected(chain, tmp_path: Path) -> None:

@@ -271,5 +271,6 @@ async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
                 None if decision.window_until is None else decision.window_until.isoformat()
             ),
             "evidence_seq": record.seq,
+            "evidence_ref": record.ref,
         }
     )

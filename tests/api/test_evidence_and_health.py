@@ -218,10 +218,24 @@ class TestEvidenceByRef:
     def test_an_unknown_ref_is_a_404(self, signed: Signer) -> None:
         assert signed.get("/v1/evidence/by-ref/9000").status_code == 404
 
-    def test_a_ref_that_is_not_a_number_is_a_400(self, signed: Signer) -> None:
+    def test_an_unknown_non_numeric_ref_is_a_404(self, signed: Signer) -> None:
+        """It used to be a 400, on the assumption that a reference is always a
+        sequence number. With the Postgres outbox (SPEC §10.3) a reference may
+        be an outbox id, so a non-numeric one is a plausible reference that
+        this instance has simply never seen -- which is 404, not "malformed".
+        """
         response = signed.get("/v1/evidence/by-ref/outbox-abc")
-        assert response.status_code == 400
-        assert "sequence number" in response.json()["detail"]
+        assert response.status_code == 404
+        detail = response.json()["detail"]
+        assert "neither a sequence number" in detail
+
+    def test_the_404_says_a_reference_from_another_instance_will_not_resolve(
+        self, signed: Signer
+    ) -> None:
+        """The likeliest reason somebody is holding a reference this chain has
+        never heard of."""
+        response = signed.get("/v1/evidence/by-ref/01JBSOMEOTHERINSTANCE")
+        assert "different instance" in response.json()["detail"]
 
 
 # --------------------------------------------------------------------------

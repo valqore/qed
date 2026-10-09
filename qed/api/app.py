@@ -20,6 +20,7 @@ from fastapi import FastAPI
 
 from qed.api.app_state import QedState
 from qed.api.auth import AdapterAuth
+from qed.api.leader import LeaderLoop
 from qed.api.problems import install_handlers
 from qed.api.routers import (
     approvals,
@@ -96,11 +97,22 @@ def create_app(
             channel_name = state.session.config.approvals.slack.channel
             if bot_token and channel_name:
                 state.slack = SlackChannel(bot_token=bot_token, channel=channel_name)
+            # On the deferred path every replica decides and exactly one
+            # chains. This is the task that tries to be that one; it starts
+            # as a follower and costs one round trip per tick until it is not.
+            state.leader = LeaderLoop(state.session)
+            state.leader.start()
         try:
             yield
         finally:
+            if state.leader is not None:
+                await state.leader.stop()
+                state.leader = None
             if state.session is not None:
-                state.session.close()
+                # The loop owns the draining, so closing must not start
+                # another one -- a per-request or per-shutdown drain would
+                # undo the point of deferring.
+                state.session.close(settle_chain=False)
                 state.session = None
 
     app = FastAPI(

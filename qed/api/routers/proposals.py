@@ -106,8 +106,14 @@ async def post_proposal(request: Request) -> Response:
         "verdict": outcome.verdict.model_dump(mode="json"),
         "enforced": outcome.enforced,
         "effective_decision": outcome.effective_decision.value,
-        "evidence_ref": str(outcome.records[-1].seq),
+        # SPEC §13. In the Postgres/HA path the records are queued and the
+        # leader has not chained them yet, so the reference is the outbox id
+        # and `GET /v1/evidence/by-ref/{id}` resolves it once it has. Writing
+        # a sequence number here that did not exist yet would be the sort of
+        # plausible lie an integration builds on.
+        "evidence_ref": outcome.records[-1].ref,
         "evidence_seq": [record.seq for record in outcome.records],
+        "evidence_pending": any(record.deferred for record in outcome.records),
         # The approval service is week 4. `null` and not an empty object: there
         # is no approval, rather than an approval with nothing in it.
         "approval": None,
@@ -191,8 +197,9 @@ async def post_result(proposal_id: str, request: Request) -> Response:
         {
             "recorded": True,
             "assurance": assurance.value,
-            "evidence_ref": str(record.seq),
+            "evidence_ref": record.ref,
             "evidence_seq": record.seq,
+            "evidence_pending": record.deferred,
         },
         status_code=201,
     )

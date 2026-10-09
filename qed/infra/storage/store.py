@@ -146,6 +146,17 @@ class SqlStore:
 
     # ---------------------------------------------------------------- lifecycle
 
+    @property
+    def dialect(self) -> Dialect:
+        """Which backend this store is talking to.
+
+        Exposed because callers outside storage legitimately want the name --
+        `qed status` reports it, and the deferred write path is chosen by it --
+        and reaching through `_conn` for that would make every such caller a
+        user of a private attribute.
+        """
+        return self._conn.dialect
+
     def migrate(self) -> None:
         """Apply each migration once, in name order.
 
@@ -454,6 +465,91 @@ class SqlStore:
             merkle_root=str(row["merkle_root"]),
             evidence_seq=None if row["evidence_seq"] is None else int(row["evidence_seq"]),
         )
+
+    # ------------------------------------------------------------- outbox
+
+    def enqueue_outbox(self, outbox_id: str, record_json: str, *, created_at: datetime) -> str:
+        """Durably accept a record that is not chained yet (SPEC §10.3).
+
+        This is the write that makes a decision recorded. The sequence number,
+        the previous hash, the record hash and the signature are all assigned
+        later by whichever replica holds the chain lock -- none of them can be
+        computed here, because every one depends on where the record lands in
+        an order this process does not control.
+
+        What *is* guaranteed here is durability: once this returns, the record
+        exists and the leader will chain it. So "no decision without a record"
+        holds at enqueue time, which is what lets the API answer before the
+        chain has caught up.
+        """
+        self._conn.execute(
+            "INSERT INTO evidence_outbox (id, created_at, record_json) VALUES (?, ?, ?)",
+            (outbox_id, rfc3339_ms(created_at), record_json),
+        )
+        return outbox_id
+
+    def outbox_depth(self) -> int:
+        """How far behind the chain is. SPEC §18's ``qed_chain_lag_records``.
+
+        The number an operator watches: a depth that keeps growing means the
+        leader is gone, or is losing the lock faster than it can drain.
+        """
+        row = self._conn.execute("SELECT count(*) AS n FROM evidence_outbox").fetchone()
+        return 0 if row is None else int(row["n"])
+
+    def outbox_batch(self, limit: int = 100) -> list[tuple[str, str]]:
+        """The oldest ``limit`` entries as ``(id, record_json)``.
+
+        Ordered by ``created_at, id`` exactly as SPEC §10.3 says, and the tie
+        break on ``id`` matters: two replicas enqueueing in the same
+        millisecond would otherwise be drained in an order the database chose,
+        and the chain's order would differ between two replays of the same
+        inputs. ULIDs sort by time within a millisecond, so the order is
+        stable and roughly causal.
+        """
+        rows = self._conn.execute(
+            "SELECT id, record_json FROM evidence_outbox ORDER BY created_at, id LIMIT ?",
+            (limit,),
+        )
+        return [(str(row["id"]), str(row["record_json"])) for row in rows]
+
+    def delete_outbox(self, outbox_ids: Sequence[str]) -> int:
+        """Remove drained entries. Called inside the drain's transaction."""
+        if not outbox_ids:
+            return 0
+        placeholders = ",".join("?" for _ in outbox_ids)
+        cursor = self._conn.execute(
+            f"DELETE FROM evidence_outbox WHERE id IN ({placeholders})", tuple(outbox_ids)
+        )
+        return int(cursor.rowcount)
+
+    def record_outbox_ref(self, outbox_id: str, seq: int) -> None:
+        """Remember which ``seq`` an outbox id became (SPEC §13 ``by-ref``).
+
+        Kept after the outbox row is gone, because the id is what the API
+        already handed to a caller and ``GET /v1/evidence/by-ref/{id}`` has to
+        keep answering it. Without this the reference would resolve only while
+        the record was still undrained, which is the window in which nobody
+        needs it.
+        """
+        self._conn.execute(
+            "INSERT INTO outbox_refs (id, seq) VALUES (?, ?) ON CONFLICT(id) DO NOTHING",
+            (outbox_id, seq),
+        )
+
+    def resolve_outbox_ref(self, outbox_id: str) -> int | None:
+        """The ``seq`` an outbox id became, or None while it is still pending."""
+        row = self._conn.execute(
+            "SELECT seq FROM outbox_refs WHERE id = ?", (outbox_id,)
+        ).fetchone()
+        return None if row is None else int(row["seq"])
+
+    def outbox_pending(self, outbox_id: str) -> bool:
+        """Whether the id is still waiting to be chained."""
+        row = self._conn.execute(
+            "SELECT 1 AS present FROM evidence_outbox WHERE id = ?", (outbox_id,)
+        ).fetchone()
+        return row is not None
 
     # ------------------------------------------------------------- budgets
 

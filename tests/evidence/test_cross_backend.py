@@ -93,13 +93,17 @@ def write_all(writer: ChainWriter) -> list[dict[str, object]]:
     """Write the fixture records and return them as the export would."""
     written = []
     for index, (type_, payload) in enumerate(PAYLOADS):
-        record = writer.append(
+        appended = writer.append(
             type_=type_,
             assurance=Assurance.kernel,
             payload=payload,
             ts=WHEN.replace(microsecond=index * 1000),
         )
-        written.append(record.model_dump(mode="json"))
+        # These writers are deliberately direct on both backends -- the
+        # comparison is about the *chain*, so both sides have to be chained the
+        # same way. `record` is only None in deferred mode.
+        assert appended.record is not None
+        written.append(appended.record.model_dump(mode="json"))
     return written
 
 
@@ -204,11 +208,12 @@ class TestTheStoreBehavesTheSame:
         """What replaces SQLite's `BEGIN IMMEDIATE` on this backend: a second
         writer's insert fails rather than succeeding with a duplicate."""
         writer = ChainWriter(postgres, signer, instance_id=INSTANCE)
-        record = writer.append(
+        appended = writer.append(
             type_=EvidenceType.proposal, assurance=Assurance.kernel, payload={"n": 1}
         )
+        assert appended.record is not None
         with pytest.raises(Exception):  # the driver's own integrity error
-            postgres.append_evidence(record)
+            postgres.append_evidence(appended.record)
 
     def test_a_boolean_comes_back_as_a_boolean(self, signer, postgres: PostgresStore) -> None:
         """Postgres has a real boolean type; SQLite stores 0 and 1. Both have

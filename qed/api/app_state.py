@@ -15,6 +15,7 @@ from fastapi import Request
 
 from qed.api.auth import AdapterAuth
 from qed.api.human_auth import Human, bearer_token, human_from_claims
+from qed.api.leader import LeaderLoop
 from qed.api.problems import Problem
 from qed.config import IssuerConfig
 from qed.core.delegation.claims import AUDIENCE, TokenClaims, TokenVerificationError
@@ -51,6 +52,9 @@ class QedState:
     #: recording a Slack user id as the approver.
     slack: SlackChannel | None = None
     _jwks_uris: dict[str, str] = field(default_factory=dict, repr=False)
+    #: The chain leader loop, on the deferred path. None on SQLite, where the
+    #: decider chains its own records and there is nothing to elect.
+    leader: LeaderLoop | None = None
     #: Why the service is not ready, if it is not. Empty when it is.
     blockers: list[str] = field(default_factory=list)
 

@@ -87,6 +87,7 @@ class TestTheMigrationsAreShared:
             "0002_budget.sql",
             "0003_mandates.sql",
             "0004_approvals.sql",
+            "0005_outbox_refs.sql",
         ]
 
     def test_they_are_ordered_by_name(self) -> None:

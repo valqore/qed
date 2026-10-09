@@ -8,6 +8,7 @@ the server cannot drift into deciding things differently.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,7 +33,6 @@ from qed.core.schemas import (
     BudgetState,
     Decision,
     EvalContext,
-    EvidenceRecord,
     EvidenceType,
     HistoryDerived,
     Mandate,
@@ -41,7 +41,7 @@ from qed.core.schemas import (
     rfc3339_ms,
     utcnow,
 )
-from qed.infra.chain_writer import ChainWriter
+from qed.infra.chain_writer import Appended, ChainWriter
 from qed.infra.keys.file import PUBLIC_DIR_NAME, FileSigner, load_signer
 from qed.infra.storage.store import SqliteStore, SqlStore
 
@@ -54,6 +54,8 @@ __all__ = [
     "open_session",
     "open_store",
 ]
+
+logger = logging.getLogger("qed.runtime")
 
 DB_NAME = "qed.db"
 
@@ -83,7 +85,18 @@ class Session:
     def public_keys_dir(self) -> Path:
         return self.directory / PUBLIC_DIR_NAME
 
-    def close(self) -> None:
+    def close(self, *, settle_chain: bool = True) -> None:
+        """Close the store, draining anything this process queued first.
+
+        ``settle_chain=False`` for a caller that will drain on its own
+        schedule -- the API's leader loop does, and a per-request drain there
+        would undo the whole point of deferring.
+        """
+        if settle_chain:
+            try:
+                settle(self)
+            except Exception as exc:  # pragma: no cover - never block a close
+                logger.warning("could not settle the chain on close: %s", exc)
         self.store.close()
 
 
@@ -138,6 +151,11 @@ def open_session(
             instance_id=config.instance_id,
             dev=dev,
             masking=config.evidence.masking,
+            # Postgres exists for more than one replica, and more than one
+            # direct writer forks the chain -- so the backend decides, not a
+            # flag somebody has to remember to set. SQLite is one process
+            # writing for itself and has nothing to coordinate.
+            write_mode="deferred" if config.evidence.is_postgres else "direct",
         )
 
         paths = [baseline_pack_dir(), *(policy_paths or [Path(p) for p in config.policies])]
@@ -210,7 +228,7 @@ class CheckOutcome:
     #: False when the service runs in shadow mode: the decision is recorded but
     #: the adapter is told to proceed (ADR-003).
     enforced: bool
-    records: list[EvidenceRecord]
+    records: list[Appended]
 
     @property
     def effective_decision(self) -> Decision:
@@ -231,7 +249,7 @@ def _resolve_approval(
     *,
     key: str,
     now: datetime,
-) -> tuple[Verdict, list[EvidenceRecord]]:
+) -> tuple[Verdict, list[Appended]]:
     """Turn a REQUIRE_APPROVAL into whatever it actually is (SPEC §9.2).
 
     Four outcomes, in the order they are checked:
@@ -243,7 +261,7 @@ def _resolve_approval(
       copy, so the human sees one request instead of forty;
     * otherwise -> open a new request.
     """
-    records: list[EvidenceRecord] = []
+    records: list[Appended] = []
     store = session.store
 
     granted = store.active_window(key, now=now)
@@ -408,7 +426,7 @@ def check_proposal(
         now=stamp, mandate=mandate, history=history if history is not None else HistoryDerived()
     )
 
-    records: list[EvidenceRecord] = []
+    records: list[Appended] = []
     records.append(
         session.writer.append(
             type_=EvidenceType.proposal,
@@ -514,6 +532,37 @@ def check_proposal(
     return outcome
 
 
+def settle(session: Session) -> int:
+    """Chain anything this process queued, if nobody else is doing it.
+
+    A one-shot command -- `qed check`, `qed approve`, `qed mandate sign` --
+    enqueues and exits. Without this the record would sit in the outbox until
+    a server happened to run, so a CLI-only Postgres deployment would have a
+    chain that never advanced. That is not a trade worth making for a latency
+    benefit only a server needs.
+
+    If the lock is held, a server *is* running and will drain it; this returns
+    0 and the record is chained within that server's tick. Either way the
+    record is durable from the moment it was enqueued.
+
+    A no-op in direct mode, where the record was chained on the way in.
+    """
+    if not session.writer.deferred:
+        return 0
+    store = session.store
+    claim = getattr(store, "try_become_leader", None)
+    if claim is None or not claim():  # pragma: no cover - direct mode returns above
+        return 0
+    try:
+        from qed.infra.chain_drain import drain_until_empty
+
+        return drain_until_empty(session.writer).chained
+    finally:
+        resign = getattr(store, "resign_leadership", None)
+        if resign is not None:
+            resign()
+
+
 def chain_status(session: Session) -> dict[str, object]:
     """Small posture summary used by the CLI."""
     last = session.store.last_seq()
@@ -522,6 +571,13 @@ def chain_status(session: Session) -> dict[str, object]:
         "instance_id": session.config.instance_id,
         "records": session.store.count_evidence(),
         "last_seq": last,
+        "store": session.store.dialect.name,
+        # SPEC §18's `qed_chain_lag_records`, reported here until there is a
+        # /metrics endpoint to carry it. Always 0 on the direct path: the
+        # record was chained before the caller got an answer, so there is
+        # nothing that could lag.
+        "write_mode": "deferred" if session.writer.deferred else "direct",
+        "chain_lag_records": session.store.outbox_depth() if session.writer.deferred else 0,
         "key_id": session.signer.key_id,
         "policy_hash": session.bundle.hash,
         "rules_active": len(session.bundle.active_rules()),
