@@ -850,14 +850,14 @@ def login(
 @app.command()
 def token(
     issuer: Annotated[str, typer.Option("--issuer", help="The issuer you logged in to")],
-    gate_url: Annotated[
+    qed_url: Annotated[
         str, typer.Option("--qed-url", help="Base URL of QED API")
     ] = "http://127.0.0.1:8710",
     scope: Annotated[str, typer.Option("--scope", help="Scopes to request")] = "",
     adapter: Annotated[str, typer.Option("--adapter", help="Adapter id for signing")] = "",
     secret_env: Annotated[
         str, typer.Option("--secret-env", help="Env var holding the adapter secret")
-    ] = "GATE_ADAPTER_SECRET",
+    ] = "QED_ADAPTER_SECRET",
     raw: Annotated[bool, typer.Option("--raw", help="Print only the token")] = False,
 ) -> None:
     """Exchange the stored login for a budgeted qed token (SPEC §6.2).
@@ -921,10 +921,10 @@ def token(
     }
     try:
         response = httpx.post(
-            f"{gate_url.rstrip('/')}{path}", content=body, headers=headers, timeout=10.0
+            f"{qed_url.rstrip('/')}{path}", content=body, headers=headers, timeout=10.0
         )
     except httpx.HTTPError as exc:
-        _fail(f"could not reach QED at {gate_url}: {exc}")
+        _fail(f"could not reach QED at {qed_url}: {exc}")
         return
 
     if response.status_code != 200:

@@ -31,7 +31,7 @@ from qed.core.schemas import rfc3339_ms, utcnow
 from qed.infra.keys.file import init_keys
 
 ADAPTER_ID = "adp_test"
-SECRET_ENV = "GATE_TEST_ADAPTER_SECRET"
+SECRET_ENV = "QED_TEST_ADAPTER_SECRET"
 SECRET = "s" * 48
 
 

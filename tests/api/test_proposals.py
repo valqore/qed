@@ -285,7 +285,7 @@ def test_what_comes_back_is_what_went_into_the_chain(signed: Signer) -> None:
     }
 
 
-def test_an_identifier_gate_generated_is_never_masked_in_the_chain(signed: Signer) -> None:
+def test_an_identifier_qed_generated_is_never_masked_in_the_chain(signed: Signer) -> None:
     """Regression for the ``token_jti`` / card-number collision.
 
     ``01JB000000000000000000JTI0`` holds eighteen zeros, which pass the Luhn

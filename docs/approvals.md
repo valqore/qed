@@ -150,8 +150,8 @@ make the whole control decorative.
 ```yaml
 approvals:
   slack:
-    bot_token_env: GATE_SLACK_BOT_TOKEN
-    signing_secret_env: GATE_SLACK_SIGNING_SECRET
+    bot_token_env: QED_SLACK_BOT_TOKEN
+    signing_secret_env: QED_SLACK_SIGNING_SECRET
     channel: "#approvals"
   groups_by_email:
     priya@example.com: [sre-oncall]

@@ -114,7 +114,7 @@ def served(tmp_path: Path) -> Iterator[Served]:
                 process.wait(timeout=10)
 
 
-class TestGateServe:
+class TestQedServe:
     def test_it_comes_up_and_reports_ready(self, served: Served) -> None:
         import json
 

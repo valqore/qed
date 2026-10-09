@@ -171,7 +171,7 @@ def _from_dict(data: dict[str, Any]) -> StoredLogin | None:
 
 
 def _default_directory() -> Path:
-    override = os.environ.get("GATE_CREDENTIALS_DIR")
+    override = os.environ.get("QED_CREDENTIALS_DIR")
     if override:
         return Path(override)
     if os.name == "nt":

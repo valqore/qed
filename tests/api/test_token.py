@@ -141,7 +141,7 @@ def exchange(signed: Signer, **body: Any) -> httpx.Response:
 
 
 class TestHappyPath:
-    def test_an_idp_token_is_exchanged_for_a_gate_token(self, signed: Signer) -> None:
+    def test_an_idp_token_is_exchanged_for_a_qed_token(self, signed: Signer) -> None:
         response = exchange(signed)
         assert response.status_code == 200, response.text
         body = response.json()

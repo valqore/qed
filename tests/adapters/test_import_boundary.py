@@ -109,12 +109,12 @@ class TestTheClassifierHasNoImportThatCanFail:
     def test_it_imports_nothing_from_the_kernel_beyond_the_schema(self) -> None:
         """Classification is the adapter's job; deciding is the kernel's."""
         tree = ast.parse(INTENT.read_text(encoding="utf-8"), filename=str(INTENT))
-        gate_modules = {
+        qed_modules = {
             node.module
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("qed.")
         }
-        assert gate_modules <= {"qed.core.schemas"}, gate_modules
+        assert qed_modules <= {"qed.core.schemas"}, qed_modules
 
     def test_it_is_importable_with_nothing_else_present(self) -> None:
         """A positive check to go with the structural ones."""

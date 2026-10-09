@@ -236,7 +236,7 @@ class TestIdpTokens:
         assert claims.sub == "ali@example.com"
         assert principal.human_hash is not None
 
-    def test_an_idp_token_is_not_accepted_under_the_gate_algorithm(self) -> None:
+    def test_an_idp_token_is_not_accepted_under_the_qed_algorithm(self) -> None:
         """The accepted algorithms are named by the caller for each key source,
         so an IdP token cannot be presented as a qed-issued one."""
         private = RSAKey.generate_key(2048, parameters={"kid": "idp-1"})

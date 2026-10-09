@@ -152,7 +152,7 @@ Kernel ulaşılamadığında adaptör yerel bir "açık tutuldu" kaydı yazar; k
 | C | **DB-atanmış seq** (Postgres `SERIAL`/sequence) + `prev_hash` için son kaydı oku-yaz transaction'ı | Lider yok | Yüksek eşzamanlılıkta serialization hataları ve retry |
 
 ### Öneri
-**A (tek yazar lideri) v1; B v2'de gerekirse.** SQLite modunda zaten tek yazar. Postgres'te `pg_advisory_lock(gate_chain)` tutan replica "chain writer"; diğer replica'lar karar verir (saf fonksiyon, lidersiz), kanıt yazımını `evidence_outbox` tablosuna atar, lider sıralı olarak zincire alır. Karar gecikmesi lidere bağlı değil; yalnız kanıtın zincire girmesi birkaç ms gecikir. Lider düşerse lock serbest kalır, başka replica alır; outbox kaybolmaz.
+**A (tek yazar lideri) v1; B v2'de gerekirse.** SQLite modunda zaten tek yazar. Postgres'te `pg_advisory_lock(qed_chain)` tutan replica "chain writer"; diğer replica'lar karar verir (saf fonksiyon, lidersiz), kanıt yazımını `evidence_outbox` tablosuna atar, lider sıralı olarak zincire alır. Karar gecikmesi lidere bağlı değil; yalnız kanıtın zincire girmesi birkaç ms gecikir. Lider düşerse lock serbest kalır, başka replica alır; outbox kaybolmaz.
 
 **Şema kararları:**
 - `EvidenceRecord.schema_version: "1.0"` zorunlu, hash girdisine dahil.

@@ -62,8 +62,8 @@ HEADER_NONCE: Final = "x-qed-nonce"
 HEADER_SIGNATURE: Final = "x-qed-signature"
 
 #: Environment variable prefix used when an adapter is not in ``qed.yaml``.
-#: ``GATE_ADAPTER_SECRET_ADP_LAPTOP_ALI`` for adapter id ``adp_laptop_ali``.
-ENV_PREFIX: Final = "GATE_ADAPTER_SECRET_"
+#: ``QED_ADAPTER_SECRET_ADP_LAPTOP_ALI`` for adapter id ``adp_laptop_ali``.
+ENV_PREFIX: Final = "QED_ADAPTER_SECRET_"
 
 #: Shortest secret accepted. 32 bytes of entropy, hex or base64, is 43+ chars;
 #: anything shorter is a password someone typed and is not worth guarding.

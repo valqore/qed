@@ -56,7 +56,7 @@ a CI job or on a laptop with no browser to redirect.
 # qed.yaml
 adapters:
   - adapter_id: adp_laptop_ali
-    secret_env: GATE_SECRET_LAPTOP_ALI    # the name, never the value
+    secret_env: QED_SECRET_LAPTOP_ALI    # the name, never the value
     kind: mcp
 ```
 

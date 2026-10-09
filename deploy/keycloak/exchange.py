@@ -37,7 +37,7 @@ def main() -> int:
     if len(sys.argv) < 4:
         sys.stderr.write(__doc__ or "")
         return 2
-    gate_url, adapter, subject = sys.argv[1], sys.argv[2], sys.argv[3]
+    qed_url, adapter, subject = sys.argv[1], sys.argv[2], sys.argv[3]
     scope = sys.argv[4] if len(sys.argv) > 4 else "read write admin"
 
     body = json.dumps(
@@ -61,7 +61,7 @@ def main() -> int:
         canonical_string(method="POST", path=PATH, timestamp=timestamp, nonce="", body=body),
     )
     request = urllib.request.Request(
-        f"{gate_url.rstrip('/')}{PATH}",
+        f"{qed_url.rstrip('/')}{PATH}",
         data=body,
         method="POST",
         headers={

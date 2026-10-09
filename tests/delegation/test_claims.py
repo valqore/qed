@@ -52,7 +52,7 @@ class TestValidateClaims:
         with pytest.raises(TokenVerificationError, match="audience"):
             validate_claims(claims(aud="some-other-api"), now=NOW, issuers=ISSUERS)
 
-    def test_an_audience_list_containing_gate_is_accepted(self) -> None:
+    def test_an_audience_list_containing_qed_is_accepted(self) -> None:
         validate_claims(claims(aud=["other", "qed"]), now=NOW, issuers=ISSUERS)
 
     def test_an_expired_token_is_refused(self) -> None:

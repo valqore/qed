@@ -976,7 +976,7 @@
     decision: ALLOW
     rules: [AG-DEF-001]
 
-- id: idn-009-action-against-the-gates-own-state
+- id: idn-009-action-against-qeds-own-state
   patch:
     action:
       kind: shell

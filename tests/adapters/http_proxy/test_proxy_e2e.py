@@ -352,7 +352,7 @@ async def run_with_broker(
         session.close()
 
 
-async def test_the_gates_credential_replaces_the_agents(qed_dir: Path, tmp_path: Path) -> None:
+async def test_the_brokered_credential_replaces_the_agents(qed_dir: Path, tmp_path: Path) -> None:
     """Stripping comes before attaching. An adapter that added the broker's
     header while leaving the agent's in place would be an adapter where the
     agent still chooses which credential is used."""

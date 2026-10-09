@@ -149,7 +149,7 @@ class TestBlastHints:
         assert built.context.blast_radius_hints.writes is False
         assert built.context.blast_radius_hints.deletes is False
 
-    def test_the_tunnel_summary_says_what_the_gate_cannot_see(self) -> None:
+    def test_the_tunnel_summary_says_what_the_qed_cannot_see(self) -> None:
         built, _ = proposal("CONNECT api.stripe.com:443 HTTP/1.1")
         assert "cannot see the method, path or body" in built.context.summary
 

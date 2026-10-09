@@ -759,7 +759,7 @@ Full STRIDE in `THREAT_MODEL.md`. Key MUSTs:
 ## 18. Observability
 
 - **Events**: `GET /v1/events` SSE; each event = redacted `EvidenceRecord` summary (`seq, ts, type, decision, rule_ids, principal_display?, agent, action.name, target, environment, assurance, mode`). Backfill via `?from_seq=`.
-- **Metrics** (Prometheus): `gate_decisions_total{decision,mode,environment,adapter_kind}`, `gate_decision_latency_seconds` (histogram; target p95 < 50 ms), `gate_approvals_total{decision}`, `gate_approval_wait_seconds`, `gate_budget_exhausted_total`, `gate_chain_lag_records` (outbox depth), `gate_chain_last_checkpoint_age_seconds`, `gate_ungated_windows_total`, `gate_no_rule_matched_ratio`.
+- **Metrics** (Prometheus): `qed_decisions_total{decision,mode,environment,adapter_kind}`, `qed_decision_latency_seconds` (histogram; target p95 < 50 ms), `qed_approvals_total{decision}`, `qed_approval_wait_seconds`, `qed_budget_exhausted_total`, `qed_chain_lag_records` (outbox depth), `qed_chain_last_checkpoint_age_seconds`, `qed_ungated_windows_total`, `qed_no_rule_matched_ratio`.
 - **SIEM**: OCSF-shaped JSON (class `Authorization` / `API Activity` mapping documented in `docs/siem.md`) via webhook or stdout; CEF optional.
 
 ---

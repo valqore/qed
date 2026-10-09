@@ -52,8 +52,8 @@ delegation:
 YAML
 qed keys init --dir "$DIR/qed" >/dev/null
 qed serve --dir "$DIR/qed" --config "$DIR/qed.yaml" &
-GATE_PID=$!
-trap 'kill $GATE_PID 2>/dev/null || true' EXIT
+QED_PID=$!
+trap 'kill $QED_PID 2>/dev/null || true' EXIT
 for _ in $(seq 1 40); do
   if curl -fsS "$QED_URL/readyz" >/dev/null 2>&1; then break; fi
   sleep 1
