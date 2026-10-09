@@ -1552,6 +1552,184 @@ def _print_http_stats(stats: HttpProxyStats) -> None:
         )
 
 
+# ----------------------------------------------------------------------- hook
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def hook(ctx: typer.Context) -> None:
+    """Decide one coding-agent tool call, reading the payload on stdin.
+
+        qed hook claude-code --human you@example.com
+
+    Not meant to be typed: `qed install claude-code` writes it into the
+    agent's settings. Documented so that an operator who finds it in a
+    settings file can tell what it is.
+
+    Everything is parsed by hand rather than by Typer, and `--help` is off,
+    because this runs on every tool call the agent makes: building a command
+    tree to read four flags is latency its user feels. Exit 0 leaves the
+    normal permission flow alone, exit 2 blocks.
+    """
+    args = list(ctx.args)
+    agent = args[0] if args and not args[0].startswith("-") else ""
+    rest = args[1:] if agent else args
+
+    if agent in {"", "-h", "--help"}:
+        typer.echo("usage: qed hook claude-code [--human you@example.com] [--env dev]")
+        typer.echo("")
+        typer.echo("Agents: claude-code. Codex arrives when its hook API is confirmed")
+        typer.echo("(SPEC 12.2); there is no wrapper yet and a stub would be worse")
+        typer.echo("than its absence.")
+        raise typer.Exit(0)
+
+    if agent != "claude-code":
+        typer.secho(
+            f"qed: no hook for {agent!r}. Only `claude-code` exists today; Codex "
+            "arrives when its hook API is confirmed (SPEC 12.2).",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from qed.adapters.hooks.claude_code import main as hook_main
+
+    raise typer.Exit(hook_main(rest))
+
+
+# -------------------------------------------------------------------- install
+
+
+@app.command()
+def install(
+    agent: Annotated[str, typer.Argument(help="claude-code")],
+    human: Annotated[
+        str | None,
+        typer.Option("--human", help="Who the session acts for. Hashed into principal_hash."),
+    ] = None,
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    environment: Annotated[
+        str, typer.Option("--env", help="dev, staging or prod. Scores the blast radius.")
+    ] = "dev",
+    fail_mode: Annotated[
+        str,
+        typer.Option(
+            "--fail-mode",
+            help="What to do when qed itself cannot decide. open or closed; "
+            "SPEC 12.2 defaults open in dev and closed in prod.",
+        ),
+    ] = "",
+    scope: Annotated[
+        str,
+        typer.Option(
+            "--scope",
+            help="local (gitignored, the default), project (committed) or user (all projects).",
+        ),
+    ] = "local",
+    mandate_file: Annotated[
+        Path | None, typer.Option("--mandate", help="Mandate as JSON, for an unattended agent.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print what would be written and write nothing.")
+    ] = False,
+) -> None:
+    """Write the qed hook into a coding agent's settings (SPEC 12.2).
+
+        qed install claude-code --human you@example.com
+
+    The entry is merged into the existing hooks rather than replacing them, is
+    matched on the executable so re-running updates it instead of adding a
+    second, and is written in exec form so a path with spaces needs no
+    quoting.
+
+    `--scope local` by default, which is the gitignored settings file: an
+    entry naming one person's email in a file the team commits would
+    attribute everybody's actions to whoever ran the installer.
+    """
+    if agent != "claude-code":
+        _fail(
+            f"no installer for {agent!r}. Only `claude-code` exists today; Codex arrives "
+            "when its hook API is confirmed (SPEC 12.2)."
+        )
+        return
+    if environment not in {"dev", "staging", "prod"}:
+        _fail("--env must be dev, staging or prod")
+        return
+    if scope not in {"local", "project", "user"}:
+        _fail("--scope must be local, project or user")
+        return
+    if human is None and mandate_file is None:
+        _fail(
+            "give --human <who you are> or --mandate <file>. Without either, every verdict "
+            "is a synthetic AG-IDN-007 identity BLOCK reached before any rule is evaluated, "
+            "and in shadow mode nothing would look wrong."
+        )
+        return
+
+    mode = fail_mode or ("closed" if environment == "prod" else "open")
+    if mode not in {"closed", "open"}:
+        _fail("--fail-mode must be open or closed")
+        return
+
+    from qed.adapters.hooks.install import apply_plan, plan_install, settings_path
+
+    target = settings_path(scope=scope)
+    plan = plan_install(
+        path=target,
+        human=human,
+        environment=environment,
+        directory=directory,
+        config=config,
+        fail_mode=mode,
+        mandate=mandate_file,
+    )
+
+    typer.echo(f"settings : {plan.path}")
+    typer.echo(f"command  : {plan.command}")
+    typer.echo(f"args     : {' '.join(plan.args)}")
+    if dry_run:
+        typer.echo("")
+        typer.echo("--dry-run: nothing was written.")
+        return
+
+    try:
+        result = apply_plan(plan)
+    except (OSError, ValueError) as exc:
+        _fail(str(exc))
+        return
+
+    typer.echo("")
+    typer.secho(
+        f"qed: {'updated' if result.replaced else 'installed'} the PreToolUse hook"
+        + (f", leaving {result.preserved} other hook(s) alone" if result.preserved else ""),
+        fg=typer.colors.GREEN,
+    )
+    typer.echo("")
+    typer.secho(
+        "This adapter is ADVISORY and always will be (SPEC 12.2, ADR-001). Whoever can "
+        "edit these settings can delete this line, so the chain records every decision "
+        "as advisory and never claims the call could not have happened.",
+        fg=typer.colors.YELLOW,
+    )
+    typer.echo("")
+    typer.echo("To stop a developer or a prompt-injected agent removing it, deploy the")
+    typer.echo("same entry through Claude Code's managed settings and set")
+    typer.echo("`allowManagedHooksOnly: true`. That hardens the adapter; it does not make")
+    typer.echo("it enforcing. For that the agent has to be unable to reach the target")
+    typer.echo("without qed: see `qed proxy` and the credential broker.")
+    if mode == "open":
+        typer.echo("")
+        typer.secho(
+            f"fail_mode is open (env {environment}), so a tool call proceeds when qed "
+            "itself cannot decide. The gap is written to the chain as an ungated_window, "
+            "not swallowed. Use --fail-mode closed to refuse instead.",
+            fg=typer.colors.YELLOW,
+        )
+
+
 def main() -> None:
     app()
 

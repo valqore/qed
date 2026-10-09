@@ -6,6 +6,67 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - the Claude Code hook and `qed install` (SPEC 12.2, week 6)
+
+```
+qed install claude-code --human you@acme.com
+```
+
+Every `Bash`, file write, MCP call and skill then goes through the same
+`check_proposal` the two proxies and `qed check` use, and lands in the same
+chain. `docs/hooks.md`; the three decisions that depart from SPEC 12.2 are in
+ADR-0008, which exists because the spec was written against the older
+exit-code-only hook contract.
+
+- **An ALLOW verdict prints nothing at all.** The contract has a
+  `permissionDecision: "allow"` and it *bypasses the permission rules the
+  operator configured*. A gate answering `allow` to everything it did not block
+  would be granting permissions nobody asked for -- somebody who had denied
+  `Bash(rm *)` in their own settings would find QED waving it through. Exit 0
+  with no output means "no decision, carry on with the normal flow", which is
+  the honest answer from something asked whether to *stop* a call. A test
+  asserts the string never reaches stdout.
+- **REQUIRE_APPROVAL answers `ask`, not a refusal.** SPEC 12.2 degraded it to
+  exit 2 "(hook cannot wait)". It still cannot -- but `ask` hands the call to
+  the person at the terminal, which is what the rule asked for. The approval is
+  still opened and recorded, so it can also be decided out of band and the
+  window applies to the retry.
+- **Nothing ever exits 1.** Any non-zero exit that is not 2 is *non-blocking*:
+  the call proceeds and the transcript shows a notice. So a traceback would not
+  fail closed, it would fail silently open -- the hook documentation warns that
+  a mistyped path "silently disables the gate". Every path out of the adapter
+  is a deliberate exit, and a fail-open gap writes an `ungated_window`.
+- `mcp__postgres__execute_sql` becomes `postgres.execute_sql`, the same
+  `action.name` the MCP proxy writes, so **one rule matches the same action
+  through either adapter**.
+- File paths are recorded relative to the session directory, so the chain does
+  not carry somebody's home directory and a rule against `src/*` matches on two
+  machines. A shell command targets `host:<hostname>`, because the command is
+  the parameters.
+- `agent_chain` is real, not asserted: Claude Code sends `agent_id` and
+  `agent_type` only inside a subagent, so `["claude-code@host", "sub:Explore"]`
+  means one genuinely is acting.
+- Always `enforcement: advisory` (ADR-001), and `HookOptions` now refuses an
+  identityless construction like the other two adapters do.
+- `qed install` merges rather than replacing, leaves other hooks and the rest
+  of the file alone, defaults to the gitignored `settings.local.json`, resolves
+  the executable to an absolute path, and writes the exec form so a Windows
+  path needs no quoting. It is idempotent on the *invocation* rather than the
+  path: recreating a virtualenv replaces the entry whose executable moved
+  instead of leaving a dead one beside a live one, and a dead entry is
+  non-blocking.
+- It prints the hardening route (`allowManagedHooksOnly` through managed
+  settings) and is clear that hardening is not enforcement. SPEC 12.2's note
+  names `allowManagedPermissionRulesOnly`, which is the permissions equivalent
+  and does not lock hooks.
+
+Codex is not built: SPEC 12.2 says "implement when API confirmed" and it is
+not. A stub that recorded nothing would be worse than its absence, because
+`qed doctor` would list an adapter that does nothing.
+
+70 new tests, 1,719 total.
+
+
 ### Added - HTTP forward proxy (`qed proxy`) (SPEC 12.3, week 5)
 
 Point an agent's `HTTPS_PROXY` at QED and every outbound call gets a

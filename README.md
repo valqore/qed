@@ -44,15 +44,17 @@ hardware, including air-gapped.
 | Standalone verifier | `packages/qed-verify/` |
 | **MCP proxy** (stdio and Streamable HTTP), shadow mode | `qed/adapters/mcp/` |
 | **HTTP forward proxy** (`CONNECT` and plain HTTP) | `qed/adapters/http_proxy/` |
+| **Claude Code hook** + `qed install` | `qed/adapters/hooks/` |
 | **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
 | **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
 | **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
-| CLI: `keys init`, `check`, `policy lint/explain/test`, `export`, `verify`, `serve`, `mcp`, `proxy`, `login`, `token`, `mandate`, `approve`, `doctor` | `qed/cli.py` |
+| CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint` | `qed/cli.py` |
 
-Not built yet: coding-agent hooks (`qed install claude-code`), the Python
-SDK, `mode: mitm` for the HTTP proxy, compliance packs beyond the baseline,
-the live UI.
+Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2), the Python
+SDK, Postgres and the chain leader/outbox, Helm, `mode: mitm` for the HTTP
+proxy, compliance packs beyond the baseline, and SPEC §19's live-stream and
+budget pages.
 
 ## Quick start
 
@@ -85,6 +87,22 @@ qed export --dir .qed --format oscal --out assessment.json
 ```
 
 `--human` or `--mandate` is required. See `docs/mcp-proxy.md` for why.
+
+### Put it in front of your coding agent
+
+```bash
+qed install claude-code --human you@example.com
+```
+
+Every `Bash`, every file write, every MCP call and every skill then goes
+through the same kernel. A refused call comes back as `deny` with the rule ids;
+one that needs a person comes back as `ask`, which puts the question to whoever
+is at the terminal.
+
+This adapter is **advisory and always will be** — whoever can edit the settings
+can delete the entry that calls it, so the chain records it as advisory and
+never claims the call could not have happened. `docs/hooks.md` has the
+hardening, and why an ALLOW verdict deliberately prints nothing at all.
 
 ### Put it in front of everything else
 
@@ -121,7 +139,7 @@ adapters (SPEC §17). Adapters sign each request; see `docs/api.md`.
 2. `DESIGN_DECISIONS.md` — ADR-001…008, accepted.
 3. `docs/adr/` — decisions made while implementing, where the spec was silent.
 4. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
-5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/credential-broker.md`,
+5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
    `docs/assurance-classes.md`, `docs/policy-testing.md`.
 
@@ -143,6 +161,7 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 | Every `/v1` route refuses an unsigned request | `tests/api/test_auth.py` |
 | Masking never rewrites a kernel-generated identifier | `tests/masking/test_masking.py` |
 | No package shadows a standard-library module | `tests/test_no_stdlib_shadowing.py` |
+| The hook never emits `allow`, and never exits 1 | `tests/adapters/test_claude_code_hook.py` |
 | An adapter's `execution_result` records the enforcement its proposal did | `tests/adapters/http_proxy/test_proxy_e2e.py` |
 | The OSCAL export validates against the NIST schema | `tests/evidence/test_oscal_schema.py` |
 | Tool-call classification imports nothing that can fail | `tests/adapters/test_import_boundary.py` |
