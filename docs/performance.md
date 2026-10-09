@@ -62,11 +62,27 @@ does not reach that**, and will not:
 | PostgreSQL decisions | ~105/s |
 | SQLite chain appends | ~1,270/s |
 
-1,000 decisions a second is four to ten replicas, which is exactly what the
-PostgreSQL path exists for (ADR-0009). Measured on one machine with one local
-PostgreSQL, four replicas reach ~290/s — the scaling is real and the ceiling
-there is the single database and a single Python process per replica, not the
-design.
+1,000 decisions a second is several replicas, which is exactly what the
+PostgreSQL path exists for (ADR-0009).
+
+**A replica is a process, and that matters more than it sounds.** Four
+*threads* in one interpreter are not four replicas, and whether they beat one
+depends on where a decision's time goes:
+
+| four concurrent sessions, one process | one | four |
+|---|---|---|
+| developer machine, PostgreSQL in Docker | 102/s | **300/s** |
+| CI runner, PostgreSQL on loopback | 277/s | **171/s** |
+
+Both are correct. When the database is remote or slow a decision is mostly
+socket wait, threads release the GIL while waiting, and four overlap. When it
+is local and fast a decision is mostly Python — hashing, signing, 46 rules — so
+four threads contend for the GIL and come out *slower* than one.
+
+So the honest claim is: **per-replica throughput is 250–400 decisions/s, and
+you scale it with replicas (processes, pods), not with threads.** An earlier
+version of this page read the developer-machine number as proof that
+concurrency scales. It was proof that that machine's database was slow.
 
 This is written down rather than quietly reinterpreted because the honest
 version is more useful: **p95 is the number that constrains an agent waiting

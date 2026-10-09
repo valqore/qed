@@ -65,9 +65,11 @@ Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
 SPEC §19's live-stream and budget pages.
 
 **Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
-10.6 ms on PostgreSQL, against SPEC §18's 50 ms target. Throughput is ~250
-decisions/s per replica, so SPEC §22's "1k rps" is four to ten replicas rather
-than one — `docs/performance.md` has the numbers and says so plainly.
+10.6 ms on PostgreSQL, against SPEC §18's 50 ms target — though that budget is
+a claim about the disk, not about Python, and slow storage can blow through it.
+Throughput is 250–400 decisions/s per replica, so SPEC §22's "1k rps" is
+several replicas rather than one. `docs/performance.md` has the numbers,
+including the ones that are less flattering.
 
 ## Quick start
 
