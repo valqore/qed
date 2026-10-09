@@ -71,6 +71,12 @@ ui = [
 postgres = [
     "psycopg[binary]>=3.2",
 ]
+# SPEC 10.4. The S3 object-lock checkpoint publisher, which is the only anchor
+# that is genuinely write-once: an instance with no such publisher configured
+# never imports boto3.
+s3 = [
+    "boto3>=1.34",
+]
 
 [project.scripts]
 qed = "qed.cli:main"
@@ -123,6 +129,13 @@ ignore_missing_imports = true
 # module may be absent.
 [[tool.mypy.overrides]]
 module = ["psycopg", "psycopg.*"]
+ignore_missing_imports = true
+
+# Same reasoning for boto3, which only the S3 object-lock checkpoint publisher
+# needs. It also ships no type stubs of its own, so this says both things at
+# once: it may be absent, and it is untyped when present.
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

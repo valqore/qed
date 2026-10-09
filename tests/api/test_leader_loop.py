@@ -1,14 +1,18 @@
-"""The chain leader's loop (SPEC §10.3, §104).
+"""The chain's background loop (SPEC §10.3, §10.4, §104).
 
 ``tests/evidence/test_ha_outbox.py`` covers the drain -- that two replicas
 produce one contiguous chain. These tests cover the *loop* around it: whether
-it runs at all, whether it re-asks who the leader is, and whether it stops
-without leaving a task or a lock behind.
+it runs, whether it re-asks who the leader is, and whether it stops without
+leaving a task or a lock behind.
 
-The SQLite half runs everywhere, because "there is no leader on SQLite" is
-exactly the property worth pinning: a drain task on a single-writer backend
-would be a task with nothing to do and a lock that does not exist. The
-PostgreSQL half needs ``QED_TEST_POSTGRES_DSN``.
+The split that matters is between the loop's two jobs. **Draining** is the HA
+path only. **Maintenance** -- checkpoint, publish, purge -- runs on both, so
+the loop itself is always applicable, and the SQLite tests below assert that it
+runs *without* an election rather than that it does not run at all.
+``tests/evidence/test_checkpoints.py`` covers what maintenance does; this
+covers when it is allowed to.
+
+The PostgreSQL half needs ``QED_TEST_POSTGRES_DSN``.
 """
 
 from __future__ import annotations
@@ -40,26 +44,56 @@ def enqueue(session: Session, note: str) -> str:
     return appended.ref
 
 
-class TestOnSqliteThereIsNoLeader:
-    def test_the_loop_does_not_apply(self, qed_dir: Path) -> None:
+class TestOnSqliteThereIsNoElection:
+    def test_there_is_nothing_to_drain(self, qed_dir: Path) -> None:
         """One process writes its own records on the way in, so there is
-        nothing to elect and nothing to drain."""
+        nothing queued and no lock to hold."""
         session = open_session(directory=qed_dir)
         try:
             assert session.writer.deferred is False
-            assert LeaderLoop(session).applicable is False
+            assert LeaderLoop(session).drains is False
+        finally:
+            session.close()
+
+    def test_the_loop_still_applies(self, qed_dir: Path) -> None:
+        """Because maintenance does. A SQLite instance needs checkpoints,
+        anchors and retention, and before this loop existed it got them only
+        if somebody ran `qed checkpoint` by hand."""
+        session = open_session(directory=qed_dir)
+        try:
+            assert LeaderLoop(session).applicable is True
+        finally:
+            session.close()
+
+    def test_a_tick_chains_nothing_and_claims_to_be_the_writer(self, qed_dir: Path) -> None:
+        """One process, one chain, no election -- so it may append, and
+        `leading` says so for `/v1/status`."""
+        session = open_session(directory=qed_dir)
+        try:
+            loop = LeaderLoop(session)
+            assert loop.tick_once() == 0
+            assert loop.leading is True
+            assert loop.last_error == ""
         finally:
             session.close()
 
     @pytest.mark.asyncio
-    async def test_start_is_a_no_op(self, qed_dir: Path) -> None:
+    async def test_stopping_without_a_lock_is_quiet(self, qed_dir: Path) -> None:
         session = open_session(directory=qed_dir)
         try:
-            loop = LeaderLoop(session)
+            loop = LeaderLoop(session, tick=0.01)
             loop.start()
+            assert loop._task is not None
+            await loop.stop()
             assert loop._task is None
-            await loop.stop()  # must not raise with nothing started
-            assert loop.leading is False
+        finally:
+            session.close()
+
+    @pytest.mark.asyncio
+    async def test_stopping_something_never_started_does_not_raise(self, qed_dir: Path) -> None:
+        session = open_session(directory=qed_dir)
+        try:
+            await LeaderLoop(session).stop()
         finally:
             session.close()
 
@@ -127,6 +161,10 @@ class TestOnPostgres:
             assert loop.tick_once() == 0
             assert loop.leading is False
             assert session.store.outbox_depth() == 1
+            # And it did not checkpoint either. A follower that ran
+            # maintenance would be a second writer, which is the whole thing
+            # the lock prevents.
+            assert loop.checkpoints == 0
         finally:
             leader_store.close()
 

@@ -432,6 +432,13 @@ class ChainWriter:
             if (stamp - oldest).total_seconds() < CHECKPOINT_EVERY_SECONDS:
                 return None
         root = merkle_root([r.hash for r in pending])
+        # The previous checkpoint's receipts, carried forward. They cannot go
+        # in the record they describe -- a receipt about a record would change
+        # the hash it is about -- so each checkpoint vouches for the
+        # publication of the one before it, and the first carries none. This
+        # is what makes a receipt durable: the `checkpoints` table can be
+        # restored from a backup, and the chain cannot.
+        carried = list(previous.published_to) if previous is not None else []
         # Direct, even in deferred mode. A checkpoint covers a contiguous
         # range that ends at `last_seq`, and a queued checkpoint would be
         # chained after records that arrived while it waited -- so it would
@@ -445,7 +452,7 @@ class ChainWriter:
                 "to_seq": last_seq,
                 "merkle_root": root,
                 "records": len(pending),
-                "previous_receipts": [],
+                "previous_receipts": carried,
             },
             ts=stamp,
         )

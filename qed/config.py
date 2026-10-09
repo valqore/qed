@@ -48,6 +48,37 @@ UNIMPLEMENTED_SECTIONS = (
 )
 
 
+class CheckpointConfig(Frozen):
+    """When to checkpoint, and where to publish the root (SPEC §10.4, §16).
+
+    ```yaml
+    evidence:
+      checkpoint:
+        every_records: 1000
+        every_seconds: 3600
+        publishers:
+          - { type: s3-object-lock, bucket: acme-qed-anchors }
+          - { type: file, path: /data/anchors }
+    ```
+
+    Publishing is what turns a checkpoint into an anchor. Without it the
+    Merkle root sits in the same chain it summarises, so an operator who could
+    rewrite the chain could recompute the root -- and nothing in an export
+    would say so. With it, the root is also somewhere the instance does not
+    control, and a rewritten chain fails the comparison.
+
+    Both thresholds are a *first reached* pair, not an and.
+    """
+
+    every_records: int = 1000
+    every_seconds: int = 3600
+    publishers: list[dict[str, object]] = Field(default_factory=list)
+
+    @property
+    def publishing(self) -> bool:
+        return bool(self.publishers)
+
+
 class EvidenceConfig(Frozen):
     #: Where the chain lives. Unset or ``sqlite`` means the file in the state
     #: directory; a ``postgresql://`` URL means that server (SPEC §15).
@@ -59,6 +90,7 @@ class EvidenceConfig(Frozen):
     store: str | None = None
     #: Environment variable holding the connection URL. Wins over `store`.
     store_env: str | None = None
+    checkpoint: CheckpointConfig = CheckpointConfig()
     #: Path to the Ed25519 private key, when it does not live in the state
     #: directory. A container's chain is on a writable volume while its key
     #: arrives from a read-only secret mount, and nesting the one inside the

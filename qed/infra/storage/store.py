@@ -63,6 +63,25 @@ class ChainIntegrityError(RuntimeError):
     """The store refused a write that would have broken the chain."""
 
 
+def _receipts(value: object) -> tuple[dict[str, object], ...]:
+    """Decode a ``published_to`` column.
+
+    Tolerant on purpose: this is the one column a backup restore or a hand
+    edit is likely to touch, and a chain that refused to open because a
+    receipt list was malformed would be a chain held hostage by metadata that
+    is not part of it.
+    """
+    if not value:
+        return ()
+    try:
+        decoded = json.loads(value if isinstance(value, str) else str(value))
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(decoded, list):
+        return ()
+    return tuple(entry for entry in decoded if isinstance(entry, dict))
+
+
 class Checkpoint(NamedTuple):
     """A row of ``checkpoints``. Indexable, so older positional reads still work."""
 
@@ -72,6 +91,12 @@ class Checkpoint(NamedTuple):
     #: Seq of the ``checkpoint`` evidence record itself. None only for a row
     #: written before the column existed.
     evidence_seq: int | None
+    #: What came back from publishing this checkpoint (SPEC §10.4). Held here
+    #: rather than in the record it describes -- a receipt about a record
+    #: cannot go inside that record, because it would change the hash it is
+    #: about. The *next* checkpoint's payload carries them, which is what makes
+    #: them durable; this column is how they get from one to the other.
+    published_to: tuple[dict[str, object], ...] = ()
 
 
 class _Cursor(Protocol):
@@ -494,8 +519,8 @@ class SqlStore:
         day it does not.
         """
         row = self._conn.execute(
-            "SELECT seq_from, seq_to, merkle_root, evidence_seq FROM checkpoints "
-            "ORDER BY seq_to DESC LIMIT 1"
+            "SELECT seq_from, seq_to, merkle_root, evidence_seq, published_to FROM "
+            "checkpoints ORDER BY seq_to DESC LIMIT 1"
         ).fetchone()
         if row is None:
             return None
@@ -504,6 +529,19 @@ class SqlStore:
             seq_to=int(row["seq_to"]),
             merkle_root=str(row["merkle_root"]),
             evidence_seq=None if row["evidence_seq"] is None else int(row["evidence_seq"]),
+            published_to=_receipts(row["published_to"]),
+        )
+
+    def record_publication(self, *, seq_to: int, receipts: Sequence[dict[str, object]]) -> None:
+        """Store what publishing one checkpoint produced (SPEC §10.4).
+
+        Replaces rather than appends: a publication is retried as a whole, and
+        two generations of receipts for one checkpoint would leave a reader to
+        guess which is current.
+        """
+        self._conn.execute(
+            "UPDATE checkpoints SET published_to = ? WHERE seq_to = ?",
+            (json.dumps(list(receipts)), seq_to),
         )
 
     # ------------------------------------------------------------- outbox

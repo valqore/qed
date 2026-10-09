@@ -1032,9 +1032,30 @@ def doctor(
         }
 
         from qed.infra.keys.rotation import pending_rotation
+        from qed.infra.maintenance import publishers_for
 
         staged = pending_rotation(session.directory)
         report["interrupted_rotation"] = None if staged is None else str(staged)
+
+        # A checkpoint whose root is published nowhere is a Merkle root inside
+        # the chain it summarises, which an operator who could rewrite the
+        # chain could recompute. Saying so is the point of this line.
+        anchors, anchor_problems = publishers_for(session.config)
+        last = session.store.last_checkpoint()
+        report["checkpoints"] = {
+            "publishers": [publisher.describe() for publisher in anchors],
+            "config_errors": anchor_problems,
+            "last": None
+            if last is None
+            else {
+                "to_seq": last.seq_to,
+                "merkle_root": last.merkle_root,
+                "published_to": [
+                    {"publisher": r.get("publisher"), "ok": r.get("ok"), "target": r.get("target")}
+                    for r in last.published_to
+                ],
+            },
+        }
     finally:
         session.close()
 
@@ -1056,6 +1077,22 @@ def doctor(
             f"on the next maintenance pass",
             fg=typer.colors.YELLOW,
         )
+    checkpoint_report = cast("dict[str, object]", report["checkpoints"])
+    configured = cast("list[str]", checkpoint_report["publishers"])
+    if configured:
+        typer.echo(f"anchors    : {'; '.join(configured)}")
+    else:
+        typer.secho(
+            "anchors    : none -- a checkpoint's Merkle root lives only in the chain it "
+            "summarises,\n"
+            "             so it attests to nothing an operator who could rewrite the "
+            "chain could not\n"
+            "             recompute. Configure `evidence.checkpoint.publishers`.",
+            fg=typer.colors.YELLOW,
+        )
+    for problem in cast("list[str]", checkpoint_report["config_errors"]):
+        typer.secho(f"             ! {problem}", fg=typer.colors.RED)
+
     if report["interrupted_rotation"]:
         typer.secho(
             f"rotation   : INTERRUPTED -- a staged key is at "
@@ -1254,10 +1291,35 @@ def checkpoint(
     ] = False,
     config: ConfigOption = None,
 ) -> None:
-    """Append a Merkle checkpoint over the records since the last one."""
+    """Append a Merkle checkpoint, publish its root, and apply retention.
+
+    One maintenance pass, run now rather than waiting for the running
+    instance's own loop (SPEC §10.4, §10.6). The three are together because
+    they have to happen in that order: a root is fixed, it is anchored
+    somewhere the instance does not control, and only then may payloads the
+    retention policy has expired be dropped.
+
+    The caller must be the chain's only writer. On the HA path a running
+    `qed serve` holds that lock, so this reports what it could not do rather
+    than racing it.
+    """
+    from qed.infra.maintenance import maintain
+
     session = open_session(directory=directory, config_path=config, strict_policy=False)
-    record = session.writer.checkpoint(force=force)
-    session.close()
+    try:
+        result = maintain(session, force_checkpoint=force)
+    finally:
+        session.close()
+
+    for problem in result.errors:
+        typer.secho(f"  ! {problem}", fg=typer.colors.RED, err=True)
+    if result.purged:
+        typer.echo(f"retention: {result.purged} payload(s) purged")
+    for receipt in result.receipts:
+        mark = "ok" if receipt.ok else "FAILED"
+        typer.echo(f"published: {receipt.publisher} -> {receipt.target} [{mark}]")
+
+    record = result.checkpoint
     if record is None:
         typer.echo("nothing to checkpoint yet")
         return
