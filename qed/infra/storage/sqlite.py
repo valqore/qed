@@ -16,6 +16,7 @@ from collections.abc import Iterator, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
+from typing import NamedTuple
 
 from qed.core.approval.model import ApprovalDecision, ApprovalRequest, ApprovalStatus
 from qed.core.budget import Charge, apply_charge
@@ -42,6 +43,17 @@ _EVIDENCE_COLUMNS = (
 
 class ChainIntegrityError(RuntimeError):
     """The store refused a write that would have broken the chain."""
+
+
+class Checkpoint(NamedTuple):
+    """A row of ``checkpoints``. Indexable, so older positional reads still work."""
+
+    seq_from: int
+    seq_to: int
+    merkle_root: str
+    #: Seq of the ``checkpoint`` evidence record itself. None only for a row
+    #: written before the column existed.
+    evidence_seq: int | None
 
 
 class SqliteStore:
@@ -338,13 +350,27 @@ class SqliteStore:
             (seq_to, seq_from, merkle_root, evidence_seq, json.dumps([])),
         )
 
-    def last_checkpoint(self) -> tuple[int, int, str] | None:
+    def last_checkpoint(self) -> Checkpoint | None:
+        """The newest checkpoint, including the seq of its own record.
+
+        ``evidence_seq`` is needed to date a checkpoint, and SPEC §19's badge
+        wants its age. It is *not* ``seq_to + 1``: that happens to be true for
+        a writer that checkpoints immediately, and an arithmetic guess about
+        where a record lives is the kind of thing that stays correct until the
+        day it does not.
+        """
         row = self._conn.execute(
-            "SELECT seq_from, seq_to, merkle_root FROM checkpoints ORDER BY seq_to DESC LIMIT 1"
+            "SELECT seq_from, seq_to, merkle_root, evidence_seq FROM checkpoints "
+            "ORDER BY seq_to DESC LIMIT 1"
         ).fetchone()
         if row is None:
             return None
-        return int(row["seq_from"]), int(row["seq_to"]), str(row["merkle_root"])
+        return Checkpoint(
+            seq_from=int(row["seq_from"]),
+            seq_to=int(row["seq_to"]),
+            merkle_root=str(row["merkle_root"]),
+            evidence_seq=None if row["evidence_seq"] is None else int(row["evidence_seq"]),
+        )
 
     # ------------------------------------------------------------- budgets
 

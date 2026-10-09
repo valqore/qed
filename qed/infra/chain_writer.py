@@ -169,7 +169,7 @@ class ChainWriter:
         if last_seq is None:
             return None
         previous = self.store.last_checkpoint()
-        start = 0 if previous is None else previous[1] + 1
+        start = 0 if previous is None else previous.seq_to + 1
         pending = list(self.store.iter_evidence(start, last_seq))
         if not pending:
             return None

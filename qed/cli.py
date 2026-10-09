@@ -1006,6 +1006,10 @@ def serve(
     config: ConfigOption = None,
     host: Annotated[str | None, typer.Option("--host", help="Bind address.")] = None,
     port: Annotated[int | None, typer.Option("--port", help="Bind port.")] = None,
+    ui: Annotated[
+        bool,
+        typer.Option("--ui", help="Also serve the web pages from the separate qed-ui package."),
+    ] = False,
     dev: Annotated[
         bool,
         typer.Option(
@@ -1014,11 +1018,17 @@ def serve(
         ),
     ] = False,
 ) -> None:
-    """Run the HTTP API (SPEC 13).
+    """Run the HTTP API (SPEC 13), and with `--ui` the web pages too (SPEC 19).
 
     `/readyz` answers 503 until there is a signing key and a way to
     authenticate adapters, so `qed keys init` comes first. Without `--dev`,
     register an adapter under `adapters:` in qed.yaml with a `secret_env`.
+
+    `--ui` needs the separate `qed-ui` package, which is AGPL-3.0 and ships
+    apart from this Apache-2.0 wheel on purpose (SPEC 20.4). Without it the
+    API runs and the command says what to install. The pages sign in through
+    the identity providers under `delegation.issuers`, so configure one or
+    nobody can log in.
     """
     try:
         import uvicorn
@@ -1043,6 +1053,28 @@ def serve(
     typer.echo(f"qed: serving on http://{bind_host}:{bind_port} (mode {settings.mode.value})")
 
     application = create_app(directory=directory, config_path=config, policy_paths=policy, dev=dev)
+
+    if ui:
+        from qed.api.ui import UiUnavailable, mount_ui
+
+        try:
+            assets = mount_ui(application)
+        except UiUnavailable as exc:
+            # Not fatal. An operator who asked for the pages and did not get
+            # them needs to be told, but refusing to serve the API because a
+            # separate optional wheel is missing would be the wrong trade.
+            typer.secho(f"qed: {exc}", fg=typer.colors.YELLOW, err=True)
+        else:
+            typer.echo(f"qed: web pages on http://{bind_host}:{bind_port}/ui/ (from {assets})")
+            if not settings.delegation.issuers:
+                typer.secho(
+                    "qed: no identity provider is configured under `delegation.issuers`, so "
+                    "the pages have no way to sign anybody in. They will load and every "
+                    "request they make will be refused.",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+
     uvicorn.run(application, host=bind_host, port=bind_port, log_level="info")
 
 

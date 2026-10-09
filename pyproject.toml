@@ -55,6 +55,15 @@ dev = [
     # oscal-cli, which would add a JVM to CI.
     "jsonschema>=4.22",
 ]
+# SPEC 19, 20.4. The web pages are AGPL-3.0 and ship as their own wheel from
+# their own repository, so that a third party cannot offer a hosted
+# QED-as-a-service without releasing their changes while a customer running it
+# internally is unaffected. Keeping it an extra is what keeps this wheel
+# Apache-2.0: `qed/api/ui.py` knows how to find the package and nothing about
+# what is inside it.
+ui = [
+    "qed-ui>=0.1",
+]
 
 [project.scripts]
 qed = "qed.cli:main"

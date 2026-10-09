@@ -28,6 +28,7 @@ from qed.api.routers import (
     health,
     proposals,
     slack,
+    status,
     token,
 )
 from qed.config import DEFAULT_DIR
@@ -116,6 +117,7 @@ def create_app(
     app.include_router(approvals.router)
     app.include_router(events.router)
     app.include_router(slack.router)
+    app.include_router(status.router)
     app.include_router(token.router)
     app.include_router(token.public_router)
     return app

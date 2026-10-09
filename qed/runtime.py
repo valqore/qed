@@ -506,6 +506,11 @@ def chain_status(session: Session) -> dict[str, object]:
         "mode": session.config.mode.value,
         "last_checkpoint": None
         if checkpoint is None
-        else {"from_seq": checkpoint[0], "to_seq": checkpoint[1], "merkle_root": checkpoint[2]},
+        else {
+            "from_seq": checkpoint.seq_from,
+            "to_seq": checkpoint.seq_to,
+            "merkle_root": checkpoint.merkle_root,
+            "evidence_seq": checkpoint.evidence_seq,
+        },
         "generated_at": rfc3339_ms(utcnow()),
     }
