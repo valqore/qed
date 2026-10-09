@@ -24,6 +24,7 @@ Skipped without a Docker daemon.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -236,9 +237,23 @@ class TestTheImageActuallyRuns:
         (state / "proposal.json").write_text(json.dumps(BASE_PROPOSAL), encoding="utf-8")
         mount = f"{state}:/var/lib/qed"
 
+        # A bind mount keeps the host's ownership, and the image's own user is
+        # 65532, so on Linux the container cannot write the directory it was
+        # handed. Running as the host user is what an operator does with a bind
+        # mount -- and it is worth asserting, because an image that only works
+        # as uid 65532 cannot be run under an arbitrary one, which is what a
+        # restrictive `runAsUser` admission policy will do to it.
+        #
+        # None of this applies to the two arrangements the docs recommend: a
+        # named Docker volume takes its ownership from the image, and the Helm
+        # chart sets `fsGroup: 65532`.
+        user: list[str] = []
+        if hasattr(os, "getuid"):
+            user = ["--user", f"{os.getuid()}:{os.getgid()}"]
+
         def inside(*args: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(
-                ["docker", "run", "--rm", "-v", mount, image, *args],
+                ["docker", "run", "--rm", *user, "-v", mount, image, *args],
                 capture_output=True,
                 text=True,
                 check=False,

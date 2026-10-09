@@ -401,6 +401,23 @@ jobs:
       - name: A chain written to Postgres verifies
         run: |
           set -euo pipefail
+
+          # The suite leaves a chain behind, under its own instance_id. A
+          # chain's genesis hash is bound to that identity and the kernel
+          # refuses to continue it as somebody else (`InstanceMismatch`) --
+          # correctly, which is why this step starts from an empty schema
+          # rather than depending on which test ran last.
+          python - <<'PY'
+          import os
+          import psycopg
+
+          with psycopg.connect(os.environ["QED_TEST_POSTGRES_DSN"], autocommit=True) as conn:
+              conn.execute("DROP SCHEMA public CASCADE")
+              conn.execute("CREATE SCHEMA public")
+              conn.execute("GRANT ALL ON SCHEMA public TO public")
+          print("schema reset")
+          PY
+
           mkdir -p /tmp/pg-e2e
           printf 'instance_id: qed-ci-pg\nmode: enforce\nevidence:\n  store_env: QED_DATABASE_URL\n' \
             > /tmp/pg-e2e/qed.yaml
