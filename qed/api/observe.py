@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from qed.core.schemas import ActionProposal
 from qed.infra.metrics import MetricsRegistry
+from qed.infra.siem import SiemShipper
 from qed.runtime import CheckOutcome
 
 __all__ = ["record_approval_decided", "record_decision", "record_ungated_window"]
@@ -35,6 +36,7 @@ def record_decision(
     proposal: ActionProposal,
     outcome: CheckOutcome,
     seconds: float,
+    siem: SiemShipper | None = None,
 ) -> None:
     """SPEC §18's `qed_decisions_total` and `qed_decision_latency_seconds`.
 
@@ -66,6 +68,17 @@ def record_decision(
     registry.increment("qed_decisions_observed_total")
     if outcome.verdict.default_applied:
         registry.increment("qed_decisions_no_rule_total")
+
+    if siem is not None:
+        for appended in outcome.records:
+            # Only what was chained. A queued record has no sequence number
+            # yet, and an OCSF event whose `raw_data` pointed at nothing would
+            # be a correlation key that resolves to nothing.
+            if appended.record is not None:
+                siem.send(
+                    appended.record,
+                    principal_hash=proposal.principal.human_hash,
+                )
 
     for record in outcome.records:
         if record.type.value == "budget_exhausted":

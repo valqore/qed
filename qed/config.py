@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 from pydantic import ConfigDict, Field
@@ -43,7 +43,6 @@ DEFAULT_DIR = Path(".qed")
 UNIMPLEMENTED_SECTIONS = (
     "identity",
     "remote",
-    "observability",
     "ui",
 )
 
@@ -154,6 +153,52 @@ class RetentionConfig(Frozen):
             # Verbatim, so what is reported back is what was written down.
             declared={"payload": self.payload, **self.by_type},
         )
+
+
+class SiemConfig(Frozen):
+    """Where OCSF events go (SPEC §18).
+
+    ```yaml
+    observability:
+      siem:
+        format: ocsf
+        webhook_env: QED_SIEM_WEBHOOK   # a URL with a token in it
+        stdout: false
+    ```
+
+    `webhook_env` and not `webhook`, for the same reason the database DSN is
+    named rather than inlined: a Splunk HEC or Slack webhook URL carries its
+    token in the path or query, and `qed.yaml` is a file somebody commits. A
+    literal `webhook` is accepted for a URL that genuinely has no secret in it.
+    """
+
+    format: Literal["ocsf"] = "ocsf"
+    webhook: str | None = None
+    webhook_env: str | None = None
+    stdout: bool = False
+
+    def resolved_webhook(self) -> str | None:
+        import os
+
+        if self.webhook_env:
+            return os.environ.get(self.webhook_env) or None
+        return self.webhook
+
+    @property
+    def active(self) -> bool:
+        return bool(self.resolved_webhook()) or self.stdout
+
+
+class ObservabilityConfig(Frozen):
+    """SPEC §16's `observability`. Metrics and SSE are always on.
+
+    `/metrics` and `/v1/events` cost nothing when nobody scrapes or subscribes,
+    and a flag to turn off observability is a flag somebody sets during an
+    incident and forgets. So the only thing configured here is where events are
+    shipped, which is the part that leaves the machine.
+    """
+
+    siem: SiemConfig = SiemConfig()
 
 
 class AdapterCredential(Frozen):
@@ -271,6 +316,7 @@ class QedConfig(Frozen):
     approvals: ApprovalsConfig = ApprovalsConfig()
     broker: BrokerConfig = BrokerConfig()
     retention: RetentionConfig = RetentionConfig()
+    observability: ObservabilityConfig = ObservabilityConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 

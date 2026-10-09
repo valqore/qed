@@ -114,6 +114,7 @@ async def post_proposal(request: Request) -> Response:
         proposal=proposal,
         outcome=outcome,
         seconds=time.perf_counter() - started,
+        siem=state.siem,
     )
 
     payload: dict[str, object] = {

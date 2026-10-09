@@ -12,6 +12,7 @@ process -- a ready one and a key-less one -- do not share a chain.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -37,6 +38,7 @@ from qed.config import DEFAULT_DIR
 from qed.infra.channels.slack import SlackChannel
 from qed.infra.jwks import JwksCache
 from qed.infra.keys.file import MissingSigningKey
+from qed.infra.siem import SiemShipper
 from qed.infra.tokens import TokenIssuer, load_or_create_token_key
 from qed.runtime import PolicyErrors, open_session
 
@@ -113,9 +115,26 @@ def create_app(
                 ),
             )
             state.leader.start()
+
+            # OCSF events to a SIEM, if one is configured. A background thread
+            # with a bounded queue: the chain is the record and this is a
+            # copy, so nothing on the decision path waits for it.
+            siem_config = state.session.config.observability.siem
+            if siem_config.active:
+                state.siem = SiemShipper(
+                    instance_id=state.session.config.instance_id,
+                    webhook=siem_config.resolved_webhook(),
+                    to_stdout=siem_config.stdout,
+                )
+                state.siem.start()
         try:
             yield
         finally:
+            if state.siem is not None:
+                # Before the session closes, so a last drain still has
+                # something to describe.
+                await asyncio.to_thread(state.siem.stop)
+                state.siem = None
             if state.leader is not None:
                 await state.leader.stop()
                 state.leader = None

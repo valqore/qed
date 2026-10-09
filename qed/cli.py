@@ -1033,6 +1033,7 @@ def doctor(
 
         from qed.infra.keys.rotation import pending_rotation
         from qed.infra.maintenance import publishers_for
+        from qed.infra.siem import SiemShipper
 
         staged = pending_rotation(session.directory)
         report["interrupted_rotation"] = None if staged is None else str(staged)
@@ -1040,6 +1041,18 @@ def doctor(
         # A checkpoint whose root is published nowhere is a Merkle root inside
         # the chain it summarises, which an operator who could rewrite the
         # chain could recompute. Saying so is the point of this line.
+        siem = session.config.observability.siem
+        report["siem"] = {
+            "configured": siem.active,
+            # Scheme, host and port only. A webhook URL often carries a token,
+            # and this output ends up in support tickets.
+            "target": SiemShipper(
+                instance_id=session.config.instance_id,
+                webhook=siem.resolved_webhook(),
+                to_stdout=siem.stdout,
+            ).describe(),
+        }
+
         anchors, anchor_problems = publishers_for(session.config)
         last = session.store.last_checkpoint()
         report["checkpoints"] = {
@@ -1077,6 +1090,10 @@ def doctor(
             f"on the next maintenance pass",
             fg=typer.colors.YELLOW,
         )
+    siem_report = cast("dict[str, object]", report["siem"])
+    if siem_report["configured"]:
+        typer.echo(f"{siem_report['target']}".replace("siem: ", "siem       : ", 1))
+
     checkpoint_report = cast("dict[str, object]", report["checkpoints"])
     configured = cast("list[str]", checkpoint_report["publishers"])
     if configured:
