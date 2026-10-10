@@ -73,6 +73,25 @@ close.
 auditor asks is not which controls you claim but which you do not. For a partial
 catalogue, absence means *not mapped* — never *not applicable*.
 
+**And a deliberate gap says why.** A control can carry a `note`, which prints
+under the table:
+
+```
+eu_ai_act: not mapped -- Art. 26:
+    Not mapped yet, and the likeliest of these five to become a real
+    mapping: 26(5)'s monitoring and 26(6)'s log retention are what the
+    evidence chain, the retention policy and the checkpoint anchors
+    already do. It is unmapped because no rule declares it, not because
+    nothing serves it -- the gap is in the rules.
+```
+
+A note is a **claim about this kernel** — what it does and does not record —
+and never a reading of the standard. "Nothing here records a risk management
+process" is checkable; "this article does not apply to us" is a legal opinion
+and has no business in a YAML file. A gap with a stated reason is something an
+auditor can disagree with; a bare absence is something they can only guess at,
+and an unmapped control with no note means exactly "not mapped yet".
+
 ### `depth`
 
 SPEC §11's honesty flag: how deep a mapping goes, not how good it is.

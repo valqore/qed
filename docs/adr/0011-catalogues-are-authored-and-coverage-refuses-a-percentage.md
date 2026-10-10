@@ -72,6 +72,27 @@ frameworks with something in them, and a reader would conclude that ISO 42001
 was a framework nobody had considered rather than one with a known, measured
 gap. A visible zero is a gap somebody can close.
 
+## Decision 3.1 — A deliberate gap states its reason, about the kernel
+
+Naming the unmapped controls was the easy half. The question an auditor asks
+next is *why*, and a silence answers it either way: it reads as an oversight to
+a generous reader and as an evasion to a careful one.
+
+So a control may carry a `note`, printed under the coverage table, and the rule
+for writing one is that **it is a claim about this kernel and never a reading of
+the standard**. "Nothing here records a risk management process, only the
+decisions it would produce" is checkable by anyone with the source. "Article 9
+does not apply to us" is a legal opinion, and a YAML file in a policy kernel is
+not where legal opinions belong — a test asserts that no note contains *not
+applicable* or *does not apply*.
+
+The notes also separate two things that look identical in a list of names: a
+gap nobody intends to close (Art. 11 is documentation about a system, which
+this records nothing about) from a gap that is simply open (Art. 26's 26(5) and
+26(6) are what the chain, the retention policy and the anchors already do — no
+rule declares it, so the gap is in the rules). An unmapped control with no note
+means exactly "not mapped yet".
+
 ## Decision 4 — An uncatalogued control is an error, not a warning
 
 SPEC §11 makes an unknown *framework* a lint warning, and that stands: it is

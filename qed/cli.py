@@ -535,10 +535,22 @@ def packs_list(
         for line in wrapped:
             typer.echo(line)
 
+    # A gap with a stated reason is something an auditor can disagree with; a
+    # bare absence is something they can only guess at. So the ones that say
+    # why are separated from the ones that do not.
     typer.echo("")
     for row in rows:
-        if row.unmapped:
-            typer.echo(f"{row.framework}: not mapped -- {', '.join(row.unmapped)}")
+        if not row.unmapped:
+            continue
+        silent = [item for item in row.unmapped if item not in row.unmapped_notes]
+        if silent:
+            typer.echo(f"{row.framework}: not mapped -- {', '.join(silent)}")
+        for control, note in row.unmapped_notes.items():
+            reason = " ".join(note.split())
+            lines = textwrap.wrap(reason, width=72, initial_indent="    ", subsequent_indent="    ")
+            typer.echo(f"{row.framework}: not mapped -- {control}:")
+            for line in lines:
+                typer.echo(line)
     typer.echo("")
     typer.echo(
         "`partial` means the catalogue lists the controls this rule set maps to and not "

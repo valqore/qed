@@ -39,6 +39,13 @@ refuses to say:
   framework nobody had considered; a visible zero is a gap somebody can close.
 - **The unmapped controls are listed by name**, because the first question an
   auditor asks is which controls you do *not* claim.
+- **A deliberate gap says why.** The five unmapped EU AI Act articles each
+  carry a `note` that prints under the table. A note is a claim about *this
+  kernel* -- "nothing here records a risk management process" -- and never a
+  reading of the standard, because "this does not apply to us" is a legal
+  opinion and has no business in a YAML file. A stated reason is something an
+  auditor can disagree with; a bare absence they can only guess at, and now
+  means exactly "not mapped yet".
 - `depth` (`article` / `category` / `pack`) says how deep a mapping goes, not
   how good it is, and rides on every finding.
 

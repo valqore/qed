@@ -28,8 +28,8 @@ is one somebody can close.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Protocol
@@ -88,6 +88,15 @@ class Control(Frozen):
     #: A short description written for this catalogue, **not** a quotation.
     #: Follow the pack's `source` for the standard's own words.
     label: str
+    #: Why no rule maps here, for a control that is deliberately unmapped.
+    #:
+    #: A **claim about this kernel**, never a reading of the standard: "nothing
+    #: here records X" is checkable, "this control does not apply to us" is a
+    #: legal opinion and does not belong in a YAML file. An unmapped control
+    #: with no note is simply not mapped yet, and the distinction is the point
+    #: -- an auditor can argue with a stated reason and can only guess at a
+    #: silence.
+    note: str = ""
 
 
 class Pack(Frozen):
@@ -125,6 +134,10 @@ class Coverage:
     unmapped: tuple[str, ...]
     #: Rules that map to this framework, by rule id.
     rules: tuple[str, ...]
+    #: Of the unmapped controls, the ones that say why, as `{control: note}`. A
+    #: stated reason is something an auditor can disagree with; a bare absence
+    #: is not.
+    unmapped_notes: Mapping[str, str] = field(default_factory=dict)
     #: What the catalogue covers, from the pack. It belongs in the coverage
     #: report and not only in the YAML file, because `eu_ai_act 44.4%` reads as
     #: a share of the whole Regulation and is a share of Chapter III Section 2
@@ -154,6 +167,7 @@ class Coverage:
             "mapped": self.mapped,
             "percentage": self.percentage,
             "unmapped": list(self.unmapped),
+            "unmapped_notes": dict(self.unmapped_notes),
             "rules": len(self.rules),
             "scope": self.scope,
         }
@@ -230,6 +244,11 @@ def coverage(rules: Iterable[Mappable]) -> list[Coverage]:
                 controls=len(item.controls),
                 mapped=sum(1 for entry in item.controls if entry.id in hits),
                 unmapped=tuple(entry.id for entry in item.controls if entry.id not in hits),
+                unmapped_notes={
+                    entry.id: entry.note
+                    for entry in item.controls
+                    if entry.id not in hits and entry.note
+                },
                 rules=tuple(sorted({rid for ids in hits.values() for rid in ids})),
                 scope=item.scope,
             )

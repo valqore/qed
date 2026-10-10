@@ -7,6 +7,11 @@
 # `label` is a short description written for this catalogue. It is **not a
 # quotation**: follow `source` for the Regulation's own words, which is what an
 # auditor will do anyway. Nothing here claims to be verbatim legal text.
+#
+# `note` on an unmapped article says why nothing maps to it, and is a claim
+# about **this kernel** -- what it does and does not record. It is never a
+# reading of the Regulation: "nothing here records X" is checkable, "this does
+# not apply to us" is a legal opinion and has no business in a YAML file.
 framework: eu_ai_act
 source: https://eur-lex.europa.eu/eli/reg/2024/1689/oj
 
@@ -21,19 +26,44 @@ scope: >-
 controls:
   - id: "Art. 9"
     label: Risk management system
+    note: >-
+      Not mapped. The kernel scores an action's blast radius and refuses what
+      policy forbids; it holds no record of a risk management *system* -- the
+      identification, estimation and review cycle this article is about. A rule
+      claiming Art. 9 would be claiming the process on the strength of one of
+      its outputs.
   - id: "Art. 10"
     label: Data and data governance
   - id: "Art. 11"
     label: Technical documentation
+    note: >-
+      Not mapped, and not expected to be. The kernel records decisions about
+      actions, not documentation about a system. Annex IV documentation is
+      written by whoever builds the system.
   - id: "Art. 12"
     label: Record-keeping (automatic logging over the system's lifetime)
   - id: "Art. 13"
     label: Transparency and provision of information to deployers
+    note: >-
+      Not mapped yet. `qed doctor` and `qed status` do report to a deployer what
+      this instance can actually enforce, which is the shape of a mapping here;
+      no rule claims it, because what this article requires is information
+      accompanying the system and not a verdict on an action.
   - id: "Art. 14"
     label: Human oversight
   - id: "Art. 15"
     label: Accuracy, robustness and cybersecurity
   - id: "Art. 26"
     label: Obligations of deployers of high-risk AI systems
+    note: >-
+      Not mapped yet, and the likeliest of these five to become a real mapping:
+      26(5)'s monitoring and 26(6)'s log retention are what the evidence chain,
+      the retention policy and the checkpoint anchors already do. It is unmapped
+      because no rule declares it, not because nothing serves it -- the gap is
+      in the rules.
   - id: "Art. 50"
     label: Transparency obligations for certain AI systems
+    note: >-
+      Not mapped. This article is about disclosing to a person that they are
+      interacting with an AI system or with generated content. The kernel sits
+      between an agent and an API and never meets that person.

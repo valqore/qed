@@ -207,6 +207,24 @@ class TestCoverage:
         assert rows["iso_42001"].controls > 0
         assert rows["iso_42001"].rules == ()
 
+    def test_a_deliberate_gap_says_why(self, rules) -> None:  # type: ignore[no-untyped-def]
+        """A stated reason is something an auditor can disagree with; a bare
+        absence is something they can only guess at."""
+        rows = {row.framework: row for row in coverage(rules)}
+        eu = rows["eu_ai_act"]
+        assert set(eu.unmapped_notes) <= set(eu.unmapped), "a mapped control carries a gap note"
+        assert "Art. 11" in eu.unmapped_notes
+        assert "documentation" in eu.unmapped_notes["Art. 11"]
+
+    def test_a_note_is_a_claim_about_the_kernel(self, rules) -> None:  # type: ignore[no-untyped-def]
+        """Not a reading of the standard. "Nothing here records X" is
+        checkable; "this does not apply to us" is a legal opinion and has no
+        business in a YAML file."""
+        rows = {row.framework: row for row in coverage(rules)}
+        for note in rows["eu_ai_act"].unmapped_notes.values():
+            assert "not applicable" not in note.lower()
+            assert "does not apply" not in note.lower()
+
     def test_the_unmapped_controls_are_named(self, rules) -> None:  # type: ignore[no-untyped-def]
         """The question an auditor asks first is which controls you do *not*
         claim."""
@@ -286,6 +304,17 @@ class TestPacksList:
         assert "not mapped" in result.output
         assert "Art. 9" in result.output
 
+    def test_a_stated_gap_prints_its_reason(self) -> None:
+        output = runner.invoke(app, ["packs", "list"]).output
+        assert "not mapped -- Art. 26:" in output
+        assert "the gap is in the rules" in " ".join(output.split())
+
+    def test_gaps_with_no_reason_are_still_listed(self) -> None:
+        """ISO 42001 has eight unmapped clauses and no notes; they must not
+        vanish because the notes path took over."""
+        output = runner.invoke(app, ["packs", "list"]).output
+        assert "iso_42001: not mapped -- 4.1," in output
+
     def test_a_percentage_never_appears_without_its_scope(self) -> None:
         """The scope is the half a reader drops, so it prints with the number
         instead of staying in a YAML file nobody opens."""
@@ -298,6 +327,12 @@ class TestPacksList:
         output = runner.invoke(app, ["packs", "list"]).output
         for item in packs():
             assert f"  {item.framework}:" in output, item.framework
+
+    def test_the_gap_notes_are_in_the_json(self) -> None:
+        report = json.loads(runner.invoke(app, ["packs", "list", "--json"]).output)
+        by_id = {item["framework"]: item for item in report["catalogues"]}
+        assert "Art. 26" in by_id["eu_ai_act"]["unmapped_notes"]
+        assert by_id["iso_42001"]["unmapped_notes"] == {}
 
     def test_the_scope_is_in_the_json(self) -> None:
         report = json.loads(runner.invoke(app, ["packs", "list", "--json"]).output)
