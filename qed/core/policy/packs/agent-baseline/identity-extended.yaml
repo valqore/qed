@@ -57,6 +57,7 @@
     - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
     - { framework: owasp_agentic, control: "ASI01" }
     - { framework: soc2, control: "CC6.2" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-IDN-008
   name: Unattended agent acting in production
@@ -106,6 +107,7 @@
     - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
     - { framework: owasp_agentic, control: "ASI01" }
     - { framework: soc2, control: "CC6.1" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-IDN-010
   name: Repeated blocks from the same principal
@@ -126,6 +128,7 @@
   compliance:
     - { framework: nist_ai_rmf, control: "MEASURE-2.7" }
     - { framework: owasp_agentic, control: "ASI06" }
+    - { framework: dora, control: "Art. 10" }
 
 - rule_id: AG-IDN-011
   name: Production action from an unrecognised adapter family
@@ -149,6 +152,7 @@
   compliance:
     - { framework: nist_ai_rmf, control: "MAP-4.1" }
     - { framework: soc2, control: "CC6.1" }
+    - { framework: dora, control: "Art. 10" }
 
 - rule_id: AG-IDN-012
   name: Action carries a mandate that is not the principal's

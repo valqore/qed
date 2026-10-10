@@ -58,7 +58,7 @@ hardware, including air-gapped.
 | **Retention and purge**, with purge-then-verify | `qed/core/evidence/retention.py` |
 | **Checkpoint anchors**: file, S3 object-lock, git tag | `qed/infra/publishers/` |
 | **Prometheus `/metrics`** and **OCSF SIEM** events | `qed/api/routers/metrics.py`, `qed/infra/siem.py` |
-| **Control catalogues** for 10 frameworks, 65 controls, with coverage | `qed/compliance/packs/`, `docs/compliance.md` |
+| **Control catalogues** for 10 frameworks, with honest coverage | `qed/compliance/packs/`, `docs/compliance.md` |
 | **Signed catalogue import**, air-gap, recorded in the chain | `qed/remote/packs.py`, ADR-0012 |
 | **Transparency-log anchor client**, six values and no payload | `qed/remote/anchor.py`, ADR-0013 |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |

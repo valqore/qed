@@ -104,3 +104,4 @@
     - { framework: eu_ai_act, control: "Art. 15" }
     - { framework: nist_csf, control: "PR.AC-5" }
     - { framework: soc2, control: "CC6.6" }
+    - { framework: dora, control: "Art. 9" }

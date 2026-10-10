@@ -14,11 +14,17 @@ frameworks:
     aliases: ["NIST AI RMF", "NIST-AI-RMF", "nist-ai-rmf", "AI RMF"]
   - id: iso_42001
     title: ISO/IEC 42001:2023 AI management systems
+    # Stays `pack`, and says why in its catalogue: the Annex A controls are not
+    # freely published, and inventing their titles would be the one thing
+    # ADR-0011 forbids.
     depth: pack
     aliases: ["ISO/IEC 42001", "ISO 42001", "iso42001", "iso-42001"]
   - id: dora
     title: Digital Operational Resilience Act (Regulation 2022/2554)
-    depth: pack
+    # `article` since week 9: the mapping is to specific Chapter II articles
+    # (8, 9, 10), checked against the EUR-Lex text, not to the Regulation at
+    # large. SPEC 11 had this at `pack` "until deepened".
+    depth: article
     aliases: ["DORA", "EU DORA"]
   - id: owasp_agentic
     title: OWASP Agentic AI Top 10

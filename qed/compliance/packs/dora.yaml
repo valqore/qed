@@ -1,15 +1,96 @@
-# DORA control catalogue (SPEC §11).
+# DORA control catalogue (SPEC §11, deepened in week 9).
 #
 # Regulation (EU) 2022/2554 on digital operational resilience for the financial
-# sector. Partial: the articles this rule set maps to. DORA's obligations are
-# largely organisational -- governance, testing programmes, third-party
-# registers -- and a policy kernel speaks to few of them directly.
+# sector. Scope of this catalogue: **Chapter II, "ICT risk management"** --
+# Articles 5 to 16, which is the chapter a policy-and-evidence kernel can speak
+# to at all. The rest of the Regulation (incident reporting, resilience
+# testing, third-party risk, information sharing, oversight) is about an
+# organisation's programme and not about an agent's actions.
+#
+# The titles here are the Regulation's own article headings, checked against the
+# consolidated text on EUR-Lex rather than written from memory -- which caught
+# one: Article 8 is titled "Identification", and the label this catalogue
+# carried before was a paraphrase of what the article is about.
+#
+# `note` on an unmapped article says why nothing maps to it, and is a claim
+# about **this kernel** -- what it does and does not record. It is never a
+# reading of the Regulation.
 framework: dora
 source: https://eur-lex.europa.eu/eli/reg/2022/2554/oj
+version: "2022/2554"
 
-catalogue: partial
-scope: The articles this rule set maps to.
+# Complete for the scope named above, so coverage over it is a real fraction.
+# Chapter II is 12 of the Regulation's 64 articles; `scope` says so.
+catalogue: complete
+scope: >-
+  Chapter II, "ICT risk management" (Articles 5-16). The Regulation's other
+  chapters -- incident reporting, digital operational resilience testing,
+  third-party risk, information sharing, oversight -- concern an organisation's
+  programme rather than an agent's actions, and nothing here maps to them.
 
 controls:
+  - id: "Art. 5"
+    label: Governance and organisation
+    note: >-
+      Not mapped. This article is about the management body's responsibilities
+      for the ICT risk framework -- who approves it, who is accountable, how
+      often they review it. The kernel records decisions about actions and
+      holds no record of a management body.
+  - id: "Art. 6"
+    label: ICT risk management framework
+    note: >-
+      Not mapped. Art. 6 is the framework itself: the documented strategy, the
+      risk tolerance, the periodic review. A rule claiming it would be claiming
+      the programme on the strength of one of its outputs.
+  - id: "Art. 7"
+    label: ICT systems, protocols and tools
+    note: >-
+      Not mapped. This is about the systems being reliable, capacious and
+      technologically resilient. The kernel decides whether an action may
+      happen; it makes no claim about the capacity of what the action touches.
   - id: "Art. 8"
-    label: Identification of ICT-supported business functions, assets and risks
+    label: Identification
+  - id: "Art. 9"
+    label: Protection and prevention
+  - id: "Art. 10"
+    label: Detection
+  - id: "Art. 11"
+    label: Response and recovery
+    note: >-
+      Not mapped yet, and a candidate. Art. 11 wants a response and recovery
+      plan with defined procedures; the kernel's kill switch and its chain of
+      what an agent did are inputs to one. Unmapped because no rule declares
+      it, and because a plan is a document the kernel does not hold.
+  - id: "Art. 12"
+    label: >-
+      Backup policies and procedures, restoration and recovery procedures and
+      methods
+    note: >-
+      Not mapped. AG-DAT-010 refuses to weaken a backup or retention setting
+      without approval, which protects a backup policy without being one. The
+      article is about having and testing the policy.
+  - id: "Art. 13"
+    label: Learning and evolving
+    note: >-
+      Not mapped, though the evidence chain is the raw material for it: Art. 13
+      wants post-incident review feeding back into the framework. That review
+      is work people do, and the kernel has no record of it happening.
+  - id: "Art. 14"
+    label: Communication
+    note: >-
+      Not mapped. Crisis communication plans for clients, counterparties and
+      the public. Nothing in a policy kernel speaks to it.
+  - id: "Art. 15"
+    label: >-
+      Further harmonisation of ICT risk management tools, methods, processes
+      and policies
+    note: >-
+      Not mapped, and not mappable: Art. 15 is a mandate for the ESAs to
+      develop regulatory technical standards. It is an obligation on
+      supervisors, not on a deployment.
+  - id: "Art. 16"
+    label: Simplified ICT risk management framework
+    note: >-
+      Not mapped. The lighter regime for small and non-interconnected entities.
+      Which regime an entity falls under is a fact about the entity, and the
+      kernel does not know it.

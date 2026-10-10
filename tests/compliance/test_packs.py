@@ -242,7 +242,11 @@ class TestCoverage:
         rows = {row.framework: row for row in coverage(rules)}
         assert rows["eu_ai_act"].depth == "article"
         assert rows["nist_ai_rmf"].depth == "category"
-        assert rows["dora"].depth == "pack"
+        # `article` since week 9: the DORA mapping is to specific Chapter II
+        # articles, so the flag moved with the mapping rather than staying at
+        # the value the first catalogue happened to have.
+        assert rows["dora"].depth == "article"
+        assert rows["iso_42001"].depth == "pack"
 
     def test_aliases_do_not_split_a_framework_in_two(self, tmp_path: Path) -> None:
         """Two spellings would be two rows in this report and two control sets
@@ -310,10 +314,15 @@ class TestPacksList:
         assert "the gap is in the rules" in " ".join(output.split())
 
     def test_gaps_with_no_reason_are_still_listed(self) -> None:
-        """ISO 42001 has eight unmapped clauses and no notes; they must not
-        vanish because the notes path took over."""
+        """The OWASP Top 10s have unmapped entries and no notes; they must not
+        vanish because the notes path took over.
+
+        This used to use ISO 42001's eight clauses, which all carry notes now
+        -- week 9 wrote down why each one is unmapped rather than leaving the
+        zero to speak for itself.
+        """
         output = runner.invoke(app, ["packs", "list"]).output
-        assert "iso_42001: not mapped -- 4.1," in output
+        assert "owasp_llm: not mapped -- LLM01," in output
 
     def test_a_percentage_never_appears_without_its_scope(self) -> None:
         """The scope is the half a reader drops, so it prints with the number
@@ -332,7 +341,11 @@ class TestPacksList:
         report = json.loads(runner.invoke(app, ["packs", "list", "--json"]).output)
         by_id = {item["framework"]: item for item in report["catalogues"]}
         assert "Art. 26" in by_id["eu_ai_act"]["unmapped_notes"]
-        assert by_id["iso_42001"]["unmapped_notes"] == {}
+        # A framework whose unmapped controls say nothing: the OWASP Top 10s,
+        # where "not in the top ten we map" needs no sentence. ISO 42001 used
+        # to be the example and now explains all eight of its clauses.
+        assert by_id["owasp_llm"]["unmapped_notes"] == {}
+        assert len(by_id["iso_42001"]["unmapped_notes"]) == 8
 
     def test_the_scope_is_in_the_json(self) -> None:
         report = json.loads(runner.invoke(app, ["packs", "list", "--json"]).output)

@@ -46,9 +46,14 @@ from qed.remote.packs import (
 
 runner = CliRunner()
 
-#: The shipped DORA catalogue's only control. A bundle that keeps it is a
-#: deepening; a bundle that drops it orphans the rule that cites it.
-SHIPPED_DORA_CONTROL = "Art. 8"
+#: The DORA controls the baseline rules cite. A bundle that keeps all three is
+#: a deepening; a bundle that drops any of them orphans the rules citing it.
+#:
+#: This was one control until week 9 deepened the DORA mapping to Articles 8, 9
+#: and 10 -- and the deepening broke four tests here, which is `would_break`
+#: doing its job on real data rather than on a fixture built to trip it.
+SHIPPED_DORA_CONTROLS = ("Art. 8", "Art. 9", "Art. 10")
+SHIPPED_DORA_CONTROL = SHIPPED_DORA_CONTROLS[0]
 
 
 @pytest.fixture(autouse=True)
@@ -83,18 +88,19 @@ def publisher() -> Any:
 
 
 def catalogue(*, drop_shipped: bool = False) -> Pack:
+    """A DORA catalogue, optionally missing what the shipped rules cite.
+
+    `drop_shipped=True` drops `Art. 8` only. The other two stay, so the test
+    for a bundle that orphans a rule is about one identifiable control rather
+    than about a bundle that happens to be smaller.
+    """
     controls = [
-        Control(id="Art. 5", label="ICT risk management framework governance"),
+        Control(id="Art. 5", label="Governance and organisation"),
         Control(id="Art. 9", label="Protection and prevention"),
+        Control(id="Art. 10", label="Detection"),
     ]
     if not drop_shipped:
-        controls.insert(
-            0,
-            Control(
-                id=SHIPPED_DORA_CONTROL,
-                label="Identification of ICT-supported business functions, assets and risks",
-            ),
-        )
+        controls.insert(0, Control(id=SHIPPED_DORA_CONTROL, label="Identification"))
     return Pack(
         framework="dora",
         source="https://eur-lex.europa.eu/eli/reg/2022/2554/oj",
@@ -307,7 +313,7 @@ class TestInstalling:
         found = pack("dora")
         assert found is not None
         assert found.imported is True
-        assert len(found.controls) == 3
+        assert len(found.controls) == 4
         assert {item.framework for item in packs() if item.imported} == {"dora"}
 
     def test_the_other_catalogues_stay_shipped(self, tmp_path: Path, publisher: Any) -> None:
@@ -722,7 +728,7 @@ class TestPacksImport:
             runner.invoke(app(), ["packs", "list", "--dir", str(state), "--json"]).output
         )
         dora = next(item for item in report["catalogues"] if item["framework"] == "dora")
-        assert dora["controls"] == 3
+        assert dora["controls"] == 4
         assert "Art. 5" in dora["unmapped"]
 
     def test_an_import_needs_a_signing_key_first(self, tmp_path: Path, publisher: Any) -> None:

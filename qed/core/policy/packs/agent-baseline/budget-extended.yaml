@@ -73,6 +73,7 @@
   compliance:
     - { framework: nist_ai_rmf, control: "MEASURE-2.7" }
     - { framework: owasp_agentic, control: "ASI06" }
+    - { framework: dora, control: "Art. 10" }
 
 - rule_id: AG-BUD-008
   name: Time budget nearly spent

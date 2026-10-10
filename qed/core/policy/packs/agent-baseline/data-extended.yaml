@@ -74,6 +74,7 @@
     - { framework: eu_ai_act, control: "Art. 15" }
     - { framework: owasp_agentic, control: "ASI05" }
     - { framework: soc2, control: "CC6.6" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-DAT-008
   name: Encryption turned off
@@ -92,6 +93,7 @@
     - { framework: eu_ai_act, control: "Art. 15" }
     - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
     - { framework: soc2, control: "CC6.1" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-DAT-009
   name: Audit logging turned off
@@ -115,6 +117,7 @@
     - { framework: nist_ai_rmf, control: "MEASURE-2.8" }
     - { framework: owasp_agentic, control: "ASI06" }
     - { framework: soc2, control: "CC7.2" }
+    - { framework: dora, control: "Art. 10" }
 
 - rule_id: AG-DAT-010
   name: Backup or retention weakened

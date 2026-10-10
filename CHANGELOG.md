@@ -35,6 +35,53 @@ Unsigned import is possible, takes a flag, and is loud: the record says
 `unsigned: true` and the command prints `UNSIGNED`. Refusing outright would
 push people to edit the installed files by hand, where nothing would record it.
 
+### Changed - DORA deepened to article level; ISO 42001 deliberately not
+
+SPEC §22 week 9 asks for both. One could be done honestly and one could not,
+and the difference is worth more than the half that shipped.
+
+**DORA is now `depth: article`.** The catalogue covers Chapter II, "ICT risk
+management" -- all twelve articles, 5 to 16 -- with the Regulation's own
+headings, checked against the consolidated text on EUR-Lex rather than written
+from memory. That caught one: Article 8 is titled **"Identification"**, and the
+label this catalogue carried before was a paraphrase of what the article is
+about.
+
+Fifteen baseline rules now map to Article 9 ("Protection and prevention", whose
+9(4)(c) and 9(4)(d) ask for policies limiting access to what is required and
+for change-management procedures) and Article 10 ("Detection", whose 10(1) asks
+for mechanisms to promptly detect anomalous activities). Coverage is 3 of 12 --
+25% -- and the nine unmapped articles each say why, as a claim about the kernel
+rather than a reading of the Regulation. Article 11 and Article 12 are named as
+the near misses rather than quietly left out.
+
+**ISO 42001 stays at `depth: pack`, with the reason written into the
+catalogue.** The deepening it needs is its **Annex A** controls, and ISO/IEC
+42001 is not freely published: the text is sold and the Annex A titles are not
+available from an authoritative public source. ADR-0011 says control titles are
+written against the standard's own published material and never from memory,
+and this is exactly the case it was written for. A plausible Annex A list
+recalled from training would be the worst possible outcome -- not a title
+slightly wrong, but a *whole catalogue* that looks verified and is not, attached
+to real rules, in a document an auditor reads as authoritative.
+
+So the eight management-system clauses (4-10, whose titles come from the
+published ISO harmonised structure) each carry a note saying why a kernel
+cannot serve them, and the file states the two things that would unblock the
+real work: a licensed copy of the standard, or a design partner who holds one.
+Week 9's signed import is the second route -- a partner can publish an ISO 42001
+pack without it passing through this repository at all.
+
+**Also fixed, in my own tooling.** The first script that added these mappings
+used a lazy `.*?` between the rule id and its `compliance:` block, so for a rule
+it could not match it slid forward and inserted into a *later* rule. Five rules
+briefly claimed articles nobody had chosen for them -- a compliance claim
+attributed to the wrong rule, which is precisely the thing that reaches an
+auditor looking real. Caught by diffing the result against the intended set
+before committing anything. The rewrite splits each file into rule blocks first
+and asserts afterwards that the rules carrying a DORA mapping are exactly the
+ones asked for.
+
 ### Added - the transparency-log anchor client (week 9)
 
 `qed/remote/anchor.py`, a fourth checkpoint publisher: `{type: qed-anchor, url,

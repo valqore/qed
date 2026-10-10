@@ -22,3 +22,4 @@
     - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
     - { framework: owasp_agentic, control: "ASI02" }
     - { framework: soc2, control: "CC6.1" }
+    - { framework: dora, control: "Art. 9" }

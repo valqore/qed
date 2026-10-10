@@ -36,7 +36,7 @@ that matter.
 
 ```
 FRAMEWORK        DEPTH        MAPPED   COVERAGE  RULES
-dora             pack         1/1      partial  1
+dora             article      3/12       25.0%  16
 eu_ai_act        article      4/9        44.4%  28
 iso_27001        pack         1/1      partial  1
 iso_42001        pack         0/8      partial  0
@@ -105,6 +105,28 @@ SPEC §11's honesty flag: how deep a mapping goes, not how good it is.
 An `article` mapping and a `pack` mapping both produce a finding, and they are
 not the same evidence. The flag is on every finding as `mapping-depth` so
 nobody has to come back here to weigh them.
+
+### A standard that is not published cannot be catalogued
+
+ISO 42001 is 0 of 8 and stays at `depth: pack`, and the reason is in
+`qed/compliance/packs/iso_42001.yaml` rather than left for a reader to guess.
+
+The deepening that framework needs is its **Annex A** controls -- the
+operational ones, where a policy kernel would have something to say. ISO/IEC
+42001 is sold rather than published, and those titles are not available from an
+authoritative public source. Writing them from memory would produce the one
+thing this project refuses: not a title slightly wrong, but a whole catalogue
+that looks verified and is not, attached to real rules, in a document an
+auditor reads as authoritative.
+
+Two things unblock it: a licensed copy of the standard read by whoever writes
+the mapping, or a design partner who holds one and publishes a signed pack —
+which needs no change to this repository at all.
+
+The eight management-system clauses that *are* listed take their titles from
+the published ISO harmonised structure, so they are checkable without the 42001
+text. They are also the clauses a kernel is least able to serve, and each says
+so.
 
 ### Editions
 

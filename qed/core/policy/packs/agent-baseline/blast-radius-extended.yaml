@@ -63,6 +63,7 @@
     - { framework: eu_ai_act, control: "Art. 14" }
     - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
     - { framework: soc2, control: "CC8.1" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-BLR-008
   name: Action targets production from a non-production context
@@ -85,6 +86,7 @@
   compliance:
     - { framework: eu_ai_act, control: "Art. 12" }
     - { framework: soc2, control: "CC8.1" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-BLR-009
   name: Production write with no stated intent

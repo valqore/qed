@@ -1,36 +1,108 @@
 # ISO/IEC 42001:2023 control catalogue (SPEC §11).
 #
-# AI management systems. **No rule in the baseline pack maps to this framework
-# yet**, which is why the catalogue is here and empty of mappings rather than
-# absent: `qed packs list` reports a framework with zero coverage, and a gap
-# that is visible is a gap somebody can close. An absent pack would have looked
-# like a framework nobody had considered.
+# AI management systems. **No rule in the baseline pack maps to this framework**,
+# which is why the catalogue is here and empty of mappings rather than absent:
+# `qed packs list` reports a framework with zero coverage, and a gap that is
+# visible is a gap somebody can close. An absent pack would have looked like a
+# framework nobody had considered.
 #
-# The clauses below are the management-system requirements (Clauses 4-10). The
-# Annex A controls are a separate catalogue and are not listed yet.
+# ## Why this is not deepened, when SPEC §22 week 9 asked for it
+#
+# The deepening ISO 42001 needs is its **Annex A** controls -- the operational
+# ones, which are where a policy-and-evidence kernel would have something to
+# say. ISO/IEC 42001 is not freely published: the text is sold, and the Annex A
+# control titles are not available from an authoritative public source.
+#
+# ADR-0011 is the rule that applies, and it is the right one: control titles are
+# written against the standard's own published material, never from memory.
+# Writing out an Annex A list from recollection would produce exactly what that
+# decision exists to prevent -- plausible identifiers an auditor cannot find,
+# attached to real rules, in a document that reads as authoritative. The risk is
+# not that a title is slightly wrong; it is that a *whole catalogue* looks
+# verified and is not.
+#
+# So `depth` stays `pack`, the clauses below stay unmapped, and this comment is
+# the honest record of why. Two things would unblock it, in order of preference:
+#
+# 1. A licensed copy of the standard, read by whoever writes the mapping. That
+#    is a purchase decision, not an engineering one.
+# 2. A design partner who holds the standard and contributes the mapping. Week 9
+#    gives them the mechanism: `qed packs import` takes a signed catalogue, so a
+#    partner can publish an ISO 42001 pack without it passing through this
+#    repository at all (ADR-0012).
+#
+# ## What is below
+#
+# The management-system requirements (Clauses 4-10). These titles come from the
+# ISO harmonised structure, which is published in ISO/IEC Directives Annex SL
+# and shared by every modern ISO management-system standard, so they are
+# checkable without the 42001 text.
+#
+# They are also, honestly, the clauses a kernel is least able to serve: they ask
+# an organisation to establish a policy, assess its risks and review its own
+# performance. Those are things people do. The `note` on each says so, rather
+# than leaving a reader to assume the zero is an oversight.
 framework: iso_42001
 source: https://www.iso.org/standard/42001
 version: "2023"
 
 catalogue: partial
 scope: >-
-  The management-system clauses (4-10). Annex A controls are not catalogued yet,
-  and no rule maps to this framework at all.
+  The management-system clauses (4-10), whose titles follow the published ISO
+  harmonised structure. The Annex A controls -- the operational ones, and the
+  ones worth mapping -- are NOT catalogued, because the standard is not freely
+  published and inventing control titles is the one thing this project will not
+  do. Absence here means "not mapped", and for Annex A it means "not catalogued
+  either".
 
 controls:
   - id: "4.1"
     label: Understanding the organization and its context
+    note: >-
+      Not mapped. The organisation's context, interested parties and the scope
+      of its AI management system. Nothing in a kernel that decides one action
+      at a time speaks to it.
   - id: "5.2"
     label: AI policy
+    note: >-
+      Not mapped, and the nearest miss in this list. The kernel holds a policy
+      and records its hash in every verdict, which is evidence *for* an AI
+      policy existing and being applied -- but clause 5.2 is about top
+      management establishing and communicating one, and a rule claiming it
+      would be claiming the governance on the strength of the mechanism.
   - id: "6.1"
     label: Actions to address risks and opportunities
+    note: >-
+      Not mapped. The planning cycle: determining risks, planning actions,
+      evaluating their effectiveness. The kernel is one of the actions somebody
+      might plan, not the planning.
   - id: "8.2"
     label: AI risk assessment
+    note: >-
+      Not mapped. An assessment is a document with a method behind it. The
+      kernel scores an action's blast radius, which is an input to one and is
+      not one.
   - id: "8.3"
     label: AI risk treatment
+    note: >-
+      Not mapped yet, and the likeliest candidate if this framework is ever
+      deepened from the management-system side: a deterministic policy gate is
+      a risk treatment, and the chain is evidence it was applied. Unmapped
+      because no rule declares it and because the clause asks for a documented
+      treatment plan the kernel does not hold.
   - id: "8.4"
     label: AI system impact assessment
+    note: >-
+      Not mapped. Impacts on individuals and societies, which a kernel standing
+      between an agent and an API never observes.
   - id: "9.1"
     label: Monitoring, measurement, analysis and evaluation
+    note: >-
+      Not mapped yet. `/metrics`, the OCSF event stream and the evidence chain
+      are monitoring and measurement; the analysis and evaluation the clause
+      also requires are work people do with them.
   - id: "10.1"
     label: Continual improvement
+    note: >-
+      Not mapped. Improving the management system over time. The chain is raw
+      material for it and the kernel has no record of the improving happening.

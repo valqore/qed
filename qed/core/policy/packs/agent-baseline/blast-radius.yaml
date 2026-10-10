@@ -19,6 +19,7 @@
     - { framework: nist_ai_rmf, control: "MANAGE-2.2" }
     - { framework: owasp_agentic, control: "ASI04" }
     - { framework: soc2, control: "CC8.1" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-BLR-002
   name: Multi-resource delete
@@ -66,6 +67,7 @@
     - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
     - { framework: owasp_agentic, control: "ASI04" }
     - { framework: soc2, control: "CC8.1" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-BLR-004
   name: Identity, secret or policy mutation
@@ -88,6 +90,7 @@
     - { framework: nist_ai_rmf, control: "GOVERN-1.5" }
     - { framework: owasp_agentic, control: "ASI02" }
     - { framework: soc2, control: "CC6.3" }
+    - { framework: dora, control: "Art. 9" }
 
 - rule_id: AG-BLR-005
   name: Derived blast radius above the oversight threshold
