@@ -34,6 +34,7 @@ from qed.core.approval.model import (
     parse_duration,
 )
 from qed.core.budget import charge_for, newly_exhausted
+from qed.core.clock import assess_clock
 from qed.core.evidence.hashing import principal_hash
 from qed.core.evidence.retention import PurgePlan, plan_purge
 from qed.core.policy.engine import evaluate
@@ -999,6 +1000,11 @@ def chain_status(session: Session) -> dict[str, object]:
         "policy_hash": session.bundle.hash,
         "rules_active": len(session.bundle.active_rules()),
         "mode": session.config.mode.value,
+        # SPEC §17's clock warning. Reported rather than enforced: `seq` and
+        # `prev_hash` fix the order, so a wrong clock makes timestamps
+        # misleading and leaves the chain sound -- and halting on a clock would
+        # trade a cosmetic problem for an outage.
+        "clock": assess_clock(session.store.last_ts(), now=utcnow()).describe(),
         "last_checkpoint": None
         if checkpoint is None
         else {

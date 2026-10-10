@@ -28,6 +28,7 @@ import typer
 from typer.core import TyperGroup
 
 from qed.config import DEFAULT_DIR, ConfigError
+from qed.core.clock import assess_clock
 from qed.core.evidence.export.jsonl import to_csv, to_jsonl
 from qed.core.evidence.export.oscal import to_oscal
 from qed.core.policy.engine import explain as explain_proposal
@@ -1492,6 +1493,10 @@ def doctor(
         report["mode"] = session.config.mode.value
         report["signing_key"] = session.signer.key_id
         report["policy_rules"] = len(session.bundle.rules)
+        # SPEC 17's clock warning. `doctor` builds its own report rather than
+        # reusing `chain_status`, so this has to be added in both places --
+        # which is how the first version of this silently printed nothing.
+        report["clock"] = assess_clock(session.store.last_ts(), now=utcnow()).describe()
         report["delegation"] = {
             "issuers": [i.issuer for i in session.config.delegation.issuers],
             "offline": session.config.delegation.offline,
@@ -1625,6 +1630,20 @@ def doctor(
             "             The operator is the one actor no rule constrains. Set "
             "`admin.self_governed`\n"
             "             with `admin.approvers` to change that (SPEC 17).",
+            fg=typer.colors.YELLOW,
+        )
+
+    # SPEC 17's clock warning, where an operator will see it before handing an
+    # export to an auditor.
+    clock = cast("dict[str, object]", report.get("clock") or {})
+    if clock.get("suspect"):
+        from qed.core.clock import ClockReport
+
+        ahead = cast("float", clock["newest_record_ahead_seconds"])
+        tolerance = cast("float", clock["tolerance_seconds"])
+        typer.secho(
+            "clock      : "
+            + ClockReport(ahead_seconds=ahead, tolerance_seconds=tolerance).message(),
             fg=typer.colors.YELLOW,
         )
 

@@ -58,6 +58,44 @@ careless action, none at all to a determined operator who lies about who they
 are. ADR-0014 and `docs/approvals.md` say so rather than leaving it to be
 discovered.
 
+### Added - `pip-audit` in CI, and the clock warning (week 10)
+
+The last two of SPEC §17's nine MUSTs with nothing behind them.
+
+**`pip-audit`** runs as its own job, and twice. Its own job because it fails for
+reasons that have nothing to do with the code -- an advisory published overnight
+turns a green commit red -- and when that happens the useful information is
+"which dependency, which advisory", not "the matrix is red". It also runs on a
+daily schedule, because a vulnerability in a pinned dependency does not wait for
+somebody to push.
+
+Twice because the two questions are different and neither answer covers both.
+The environment audit sees the versions actually installed, transitive ones
+included, which is where a vulnerability usually turns up. It cannot be
+`--strict`: `valqore-qed` and `qed-verify` are editable installs, and `--strict`
+counts anything it could not audit as a failure. The declared-set audit is the
+strict one -- it resolves exactly the dependencies this project chose, so
+nothing can be quietly left out. That mattered: the first attempt used
+`--strict` on the environment and would have gone red on our own packages the
+moment it ran.
+
+**The clock check** reports when the newest record's timestamp is more than five
+seconds in the future -- the signature of a clock that has gone backwards, after
+which an export sorted by `ts` does not read in the order things happened. It
+warns rather than refusing, because `seq` and `prev_hash` fix the order and
+halting on a clock would trade a cosmetic problem for an outage.
+
+It does **not** query an NTP server, and says so in its own output
+(`"measured": "newest record ts vs system clock; no NTP query"`). The kernel is
+offline by design, and a governance component that reached for the network to
+decide whether to trust itself would be a new dependency in the decision path.
+The spec says "NTP drift"; this is a weaker, local signal, and naming it
+`drift` with the measurement beside it is the honest version.
+
+`qed status` carries it and `qed doctor` prints the sentence. Both, because
+`doctor` builds its own report rather than reusing `chain_status` -- which is
+how the first version computed the warning correctly and printed nothing.
+
 ### Fixed - an invalid `qed.yaml` printed a pydantic traceback
 
 Found while testing the above, and nothing to do with it: `mode: nonsense`

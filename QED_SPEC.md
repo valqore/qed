@@ -750,10 +750,10 @@ Full STRIDE in `THREAT_MODEL.md`. Key MUSTs:
 - Broker credentials in memory only; redact in all logs; never in evidence or events.
 - Adapter authentication mandatory; unknown adapters rejected.
 - Replay: duplicate `proposal.id` → 409 and `correction`-free rejection record.
-- Clock: warn if NTP drift > 5 s; `seq` guarantees order regardless of `ts`.
+- Clock: warn if NTP drift > 5 s; `seq` guarantees order regardless of `ts`. **Built in week 10**, with one deviation stated in its own output: it does **not** query NTP (the kernel is offline by design, invariant §1.7) and instead compares the newest record's `ts` against the system clock, which catches a clock that went backwards. Weaker signal, no network. Reported by `qed status` and `qed doctor`; never enforced, because halting on a clock would trade a cosmetic problem for an outage.
 - Input limits: proposal ≤ 64 KB; `params_redacted` ≤ 16 KB; regex evaluation with timeouts (use `re2`-style guard via `regex` module `timeout`).
 - Supply chain: SBOM (Syft), cosign keyless signing, SLSA provenance; `qed doctor` verifies own binary signature when possible.
-- Dependencies pinned; `pip-audit` in CI.
+- Dependencies pinned; `pip-audit` in CI. **Built in week 10**: its own job, on push and on a daily schedule, auditing both the installed environment (transitives included, not `--strict` because our own packages are editable installs) and the declared dependency set (`--strict`, so nothing is quietly skipped).
 
 ---
 

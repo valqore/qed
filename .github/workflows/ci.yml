@@ -1,6 +1,11 @@
 name: CI
 
 on:
+  schedule:
+    # 06:40 UTC daily, for the `audit` job: a vulnerability in a pinned
+    # dependency does not wait for somebody to push. Off-peak minute so it is
+    # not competing with every other cron on the hour.
+    - cron: "40 6 * * *"
   push:
     branches: [main]
   pull_request:
@@ -59,6 +64,66 @@ jobs:
           fi
           rm tests/_canary.py
           echo "ok: the scanner is still live"
+
+  # SPEC 17's last MUST: "Dependencies pinned; `pip-audit` in CI." It was the
+  # only one of the nine with nothing behind it.
+  #
+  # Its own job rather than a step in `check`, for two reasons. It fails for
+  # reasons that have nothing to do with the code -- an advisory published
+  # overnight turns a green commit red with no change of ours -- and when that
+  # happens the useful information is "which dependency, which advisory", not
+  # "the test matrix is red". And the schedule above runs it against a tree
+  # nobody touched, which is the case that matters: a vulnerability in a pinned
+  # dependency does not wait for a commit.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" -e packages/qed-verify
+          pip install pip-audit==2.9.0
+
+      # Two audits, because they answer different questions and neither answers
+      # both.
+      #
+      # The environment audit covers the versions actually installed, including
+      # transitive ones -- which is where a vulnerability usually turns up, in
+      # something nothing in `pyproject.toml` names. It cannot run `--strict`:
+      # `valqore-qed` and `qed-verify` are editable installs, `--strict` treats
+      # anything it could not audit as a failure, and "skipped" is not
+      # "audited". So this one is allowed to skip our own packages, which have
+      # no PyPI advisories to find.
+      - name: Audit the installed environment
+        run: pip-audit --skip-editable --progress-spinner=off
+
+      # The declared-set audit is the strict one. It resolves exactly the
+      # dependencies this project chose, so nothing can be quietly left out:
+      # "no known vulnerabilities" over a set that silently excluded a package
+      # is the answer nobody wants, and the step above is the one that could
+      # produce it.
+      - name: Audit the declared dependencies, strictly
+        run: |
+          set -euo pipefail
+          python - <<'PY' > requirements-declared.txt
+          import pathlib
+          import tomllib
+
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]
+          lines = list(project.get("dependencies", []))
+          # `dev` only. The `ui` extra is an AGPL wheel from another repository
+          # (SPEC 20.4) and is audited where it is built.
+          lines += project.get("optional-dependencies", {}).get("dev", [])
+          print("\n".join(lines))
+          PY
+          cat requirements-declared.txt
+          pip-audit --strict --progress-spinner=off -r requirements-declared.txt
 
   check:
     runs-on: ${{ matrix.os }}

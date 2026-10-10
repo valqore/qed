@@ -252,6 +252,17 @@ class SqlStore:
         row = self._conn.execute("SELECT hash FROM evidence ORDER BY seq DESC LIMIT 1").fetchone()
         return None if row is None else str(row["hash"])
 
+    def last_ts(self) -> datetime | None:
+        """The newest record's timestamp, for the clock check (SPEC §17).
+
+        By `seq`, not by `ts`: the newest record is the last one appended, and
+        asking for `MAX(ts)` would return the *latest-dated* record, which on a
+        chain written by a clock that went backwards is a different row -- and
+        the row this needs is the one a backwards clock produced.
+        """
+        row = self._conn.execute("SELECT ts FROM evidence ORDER BY seq DESC LIMIT 1").fetchone()
+        return None if row is None else _parse_ts(str(row["ts"]))
+
     def append_evidence(
         self,
         record: EvidenceRecord,
