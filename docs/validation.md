@@ -1,6 +1,6 @@
 # Validating a release
 
-The test suite is 2,250 tests and green. This page is about the things it
+The test suite is 2,610 fast tests and green. This page is about the things it
 cannot see, because every one of them has shipped at least once.
 
 The pattern is consistent enough to name: **a test that imports the source tree
@@ -26,11 +26,48 @@ several replicas starting at the same moment.
 | `evidence.checkpoint.every_records` being ignored | the default matches the spec, so only a tuned value shows it |
 | A traceback from `qed policy lint` on a malformed rule file | every test fixture is valid YAML |
 | `UnicodeDecodeError` from a pack bundle with one stray byte | every test bundle was written by the test |
+| A frozen binary telling a Python-less user to run `pip install` | the build succeeded; nothing ran the binary |
+| **A mandate's signature was never verified** | `verify_mandate` was unit-tested from week 3 and nothing called it |
+| `README.md` citing `tests/policy/test_determinism.py` | no test asserts that a cited path exists |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
 
-The last row is worth dwelling on, because the guard was already there and
+## The mandate signature, which is the worst of them
+
+A mandate is what lets an action with no human behind it proceed at all:
+`AG-IDN-007` BLOCKs an unattended proposal that carries no mandate. So forging
+one converts a refusal into a decision, and until week 11 forging one meant
+editing a JSON file.
+
+`verify_mandate()` was written in week 3 and unit-tested the same day: tamper
+with a mandate, assert it raises. **Those tests passed for eight weeks because
+they called the function. Nothing else did.** Every consumer parsed a mandate
+with `Mandate.model_validate_json` -- schema, not signature -- and handed it to
+the engine. `qed.core` had deliberately declined the job ("signature
+verification is the token layer's job") and no token layer picked it up.
+
+Three things make this the most instructive entry on the page:
+
+1. **Coverage was not the problem.** The function was covered. The missing
+   assertion was that the path an operator actually uses calls it, which is a
+   different kind of test and the kind this project keeps having to add.
+2. **`SECURITY.md` documented it as fixed-by-week-3.** A known limitation with
+   a due date is worse than an unknown one, because everybody stops looking.
+3. **It was found by executing the documentation.** Writing
+   `docs/onboarding-shadow-to-enforce.md` meant running every command in it,
+   including one with a mandate, and the only reason to try a forged one was
+   that the guide claimed the signature mattered.
+
+That last point is now policy: **a command in a document must have been run.**
+Three passages of the onboarding guide were wrong on the first draft -- a flag
+that is positional, a config block with the wrong keys, and output invented
+from the help text -- and all three would have shipped had the page been
+written from the source rather than from a terminal.
+
+## A guard written in a different matcher than the thing it guards
+
+The `fnmatch` row is worth dwelling on, because the guard was already there and
 still let it through. `tests/test_packaging.py` was written after the
 `frameworks.yaml` bug, precisely to check `package-data` against what is on
 disk -- and it used `fnmatch`, which has no notion of path segments, while

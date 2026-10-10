@@ -54,6 +54,13 @@ ALLOWED_ABSENT = {
     "upstreams.yaml",
     # The tap is a separate repository and is not published (SPEC §24.1).
     "deploy/homebrew/qed.rb",
+    # `docs/validation.md` names this one precisely *because* it does not
+    # exist: the row records that `README.md` cited it for eight weeks while
+    # the test lived in `test_engine.py`. A document describing a dangling
+    # reference has to be able to quote it, which is the same false positive
+    # the relative-link guard in `test_site.py` hit on the CHANGELOG entry
+    # explaining its own rule.
+    "tests/policy/test_determinism.py",
 }
 
 
