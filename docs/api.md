@@ -209,3 +209,53 @@ touch that connection from the wrong thread.
 This constraint is load-bearing until the Postgres pool and chain leader arrive
 in week 6. `tests/api/test_proposals.py` submits concurrently and asserts the
 sequence has no gaps, which is what would catch its removal.
+
+## Rate limits
+
+```yaml
+api:
+  rate_limit:
+    per_adapter_rps: 100      # SPEC 13's defaults
+    per_principal_rps: 20
+```
+
+A spent limit is a **429** with a `Retry-After` header and a problem document
+naming which limit it was:
+
+```json
+{
+  "type": "https://valqore.io/qed/problems/rate-limited",
+  "status": 429,
+  "detail": "the per-adapter limit of 100/s is spent for adp_mcp. ...",
+  "scope": "adapter",
+  "retry_after_seconds": 0.3
+}
+```
+
+Four things worth knowing before you tune it.
+
+**A rate limit on a gate is a kill switch under load.** An adapter in
+`fail: closed` that cannot reach a decision treats a 429 as a refusal, so
+throttling qed stops the agent's work. The defaults are high enough that
+nothing legitimate reaches them; the limit is for one misbehaving adapter or
+one principal in a loop.
+
+**The bucket holds three seconds' worth, not one.** An agent that makes thirty
+tool calls while deciding what to do next is ordinary, and at 20/s a
+one-second bucket would refuse it. The *sustained* rate is still the number you
+set — only the first burst is free.
+
+**It is per process.** Four replicas with `per_adapter_rps: 100` admit 400/s
+between them, so divide by your replica count. `GET /v1/status` reports the
+limits, the refusal counts and that caveat in `rate_limit.scope`. A shared
+limiter would need Redis or a database write per proposal, which costs more
+than the work it protects.
+
+**A 429 writes nothing to the chain**, and does not burn the proposal id. The
+attack this exists to stop is a flood, and recording every refusal would let
+that flood fill the evidence instead of the queue. Back off and resubmit the
+same id.
+
+`0` turns a limit off. Authentication happens first, so an unauthenticated
+request is a 401 rather than a 429 — otherwise an anonymous flood could spend a
+real adapter's allowance.

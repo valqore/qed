@@ -215,12 +215,51 @@ class AdapterCredential(Frozen):
     kind: str = "mcp"
 
 
+class RateLimitConfig(Frozen):
+    """Per-adapter and per-principal limits on proposals (SPEC §13).
+
+    ```yaml
+    api:
+      rate_limit:
+        per_adapter_rps: 100
+        per_principal_rps: 20
+    ```
+
+    **Under `api:`, not the spec's `adapters.rate_limit`.** In this build
+    `adapters` is a *list* of credentials, so a mapping with `rate_limit` in it
+    would not parse at all -- an operator following §16 literally would get a
+    validation error. `api` is where the limit actually applies, because the
+    limit is on requests to the API and nothing else in the product has a
+    request rate.
+
+    **0 means off, not "refuse everything".** Zero reads as "no limit" to
+    everyone who has ever written a config file, and a kernel that refused
+    every proposal because somebody typed 0 would be an outage with a
+    plausible cause. Negative is refused outright, because there is no reading
+    of it that is a limit.
+    """
+
+    per_adapter_rps: float = 100.0
+    per_principal_rps: float = 20.0
+
+    @field_validator("per_adapter_rps", "per_principal_rps")
+    @classmethod
+    def _not_negative(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError(
+                f"a rate limit cannot be negative, and this is {value}. Use 0 to turn the "
+                "limit off."
+            )
+        return value
+
+
 class ApiConfig(Frozen):
     host: str = "127.0.0.1"
     port: int = 8710
     adapters: list[AdapterCredential] = Field(default_factory=list)
     #: Reject a signed request whose timestamp is further away than this.
     max_clock_skew_seconds: int = 300
+    rate_limit: RateLimitConfig = RateLimitConfig()
 
 
 class IssuerConfig(Frozen):

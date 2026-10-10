@@ -656,7 +656,7 @@ Base `/v1`. Auth: adapters → `X-QED-Adapter-Id` + HMAC-signed request (or mTLS
 | `GET /healthz` · `GET /readyz` | Health | `readyz` false without signing key |
 | `POST /admin/keys:rotate` · `GET /admin/keys/public` | Keys | admin approval |
 
-Rate limits: per adapter 100 proposals/s default; per principal 20/s. 429 with `Retry-After`.
+Rate limits: per adapter 100 proposals/s default; per principal 20/s. 429 with `Retry-After`. **Built in week 10**, with three things the line above does not say. The bucket holds **3 seconds' worth** (`BURST_SECONDS`), because an agent making thirty tool calls while deciding what to do next is ordinary and a one-second bucket at 20/s would refuse it -- on `fail: closed` a 429 is a blocked action, so a limit on a gate is a kill switch under load. The sustained rate is unchanged. The limit is **per process**, reported as such in `/v1/status`: four replicas admit four times the number. And it lives under **`api.rate_limit`**, not `adapters.rate_limit`, because `adapters` is a list of credentials in this build and a mapping there would not parse. A refusal writes nothing to the chain.
 
 ---
 

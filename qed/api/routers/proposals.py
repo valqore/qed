@@ -34,7 +34,7 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from qed.adapters.common import MAX_PROPOSAL_BYTES
-from qed.api.app_state import authenticate, qed_state
+from qed.api.app_state import authenticate, enforce_rate_limit, qed_state
 from qed.api.observe import record_decision
 from qed.api.problems import Problem
 from qed.core.schemas import (
@@ -83,11 +83,18 @@ class ProposalEnvelope(Frozen):
 async def post_proposal(request: Request) -> Response:
     state = qed_state(request)
     body = await _body(request, limit=MAX_PROPOSAL_BYTES)
-    authenticate(request, body)
+    adapter_id = authenticate(request, body)
     session = state.require()
 
     envelope = _parse(body)
     proposal = envelope.proposal
+
+    # After the parse, because the principal is in the body, and before the
+    # decision, because the decision is the expensive part this protects
+    # (SPEC 13). A 429 writes nothing to the chain: the proposal never became
+    # a decision, and recording refusals would let a flood fill the evidence
+    # instead of the queue.
+    enforce_rate_limit(request, adapter=adapter_id, principal=proposal.principal.human_hash)
 
     started = time.perf_counter()
     try:

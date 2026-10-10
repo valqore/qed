@@ -58,6 +58,54 @@ careless action, none at all to a determined operator who lies about who they
 are. ADR-0014 and `docs/approvals.md` say so rather than leaving it to be
 discovered.
 
+### Added - rate limits on the API (week 10)
+
+SPEC §13: *"per adapter 100 proposals/s default; per principal 20/s. 429 with
+`Retry-After`."* Token buckets in `qed/core/ratelimit.py`, spent in the
+proposals route.
+
+**A rate limit on a gate is a kill switch under load, and that shaped every
+decision here.** Every other service answers a 429 by making somebody wait;
+an adapter in `fail: closed` that cannot reach a decision treats it as a
+refusal, so throttling the kernel stops the agent's work. The limit exists for
+the case it is actually for -- one misbehaving adapter, or one principal in a
+loop, consuming the capacity every other adapter needs.
+
+Which is why the bucket holds **three seconds' worth**, not one. A textbook
+bucket has capacity equal to the rate, and the spec's per-principal limit is
+20/s -- so an agent that makes thirty tool calls while working out what to do
+next would be refused. That is not an abusive agent; it is an ordinary one. The
+sustained rate stays exactly what the spec says, and only the first burst is
+free. The suite found this rather than reasoning finding it: a test that sent
+thirty proposals against the shipped defaults went red.
+
+Three more calls worth naming:
+
+- **A refusal writes nothing to the chain.** The attack this stops is a caller
+  flooding the API, and recording every refusal would let them flood the
+  evidence chain instead -- the one thing that has to stay readable. Refusals
+  are counted for `/metrics` and `/v1/status`.
+- **`Retry-After` is computed**, not guessed, and never zero when the bucket is
+  empty. A client told to retry in one second when the bucket needs three is a
+  client that gets refused again, and three of them doing it in lockstep is a
+  thundering herd of our own making. `Problem` carries response headers now,
+  because a client should be able to back off without parsing a problem
+  document.
+- **It is per process**, and says so in `/v1/status`: four replicas with
+  `per_adapter_rps: 100` admit 400/s between them. A shared limiter would need
+  Redis, or the database on every request -- which costs more than the work it
+  protects. An operator sizing a limit divides by their replica count.
+
+The config lives under `api.rate_limit`, not the spec's `adapters.rate_limit`:
+in this build `adapters` is a *list* of credentials, so a mapping with
+`rate_limit` in it would not parse at all. `0` means off rather than "refuse
+everything", because zero reads as "no limit" to everyone who has ever written
+a config file; negative is refused outright.
+
+Authentication still comes first, and must: a 429 for an unauthenticated caller
+would tell them an adapter id exists, and would let an anonymous flood spend a
+real adapter's allowance.
+
 ### Added - `pip-audit` in CI, and the clock warning (week 10)
 
 The last two of SPEC §17's nine MUSTs with nothing behind them.

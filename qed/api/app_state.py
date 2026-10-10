@@ -7,6 +7,7 @@ by a function-local import is a cycle waiting to come back.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from qed.api.leader import LeaderLoop
 from qed.api.problems import Problem
 from qed.config import IssuerConfig
 from qed.core.delegation.claims import AUDIENCE, TokenClaims, TokenVerificationError
+from qed.core.ratelimit import Limiter
 from qed.core.schemas import Principal
 from qed.infra.channels.slack import SlackChannel
 from qed.infra.jwks import JwksCache, discover_jwks_uri
@@ -57,6 +59,11 @@ class QedState:
     #: The chain leader loop, on the deferred path. None on SQLite, where the
     #: decider chains its own records and there is nothing to elect.
     leader: LeaderLoop | None = None
+    #: SPEC §13's rate limits. On the state for the same reason as `metrics`:
+    #: a module global would make two instances in one process share buckets,
+    #: and a test could not start from an empty one. None until the lifespan
+    #: builds it, which also means an unconfigured instance opens no buckets.
+    limiter: Limiter | None = None
     #: SPEC §18's metrics. On the state and not a module global, so a test can
     #: make a fresh one and two instances in one process do not share numbers.
     metrics: MetricsRegistry = field(default_factory=MetricsRegistry)
@@ -207,6 +214,49 @@ class Caller:
         if self.human is not None:
             return f"oidc:{self.human.issuer}:{self.human.subject}"
         return f"adapter:{self.adapter_id}"
+
+
+def enforce_rate_limit(
+    request: Request, *, adapter: str | None, principal: str | None, now: float | None = None
+) -> None:
+    """Spend a token, or raise a 429 with `Retry-After` (SPEC §13).
+
+    Called from the route rather than from middleware, for one reason that
+    matters: the **principal** is inside the request body, so a middleware
+    would have to parse the proposal to find it -- and then the route would
+    parse it again, or the middleware would have to hand the parse forward. The
+    adapter is known at authentication and the principal one line after the
+    parse, which is where this sits.
+
+    A refusal writes nothing to the chain. The attack this exists to stop is a
+    caller flooding the API, and recording every refusal would let that caller
+    flood the evidence chain instead -- the one thing that has to stay
+    readable.
+    """
+    state = qed_state(request)
+    limiter = state.limiter
+    if limiter is None or not limiter.enabled:
+        return
+    verdict = limiter.check(
+        adapter=adapter,
+        principal=principal,
+        now=time.monotonic() if now is None else now,
+    )
+    if verdict.allowed:
+        return
+    raise Problem(
+        status=429,
+        code="rate-limited",
+        title="Too many proposals",
+        detail=(
+            f"the per-{verdict.scope} limit of {verdict.limit_rps:g}/s is spent for "
+            f"{verdict.key}. This is a per-process limit, so an operator raising it "
+            "should divide the number they want by their replica count "
+            "(`api.rate_limit`, SPEC 13)."
+        ),
+        headers={"Retry-After": f"{verdict.retry_after:g}"},
+        extra={"scope": verdict.scope, "retry_after_seconds": verdict.retry_after},
+    )
 
 
 def authenticate_caller(request: Request, body: bytes, *, now: datetime) -> Caller:

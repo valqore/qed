@@ -35,6 +35,7 @@ from qed.api.routers import (
     token,
 )
 from qed.config import DEFAULT_DIR
+from qed.core.ratelimit import Limiter
 from qed.infra.channels.slack import SlackChannel
 from qed.infra.jwks import JwksCache
 from qed.infra.keys.file import MissingSigningKey
@@ -81,6 +82,14 @@ def create_app(
                 "the policy bundle has errors; refusing to decide against a broken bundle"
             )
         else:
+            # SPEC 13's rate limits. Built here rather than at import so an
+            # unconfigured instance opens no buckets, and so two apps in one
+            # process cannot share an allowance.
+            limits = state.session.config.api.rate_limit
+            state.limiter = Limiter(
+                per_adapter_rps=limits.per_adapter_rps,
+                per_principal_rps=limits.per_principal_rps,
+            )
             state.auth = AdapterAuth(state.session.config, dev=dev)
             mode = state.auth.mode
             if not mode.usable:

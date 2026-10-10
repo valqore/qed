@@ -36,12 +36,18 @@ class Problem(Exception):
         title: str,
         detail: str,
         extra: dict[str, object] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.status = status
         self.code = code
         self.title = title
         self.detail = detail
         self.extra = extra or {}
+        #: Response headers the status code requires. SPEC §13's 429 has to
+        #: carry `Retry-After`, and a client reading that header is a client
+        #: that backs off correctly without parsing the body -- which is the
+        #: whole reason the header exists rather than only the JSON field.
+        self.headers = headers or {}
         super().__init__(detail)
 
 
@@ -53,6 +59,7 @@ def problem_response(
     detail: str,
     instance: str | None = None,
     extra: dict[str, object] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body: dict[str, object] = {
         "type": f"{_TYPE_BASE}/{code}",
@@ -63,7 +70,7 @@ def problem_response(
     if instance is not None:
         body["instance"] = instance
     body.update(extra or {})
-    return JSONResponse(body, status_code=status, media_type=CONTENT_TYPE)
+    return JSONResponse(body, status_code=status, media_type=CONTENT_TYPE, headers=headers or None)
 
 
 def install_handlers(app: FastAPI) -> None:
@@ -76,6 +83,7 @@ def install_handlers(app: FastAPI) -> None:
             detail=exc.detail,
             instance=str(request.url.path),
             extra=exc.extra,
+            headers=exc.headers,
         )
 
     @app.exception_handler(StarletteHTTPException)

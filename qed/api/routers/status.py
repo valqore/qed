@@ -36,7 +36,8 @@ router = APIRouter(prefix="/v1", tags=["status"])
 async def status(request: Request) -> JSONResponse:
     """Posture for the UI badge. Readable by an adapter or a person."""
     caller = authenticate_caller(request, b"", now=utcnow())
-    session = qed_state(request).require()
+    state = qed_state(request)
+    session = state.require()
 
     payload = chain_status(session)
     checkpoint = session.store.last_checkpoint()
@@ -55,4 +56,10 @@ async def status(request: Request) -> JSONResponse:
     payload["verified"] = None
     payload["verify_with"] = "qed export | qed-verify --keys <public dir>"
     payload["caller"] = caller.describe()
+    # SPEC 13's limits, and the number of refusals. Here rather than only in
+    # `/metrics` because the thing an operator wants when a client reports 429s
+    # is "which limit, and is it mine or the replica count" -- and `describe`
+    # says the scope is this process only.
+    limiter = state.limiter
+    payload["rate_limit"] = limiter.describe() if limiter is not None else {"enabled": False}
     return JSONResponse(payload)
