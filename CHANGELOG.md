@@ -6,7 +6,66 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
-Nothing yet.
+Four fixes from validating `v0.6.0` end to end -- installing the built wheels
+into a clean venv, driving the installed scripts, and starting the HA stack.
+Three of the four were invisible to a green 2,200-test suite, and all of them
+are in `docs/validation.md`.
+
+### Fixed - the arm64 image had never worked
+
+`/usr/lib/x86_64-linux-gnu` was hardcoded in the Dockerfile, so on arm64 every
+shared library landed where that architecture's loader does not look and the
+image died before it could say anything useful: `python3.12: error while
+loading shared libraries: libpython3.12.so.1.0`. Nothing caught it because the
+container test only ever built for the host while the release workflow builds
+both.
+
+The triplet now comes from `sysconfig.get_config_var("MULTIARCH")` -- the
+interpreter being copied is the right thing to ask -- and the libraries stage
+as a filesystem tree so each lands at its real path. Three guards: the script
+asserts `libpython3.12.so.1.0` by name, a test refuses a hardcoded triplet, and
+`tests/deploy/test_container.py` now builds and starts the **other**
+architecture under emulation.
+
+### Fixed - a replica could die on startup in the HA path
+
+`record_bundle` was a SELECT then an INSERT. Two replicas starting together
+both saw no row, both inserted, and the loser died on `UniqueViolation:
+policy_bundles_pkey` **before its API came up** -- so a simultaneous start or a
+rolling restart could leave a replica refusing to serve, in the one deployment
+shape the PostgreSQL backend exists for.
+
+One statement with `ON CONFLICT DO NOTHING` now, with `rowcount` deciding who
+was first. The loser returns False rather than raising: another replica getting
+there first is the normal case for every replica after the first.
+
+### Fixed - AG-BLR-007 missed `terraform.destroy`
+
+The rule is CRITICAL, BLOCK, no approvers -- teardown goes through a change
+window with a named owner. It matched `terraform destroy` only inside
+`action.params_redacted.command`, which is what the shell adapter sends. An IaC
+adapter sends `action.name: terraform.destroy`, and that returned **ALLOW,
+blast radius 40, no rule matched**.
+
+Widened to the tool names (terraform, tf, pulumi, cdk, cdktf + destroy, and
+helm uninstall/delete), scoped to the tool rather than a bare `destroy` which
+would have taken `auth.destroy_session`. Six golden cases, three that must fire
+and three that must not. The policy hash changes, which `policy_loaded`
+records.
+
+### Added - `examples/policy-cases.yaml`
+
+Seven runnable cases for the shipped pack, so `qed policy test
+examples/policy-cases.yaml` works out of the box. The format was documented and
+no example shipped, which meant somebody who installed the wheel got 46 rules
+and no way to watch them decide anything. Writing it is what found the
+AG-BLR-007 gap.
+
+### Fixed - a smoke test that failed on a good build
+
+`docker run ... --help | head -3` under `set -o pipefail`: `head` closes the
+pipe, the producer dies of SIGPIPE, and the step fails on an image that is
+fine.
 
 ## [0.6.0] — 2026-10-09
 

@@ -250,9 +250,10 @@ leaves the chain behind as an artifact anyone can check with the public key.
 5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
    `docs/assurance-classes.md`, `docs/policy-testing.md`.
-6. Running it: `docs/deployment.md` (process, container, Helm, HA),
+6. Running it: `docs/deployment.md` (process, container, Helm, HA, releasing),
    `docs/ci.md` (`qed check` in a pipeline), `docs/checkpoints.md` (anchors),
-   `docs/siem.md` (OCSF) and `docs/performance.md` (what it actually costs).
+   `docs/siem.md` (OCSF), `docs/performance.md` (what it actually costs) and
+   `docs/validation.md` (what a green test suite cannot see).
 
 `ARCHITECTURE_PLAN.md` is **superseded**; only its §16 (Valqore site/README
 fixes) is still live, and that work belongs to the Valqore repos, not here.
