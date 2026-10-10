@@ -6,6 +6,124 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Security - a mandate's signature was never verified (week 11)
+
+**A forged mandate authorised unattended action.** Found while writing the
+onboarding guide, by trying the thing the documentation describes.
+
+A mandate is what lets an action with no human behind it proceed at all:
+`AG-IDN-007` BLOCKs an unattended proposal that carries no mandate. Two correct
+decisions composed into a hole, the same shape as ADR-0012's remote kill
+switch:
+
+* `qed.core` holds no keys, so `mandate_validity` checks the window and
+  revocation only and says as much -- "signature verification is the token
+  layer's job".
+* Every consumer -- `qed check`, the hook, the MCP and HTTP proxies,
+  `POST /v1/proposals` -- parsed a mandate with `Mandate.model_validate_json`,
+  which validates the schema and not the signature, and passed it straight to
+  the engine.
+
+Nobody was the token layer. Measured on the same proposal:
+
+| Mandate | Decision | Derived |
+|---|---|---|
+| none | **BLOCK** (AG-IDN-007) | `present: false` |
+| genuine | REQUIRE_APPROVAL | `present: true, within: true` |
+| `signature.sig` replaced with 86 `A`s | REQUIRE_APPROVAL | `present: true, within: true` |
+
+So writing a JSON file turned a BLOCK into a normal decision. Anyone who could
+write a file could manufacture the authority for an unattended agent.
+
+`verify_mandate()` had existed since week 3 and was unit-tested from that day:
+tamper with a mandate, assert it raises. Those tests passed for eight weeks
+because they called the function. **Nothing else did.** `SECURITY.md` listed
+this as a week-1 limitation to be fixed in week 3, and the function was written
+while the caller never was.
+
+**Fixed at the one choke point**, `check_proposal`, rather than at each of the
+seven places a mandate is parsed -- seven sites is seven chances to forget, and
+the eighth caller would be the one that got it wrong. Verification happens
+*before* the proposal record is appended, so a refusal leaves the id unused and
+the agent can retry with a real mandate.
+
+`MandateError` joined `OPERATOR_ERRORS`, so the refusal is one line and exit 1
+rather than a traceback:
+
+```
+qed: mandate md_01JB00000000000000000001 does not match its signature
+     (the document was changed after it was signed)
+```
+
+That parenthetical exists because `InvalidSignature` carries no message, so
+interpolating it produced "does not match its signature: " with nothing after
+the colon -- on the one refusal where an operator most needs to be told what
+happened.
+
+**`qed policy explain` still does not verify, and now says so.** It takes no
+`--dir`, so it has no public keys; its JSON reports `"mandate": {"present":
+true}` either way, and an operator using it to find out whether a mandate works
+would read that as a mandate that will work. It prints a yellow line saying the
+signature was not checked and that `qed check` refuses a forged one.
+
+`tests/delegation/test_mandate_is_verified_at_runtime.py` holds it, including a
+structural test that no module outside `qed/runtime.py` builds an
+`EvalContext` with a mandate in it. That test found the two remaining bypasses
+on its first run -- `policy explain` and the policy-case fixtures -- which is
+why both are now named exemptions with reasons rather than silent ones.
+
+### Added - SECURITY.md disclosure process, CONTRIBUTING.md, GOVERNANCE.md (week 11)
+
+`SECURITY.md` had a disclosure section reading "there is no public disclosure
+process to follow; the full process lands with the public launch (week 11)".
+This is week 11. It now has the channels, a response timetable, safe harbour,
+and explicit scope -- including an out-of-scope list, because "the
+documentation already says this is absent" is the commonest report a project
+like this gets.
+
+Its "Known limits in **week 1**" section had been stale for ten weeks, listing
+"no authentication anywhere", "no approval service" and "no credential broker",
+all of which shipped in weeks 3-5. Replaced with a pointer to
+`THREAT_MODEL.md` and the four limitations people most often assume away.
+
+`CONTRIBUTING.md` is new: the DCO, the definition of done, and a table of
+changes that will be refused with the reason for each -- an LLM in the decision
+path, an HMAC signing path, a development fallback key. Better to know in
+advance than in review.
+
+**The DCO is now actually checked.** SPEC §25.1 has required a `Signed-off-by`
+line since week 1 and nothing enforced it; all 64 commits up to `d849165` carry
+none. The new `dco` job checks the commits a pull request adds, and the cutoff
+is stated rather than papered over -- rewriting that history would change every
+hash for no benefit, and what a DCO is for is contributions from people who are
+not the maintainer.
+
+`GOVERNANCE.md` gained "who decides", and the first draft of that section said
+"two maintainers, named in the repository's metadata". Both halves were false:
+there is one maintainer and `pyproject.toml` declared no authors at all. A
+governance document inventing a second reviewer is the same failure as a
+coverage percentage with no catalogue behind it (ADR-0011), so it now says one
+maintainer, that **nothing here has been reviewed by a second person**, and
+that the structural tests are what substitutes for one. `authors` is declared
+in `pyproject.toml` so the document points somewhere real.
+
+### Fixed - a root document cannot link relatively (week 11)
+
+`strict: true` caught this the moment the governance docs gained
+cross-references. `[THREAT_MODEL.md](THREAT_MODEL.md)` resolves on GitHub,
+where the reader is at the repository root, and not on the site, where the page
+is `/security/` and the target is `../threat-model/`. There is no spelling that
+satisfies both, so root documents use backticked filenames, which are correct
+in both contexts. Guarded twice: statically, and by the build.
+
+`README.md` promised `tests/policy/test_determinism.py` for the invariant "same
+inputs produce byte-identical verdicts". No such file exists; the test is
+`tests/policy/test_engine.py::TestDeterminism`. The invariant was enforced and
+the sentence claiming so pointed at nothing, which is worse than no table at
+all. `tests/docs/test_claims.py` now checks that every path any document cites
+resolves, and refuses to pass if its own pattern matches suspiciously few.
+
+
 ### Added - the docs site, and the guide that says how to reach enforce (week 11)
 
 SPEC §26 names mkdocs-material; `mkdocs.yml` is it, and

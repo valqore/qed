@@ -119,6 +119,7 @@ nav:
       - Performance: performance.md
   - Project:
       - Governance: governance.md
+      - Contributing: contributing.md
       - Security: security.md
       - Changelog: changelog.md
       - Specification: spec.md

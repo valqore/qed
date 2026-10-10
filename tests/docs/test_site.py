@@ -34,6 +34,7 @@ DOCS = ROOT / "docs"
 INCLUDED_FROM_ROOT = (
     "THREAT_MODEL.md",
     "GOVERNANCE.md",
+    "CONTRIBUTING.md",
     "SECURITY.md",
     "CHANGELOG.md",
     "QED_SPEC.md",
@@ -126,6 +127,30 @@ class TestTheRootDocumentsAreReachable:
         for page in DOCS.rglob("*.md"):
             for target in pattern.findall(page.read_text(encoding="utf-8")):
                 assert (ROOT / target).exists(), f"{page.name} includes a missing {target}"
+
+    def test_no_root_document_links_relatively(self) -> None:
+        """A root document may not carry a relative link to another document.
+
+        This is the one real cost of including rather than copying, and
+        `strict: true` found it the moment week 11 added cross-references:
+        `[THREAT_MODEL.md](THREAT_MODEL.md)` resolves on GitHub, where the
+        reader is at the repository root, and not on the site, where the page
+        is at `/security/` and the target is `../threat-model/`. There is no
+        spelling that satisfies both, so a backticked filename is used instead
+        -- it is correct in both contexts and broken in neither.
+
+        `mkdocs build --strict` would catch this anyway, which is why it is
+        configured. This names it without a build.
+        """
+        pattern = re.compile(r"\]\((?!https?://|#)([^)]+\.md[^)]*)\)")
+        offenders: list[str] = []
+        for name in INCLUDED_FROM_ROOT:
+            for target in pattern.findall((ROOT / name).read_text(encoding="utf-8")):
+                offenders.append(f"{name} links relatively to {target}")
+        assert not offenders, (
+            "a relative link in a root document cannot resolve both on GitHub "
+            "and on the site; use a backticked filename instead -- " + "; ".join(offenders)
+        )
 
     def test_no_root_document_was_copied_into_docs(self) -> None:
         """Two copies of a normative document is the bug the includes avoid.

@@ -81,3 +81,80 @@ Anything the spec does not settle gets an ADR in `docs/adr/`, numbered, with
 context, the decision, consequences and the alternatives that were rejected.
 "The spec was silent so I picked one" is fine; "the spec was silent so nobody
 knows why it works this way" is not.
+
+An ADR is not revised after the fact. A decision that turns out wrong gets a
+new ADR that supersedes it, because the reasoning that led somewhere wrong is
+part of the record — and because an audit trail product that quietly edits its
+own history has a credibility problem that no feature fixes.
+
+## Who decides
+
+**One maintainer: Tunc Celik (`tunc@valqore.io`), declared in
+`pyproject.toml`.** SPEC §22 plans for two engineers and there is currently
+one, and this section says so rather than describing a review process that
+cannot happen. A governance document that invents a second reviewer is the same
+failure as a coverage percentage with no catalogue behind it.
+
+What follows from that, stated plainly because it is the honest version:
+
+- **Nothing in this repository has been reviewed by a second person.** Every
+  commit has passed CI, `ruff`, `mypy --strict` and the full suite, and none
+  has had another pair of eyes on the reasoning.
+- **The checks are what substitutes for a reviewer**, which is why so many of
+  them are structural rather than stylistic: the AST scans on `qed.core`, the
+  packaging guard, the nav guard, the threat-model guard. A test can refuse a
+  change at 3am; a policy about two approvals cannot, if there is only one
+  person.
+- This is the same observation ADR-0014
+  makes about the operator — the one actor no rule constrains — applied to the
+  project itself.
+
+When there is a second maintainer, these become the rules, and this paragraph
+becomes a statement about the past:
+
+- **Any maintainer may merge** a change that passes CI and the definition of
+  done in `CONTRIBUTING.md`.
+- **Two must agree** on: anything that changes the evidence format or
+  `schema_version`; a new dependency; a change to the open-core boundary at the
+  top of this document; and anything that relaxes an invariant in
+  `SECURITY.md`.
+- **A disagreement that does not resolve** ends with the change not being made.
+  The default is the status quo, which for a kernel other people's controls
+  depend on is the right bias.
+
+There is no voting, no RFC period and no formal escalation, because inventing
+process for one or two people produces theatre rather than governance.
+
+## Contributions
+
+`CONTRIBUTING.md` has the mechanics. The governance-relevant
+parts:
+
+- **DCO, not CLA**, on this repository (SPEC §25.1). Contributors keep their
+  copyright and assert the right to contribute under Apache-2.0. `qed-ui` uses
+  a CLA because it is AGPL and may need relicensing; this one will not be
+  relicensed.
+- **No contributor is asked to assign copyright**, and no contribution is
+  taken under terms different from the licence everyone else gets.
+- **Maintainers' changes go through the same CI** as anybody else's. There is
+  no bypass and no admin merge.
+
+## Support and response
+
+One commitment, because it is the only one worth making at this size: **every
+issue gets a human response within 24 hours on a working day.** Not a fix — a
+response. For a security report the timetable is in
+`SECURITY.md`.
+
+A weekly changelog post goes in GitHub Discussions.
+
+## Trademark, and what a fork may do
+
+Apache-2.0 §6 grants no trademark rights, and `NOTICE` says what that leaves a
+fork free to do: everything except claim the product name or use the logo. Fork
+it, sell it, run it, change it, and call it something else.
+
+Specifically permitted and worth naming, since projects sometimes imply
+otherwise: running QED commercially, offering it as a managed service, and
+keeping your modifications private. The licence means it and no later document
+will take it back.

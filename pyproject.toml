@@ -14,6 +14,10 @@ requires-python = ">=3.12"
 # and nothing pending, so the Apache-2.0 patent grant in 3 grants nothing
 # Valqore holds.
 license = "Apache-2.0"
+# Declared because GOVERNANCE.md's "who decides" section points here, and a
+# governance document naming a maintainer the package metadata does not is a
+# claim with nothing behind it.
+authors = [{ name = "Tunc Celik", email = "tunc@valqore.io" }]
 license-files = ["LICENSE", "NOTICE"]
 classifiers = [
     "Programming Language :: Python :: 3.12",

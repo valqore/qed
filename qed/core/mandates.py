@@ -99,7 +99,13 @@ def verify_mandate(mandate: Mandate, public_keys: dict[str, object]) -> None:
         # verifier written by somebody else to get wrong.
         key.verify(b64u_decode(signature.sig), signing_payload(mandate))  # type: ignore[attr-defined]
     except Exception as exc:
-        raise MandateError(f"mandate {mandate.id} does not match its signature: {exc}") from exc
+        # `InvalidSignature` carries no message, so interpolating it produced
+        # "does not match its signature: " with nothing after the colon -- the
+        # one refusal where an operator most wants to be told something. Say
+        # what it means instead, and keep the detail only when there is any.
+        detail = str(exc).strip()
+        reason = f": {detail}" if detail else " (the document was changed after it was signed)"
+        raise MandateError(f"mandate {mandate.id} does not match its signature{reason}") from exc
 
 
 def is_active(mandate: Mandate, *, now: datetime) -> bool:

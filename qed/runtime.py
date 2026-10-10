@@ -37,6 +37,7 @@ from qed.core.budget import charge_for, newly_exhausted
 from qed.core.clock import assess_clock
 from qed.core.evidence.hashing import principal_hash
 from qed.core.evidence.retention import PurgePlan, plan_purge
+from qed.core.mandates import MandateError, verify_mandate
 from qed.core.policy.engine import evaluate
 from qed.core.policy.loader import LoadResult, baseline_pack_dir, load_bundle
 from qed.core.policy.model import LintFinding, PolicyBundle
@@ -60,6 +61,7 @@ from qed.infra.chain_writer import Appended, ChainWriter
 from qed.infra.keys.file import (
     PUBLIC_DIR_NAME,
     FileSigner,
+    load_public_keys,
     load_signer,
     public_key_filename,
 )
@@ -73,6 +75,7 @@ __all__ = [
     "EXIT_ERROR",
     "CheckOutcome",
     "DuplicateProposal",
+    "MandateError",
     "PolicyErrors",
     "RetentionResult",
     "Rotation",
@@ -86,6 +89,7 @@ __all__ = [
     "plan_retention",
     "rotate_signing_key",
     "settle",
+    "verify_session_mandate",
 ]
 
 logger = logging.getLogger("qed.runtime")
@@ -499,6 +503,29 @@ def _approver_view(
     }
 
 
+def verify_session_mandate(session: Session, mandate: Mandate) -> None:
+    """Check a mandate's signature against this instance's public keys.
+
+    **Why this exists.** A mandate is what lets an action with no human behind
+    it proceed at all: `AG-IDN-007` BLOCKs an unattended proposal that carries
+    no mandate, and `compute_derived` reports `present: true` for any mandate it
+    is handed. Until this function was called, those two facts composed into a
+    forgery: a mandate whose `signature.sig` was replaced with 86 `A`s derived
+    identically to the genuine one, so writing a JSON file turned a BLOCK into a
+    normal decision.
+
+    `qed.core` cannot do this -- it holds no keys, and `mandate_validity` says
+    so in as many words ("signature verification is the token layer's job").
+    This is the token layer. `verify_mandate` had existed and been unit-tested
+    since week 3; what was missing was any caller, which is why a green suite
+    never saw it.
+
+    Raises `MandateError`, which every caller already has to handle because a
+    malformed mandate file could always raise.
+    """
+    verify_mandate(mandate, dict(load_public_keys(session.public_keys_dir)))
+
+
 def check_proposal(
     session: Session,
     proposal: ActionProposal,
@@ -524,6 +551,13 @@ def check_proposal(
         if budget is not None
         else (session.store.load_budget(jti) or BudgetState(token_jti=jti))
     )
+    if mandate is not None:
+        # Verified here, at the one point every caller passes through, rather
+        # than at each of the seven places a mandate is parsed. See
+        # `verify_session_mandate` for why this is not `qed.core`'s job and why
+        # an unverified mandate must not reach `evaluate`.
+        verify_session_mandate(session, mandate)
+
     ctx = EvalContext(
         now=stamp, mandate=mandate, history=history if history is not None else HistoryDerived()
     )

@@ -31,6 +31,7 @@ from qed.config import DEFAULT_DIR, ConfigError
 from qed.core.clock import assess_clock
 from qed.core.evidence.export.jsonl import to_csv, to_jsonl
 from qed.core.evidence.export.oscal import to_oscal
+from qed.core.mandates import MandateError
 from qed.core.policy.engine import explain as explain_proposal
 from qed.core.policy.loader import baseline_pack_dir, load_bundle
 from qed.core.schemas import (
@@ -76,7 +77,12 @@ if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
 #: Each already carries a sentence written for a person, and a traceback around
 #: it helps nobody: "this chain was last signed by X" is the whole answer and
 #: the frames above it are noise.
-OPERATOR_ERRORS: Final = (InstanceMismatch, KeyDiscontinuity, ConfigError)
+#:
+#: `MandateError` joined the list when mandate signatures started being
+#: verified: a forged or unsigned mandate is the most load-bearing refusal the
+#: CLI makes, and printing it as a stack trace would make the one case that
+#: matters look like a crash.
+OPERATOR_ERRORS: Final = (InstanceMismatch, KeyDiscontinuity, ConfigError, MandateError)
 
 
 class QedGroup(TyperGroup):
@@ -1020,6 +1026,20 @@ def policy_explain(
         else None
     )
     ctx = EvalContext(now=utcnow(), mandate=mandate)
+    if mandate is not None:
+        # `explain` takes no `--dir`, so it holds no public keys and cannot
+        # check the signature. `check_proposal` does, and refuses a forgery.
+        # Saying so matters because the derived output below reports
+        # `"mandate": {"present": true}` either way, and an operator using
+        # `explain` to find out whether a mandate works would read that as a
+        # mandate that will work.
+        typer.secho(
+            "qed: this is a policy dry-run with no keys, so the mandate's signature "
+            "was NOT verified -- only its window, revocation and `allowed` envelope. "
+            "`qed check` verifies it and refuses a forged one.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     typer.echo(json.dumps(explain_proposal(proposal, result.bundle, budget, ctx), indent=2))
 
 

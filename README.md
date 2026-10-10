@@ -287,7 +287,7 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 | `qed.core` imports no HTTP client and no socket | `tests/core/test_no_network.py` |
 | `qed.core` imports no model SDK | `tests/core/test_no_llm.py` |
 | Decisions are independent of rule file order | `tests/policy/test_golden.py` |
-| Same inputs produce byte-identical verdicts | `tests/policy/test_determinism.py` |
+| Same inputs produce byte-identical verdicts | `tests/policy/test_engine.py` |
 | Tamper, delete, reorder in the chain are all detected | `tests/evidence/test_chain.py` |
 | Records verify after their payload is purged | `tests/evidence/test_chain.py` |
 | Ed25519 only — no HMAC path exists anywhere | `tests/evidence/test_no_hmac.py` |
