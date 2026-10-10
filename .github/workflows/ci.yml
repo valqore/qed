@@ -498,14 +498,21 @@ jobs:
       # really for. `QED_BUILDER_IMAGE` points the build at AWS's mirror of
       # the same official Python image, for the same reason the Postgres
       # service container does.
+      # Once, not twice: this used to run as two steps, which built the
+      # container twice for one result.
+      #
+      # `QED_REQUIRE_EMULATION` matters because this job installs the emulator
+      # itself a step earlier. Without it the arm64 tests *skip* when the probe
+      # cannot start a foreign image -- including when the probe simply failed
+      # to pull -- and a skip here is a green run with the test that caught the
+      # last arm64 bug not having run. With it they run and fail by name.
+      #
+      # The skip guard stays for everything else: helm or Docker not reaching
+      # the tests is the other way this job passes without testing anything.
       - name: Chart and container tests
         env:
           QED_BUILDER_IMAGE: public.ecr.aws/docker/library/python:3.12-slim-bookworm
-        run: pytest tests/deploy -q
-
-      - name: The chart tests really ran
-        env:
-          QED_BUILDER_IMAGE: public.ecr.aws/docker/library/python:3.12-slim-bookworm
+          QED_REQUIRE_EMULATION: "1"
         run: |
           set -euo pipefail
           pytest tests/deploy -q -p no:cacheprovider | tee /tmp/deploy.txt

@@ -91,6 +91,23 @@ checkout were green, because the checkout has the files.
 The matcher is `PurePosixPath.match` now, which segments the way setuptools
 does, and removing the pattern fails ten tests by name instead of none.
 
+### Fixed - the arm64 tests could vanish from a green CI run
+
+The emulation probe ran `docker run --platform <foreign> busybox true` and read
+its exit code. That returns the same `False` for "this machine has no emulator"
+and "the registry did not answer just then", and the second of those happened:
+the `deploy` job skipped both arm64 tests one step after installing the
+emulator. The job's own "something skipped" guard caught it, which is why that
+guard exists -- but it named the symptom and not the test.
+
+The pull is now its own step, so a registry failure prints as one. And because
+that job installs the emulator itself, it sets `QED_REQUIRE_EMULATION=1`: the
+tests then run and fail by name rather than skipping, since a skip there is a
+green run with the test that caught the last arm64 bug not having run.
+
+While there: the job ran `pytest tests/deploy` twice, building the container
+twice for one result. Once now.
+
 ### Fixed - a leadership test raced the Postgres backend reaper
 
 `test_a_dead_connection_releases_it` closed the leader's connection and

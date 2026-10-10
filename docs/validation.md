@@ -20,6 +20,7 @@ several replicas starting at the same moment.
 | `terraform.destroy` in prod returning ALLOW | no case asserted the tool-name spelling |
 | Masking eating a public key under `strict` | the record still verified against its own hash |
 | Ten control catalogues missing from the wheel | the test for exactly this matched them with `fnmatch`, whose `*` crosses a `/` |
+| Both arm64 tests skipping one step after the emulator was installed | a probe that could not tell "no emulator" from "the registry did not answer" |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
@@ -84,9 +85,19 @@ retired key" pass for the wrong reason.
 
 ```bash
 pytest tests/deploy -m slow        # builds and starts the foreign arch under emulation
+QED_REQUIRE_EMULATION=1 pytest tests/deploy -m slow   # ...and refuses to skip
 ```
 
-Skipped without emulation rather than passing on the easy half.
+Skipped without emulation rather than passing on the easy half -- which leaves
+one more way to pass without testing anything, so CI sets
+`QED_REQUIRE_EMULATION=1`: it installs the emulator a step earlier, and there a
+skip is a green run with the test that caught the last arm64 bug not having
+run.
+
+The probe pulls its image in a separate step from starting it, because one
+probe that did both returned the same `False` for "this machine has no
+emulator" and "the registry did not answer just then" -- and the second of
+those made the arm64 tests vanish from a run that had installed the emulator.
 
 ### Start more than one replica
 

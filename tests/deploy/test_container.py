@@ -323,6 +323,11 @@ class TestTheImageActuallyRuns:
         assert report.ok, report.summary()
 
 
+#: A tiny image the probe starts under emulation. Pulled in its own step so a
+#: registry failure is not mistaken for a missing emulator.
+PROBE_IMAGE = "public.ecr.aws/docker/library/busybox:latest"
+
+
 def emulation_available() -> bool:
     """Whether this machine can run a foreign architecture.
 
@@ -330,19 +335,29 @@ def emulation_available() -> bool:
     Without it the build still succeeds and the image cannot be started, which
     is the half that matters here -- so the test skips rather than passing on
     the easy half.
+
+    The pull is a separate step from the run. One probe that did both returned
+    the same False for "this machine has no emulator" and "the registry did not
+    answer just then", and the second of those made the arm64 tests vanish from
+    a CI run on a workflow that had installed the emulator a step earlier. A
+    skip that is really a transient failure is the worst outcome available: it
+    is a green run with the test that caught the last arm64 bug not having run.
     """
     if not docker_available():
         return False
+    pull = subprocess.run(
+        ["docker", "pull", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if pull.returncode != 0:
+        # Not an answer about emulation. Say so, and let `--require-emulation`
+        # decide whether a run that cannot tell is allowed to pass.
+        print(f"emulation probe could not pull {PROBE_IMAGE}: {pull.stderr.strip()[-500:]}")
+        return False
     probe = subprocess.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--platform",
-            FOREIGN_PLATFORM,
-            "public.ecr.aws/docker/library/busybox:latest",
-            "true",
-        ],
+        ["docker", "run", "--rm", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE, "true"],
         capture_output=True,
         check=False,
     )
@@ -376,8 +391,24 @@ def foreign_image(tmp_path_factory: pytest.TempPathFactory) -> str:
     return tag
 
 
+#: Set by CI, which installs the emulator itself: there, a skip is a failure.
+#: The workflow used to catch this with "something skipped" over the whole
+#: file, which named the symptom and not the test.
+REQUIRE_EMULATION = os.environ.get("QED_REQUIRE_EMULATION") == "1"
+
+
+#: Asked once. Where emulation is *required* the tests run anyway and fail with
+#: Docker's own output, which says more than any message composed here -- and a
+#: `pytest.fail` during collection would be a collection error rather than a
+#: named failing test.
+NO_EMULATION = not emulation_available()
+
+
 @pytest.mark.slow
-@pytest.mark.skipif(not emulation_available(), reason="no emulation for another architecture")
+@pytest.mark.skipif(
+    NO_EMULATION and not REQUIRE_EMULATION,
+    reason="no emulation for another architecture",
+)
 class TestTheImageWorksOnTheOtherArchitecture:
     """The gap that shipped: `/usr/lib/x86_64-linux-gnu` was hardcoded, so the
     arm64 image put every shared library where that loader does not look and
@@ -388,6 +419,18 @@ class TestTheImageWorksOnTheOtherArchitecture:
     which is why it is `slow` and why the assertion is "it runs" rather than
     anything about performance.
     """
+
+    def test_the_emulator_is_actually_here(self) -> None:
+        """First in the class, so a missing emulator is named rather than
+        showing up as a confusing build failure three minutes later."""
+        assert not NO_EMULATION, (
+            f"QED_REQUIRE_EMULATION=1 and this machine cannot start a "
+            f"{FOREIGN_PLATFORM} image. The job installed the emulator, so this is "
+            "a broken binfmt setup or a registry that did not answer -- the probe "
+            "printed which. These tests are not skipped here, because a skip would "
+            "be a green run with the test that caught the last arm64 bug not having "
+            "run."
+        )
 
     def test_it_starts(self, foreign_image: str) -> None:
         result = subprocess.run(
