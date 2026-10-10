@@ -27,18 +27,21 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 import typer
 from typer.core import TyperGroup
 
-from qed.config import DEFAULT_DIR
+from qed.config import DEFAULT_DIR, ConfigError
 from qed.core.evidence.export.jsonl import to_csv, to_jsonl
 from qed.core.evidence.export.oscal import to_oscal
 from qed.core.policy.engine import explain as explain_proposal
 from qed.core.policy.loader import baseline_pack_dir, load_bundle
 from qed.core.schemas import (
     ActionProposal,
+    Assurance,
     BudgetState,
     Decision,
     Enforcement,
     Environment,
+    EvidenceType,
     Mandate,
+    rfc3339_ms,
     utcnow,
 )
 from qed.infra.chain_writer import InstanceMismatch, KeyDiscontinuity
@@ -65,13 +68,14 @@ if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
     # importing it on every invocation.
     from qed.adapters.http_proxy.proxy import HttpProxyStats
     from qed.adapters.mcp.proxy import ProxyStats
+    from qed.core.admin import AdminOperation, GateDecision
 
 #: Failures that are a statement about the operator's chain, not a bug in qed.
 #:
 #: Each already carries a sentence written for a person, and a traceback around
 #: it helps nobody: "this chain was last signed by X" is the whole answer and
 #: the frames above it are noise.
-OPERATOR_ERRORS: Final = (InstanceMismatch, KeyDiscontinuity)
+OPERATOR_ERRORS: Final = (InstanceMismatch, KeyDiscontinuity, ConfigError)
 
 
 class QedGroup(TyperGroup):
@@ -109,6 +113,23 @@ app.add_typer(packs_app, name="packs")
 app.add_typer(mandate_app, name="mandate")
 
 DirOption = Annotated[Path, typer.Option("--dir", help="qed state directory (keys and chain).")]
+
+# Self-governance (SPEC 17). Three options shared by every gated command, so
+# `qed keys rotate` and `qed packs import` take the same words for the same
+# thing -- an operator should not have to remember which one spells it how.
+ByOption = Annotated[
+    str, typer.Option("--by", help="Your subject, when this operation is self-governed.")
+]
+ApprovalOption = Annotated[
+    str | None, typer.Option("--approval", help="An approval id that authorises this.")
+]
+BreakGlassOption = Annotated[
+    str,
+    typer.Option(
+        "--break-glass",
+        help="Proceed without an approval, recording this reason. For incidents.",
+    ),
+]
 PolicyOption = Annotated[
     list[Path] | None,
     typer.Option("--policy", help="Extra policy file or directory. Repeatable."),
@@ -122,6 +143,66 @@ def _fail(message: str) -> None:
 
 
 # ---------------------------------------------------------------------- keys
+
+
+def _admin_gate(
+    session: Session,
+    operation: AdminOperation,
+    *,
+    by: str,
+    approval: str | None,
+    break_glass: str,
+    detail: dict[str, object] | None = None,
+) -> GateDecision | None:
+    """Run the self-governance gate, or open a request and stop.
+
+    Returns the decision when the operation may proceed, and **None** when a
+    request was opened instead -- in which case the caller must not act. The
+    exit code is 3, SPEC 12.5's REQUIRE_APPROVAL, the same number a gated agent
+    action gets: a pipeline that already branches on 3 does not need to learn a
+    second convention for qed's own operations.
+    """
+    from qed.core.admin import AdminRefusal
+    from qed.runtime import admin_gate, open_admin_request
+
+    governed = operation in session.config.admin.governed()
+    if governed and approval is None and not break_glass:
+        if not by:
+            session.close()
+            _fail(
+                f"{operation.value} is self-governed on this instance, so it needs to know "
+                "who is asking: pass `--by you@example.com`."
+            )
+            return None
+        request = open_admin_request(session, operation, requester=by, detail=detail)
+        session.close()
+        typer.secho(f"approval required: {request.id}", fg=typer.colors.YELLOW, bold=True)
+        typer.echo(f"  operation : {operation.value}")
+        typer.echo(f"  approvers : {', '.join(session.config.admin.approvers)}")
+        typer.echo(f"  expires   : {rfc3339_ms(request.expires_at)}")
+        typer.echo("")
+        typer.echo(f"  qed approve {request.id} --by someone-else@example.com")
+        typer.echo(f"  qed {operation.value.replace('_', ' ')} --approval {request.id} --by {by}")
+        raise typer.Exit(code=EXIT_APPROVAL)
+
+    try:
+        decision = admin_gate(
+            session, operation, requester=by, approval_id=approval, break_glass=break_glass
+        )
+    except AdminRefusal as exc:
+        session.close()
+        _fail(str(exc))
+        return None
+
+    if decision.break_glass:
+        typer.secho(
+            f"BREAK-GLASS: {operation.value} proceeding without an approval. "
+            f"This is recorded in the chain. Reason: {decision.reason}",
+            fg=typer.colors.RED,
+            bold=True,
+            err=True,
+        )
+    return decision
 
 
 @keys_app.command("init")
@@ -150,6 +231,9 @@ def keys_rotate(
         bool,
         typer.Option("--yes", help="Do not ask. For a scripted rotation."),
     ] = False,
+    by: ByOption = "",
+    approval: ApprovalOption = None,
+    break_glass: BreakGlassOption = "",
 ) -> None:
     """Replace the signing key, keeping the chain verifiable across the change.
 
@@ -163,6 +247,19 @@ def keys_rotate(
         session = open_session(directory=directory, config_path=config, strict_policy=False)
     except MissingSigningKey as exc:
         _fail(str(exc))
+        return
+
+    from qed.core.admin import AdminOperation
+
+    decision = _admin_gate(
+        session,
+        AdminOperation.keys_rotate,
+        by=by,
+        approval=approval,
+        break_glass=break_glass,
+        detail={"retiring_key_id": session.signer.key_id},
+    )
+    if decision is None:
         return
 
     if not yes:
@@ -190,6 +287,19 @@ def keys_rotate(
         _fail(str(exc))
         return
 
+    # The authorisation travels with the operation's own record. `key_rotated`
+    # is the chain event; this `admin_action` is who allowed it, and an auditor
+    # reading one wants the other.
+    session.writer.append(
+        type_=EvidenceType.admin_action,
+        assurance=Assurance.kernel,
+        payload={
+            "action": "keys_rotate",
+            "retired_key_id": rotation.old_key_id,
+            "active_key_id": rotation.new_key_id,
+            **decision.payload(),
+        },
+    )
     session.close()
     typer.secho("rotated", fg=typer.colors.GREEN, bold=True)
     typer.echo(f"  retired : {rotation.old_key_id}")
@@ -641,6 +751,9 @@ def packs_import(
             help="Import even if it leaves rules citing controls it does not define.",
         ),
     ] = False,
+    by: ByOption = "",
+    approval: ApprovalOption = None,
+    break_glass: BreakGlassOption = "",
 ) -> None:
     """Import a control catalogue (SPEC 11).
 
@@ -707,6 +820,19 @@ def packs_import(
         _fail(f"{exc}. An import has to be recordable before it is allowed to happen.")
         return
 
+    from qed.core.admin import AdminOperation
+
+    decision = _admin_gate(
+        session,
+        AdminOperation.packs_import,
+        by=by,
+        approval=approval,
+        break_glass=break_glass,
+        detail={"bundle_hash": bundle.bundle_hash, "issuer": bundle.issuer},
+    )
+    if decision is None:
+        return
+
     # Before writing: an imported catalogue replaces the shipped one, so a
     # bundle that omits a control an installed rule cites leaves that rule
     # citing nothing -- which is a lint error, and the engine refuses to decide
@@ -748,6 +874,7 @@ def packs_import(
                 "source": path.name,
                 "unsigned": not bundle.signed,
                 "rollback_allowed": allow_rollback,
+                **decision.payload(),
             },
         )
     finally:
@@ -1482,6 +1609,24 @@ def doctor(
         )
     for problem in cast("list[str]", checkpoint_report["config_errors"]):
         typer.secho(f"             ! {problem}", fg=typer.colors.RED)
+
+    # SPEC 17: an operator should be able to see whether the thing doing the
+    # governing is itself governed. Reported either way -- a silence here would
+    # read as "fine" on an instance where nothing gates a key rotation.
+    admin = session.config.admin
+    gated = sorted(item.value for item in cast("frozenset[Any]", admin.governed()))
+    if gated:
+        approvers = ", ".join(admin.approvers)
+        typer.echo(f"self-gov   : {', '.join(gated)} need an approval from {approvers}")
+    else:
+        typer.secho(
+            "self-gov   : off -- `qed keys rotate` and `qed packs import` need nobody's "
+            "agreement.\n"
+            "             The operator is the one actor no rule constrains. Set "
+            "`admin.self_governed`\n"
+            "             with `admin.approvers` to change that (SPEC 17).",
+            fg=typer.colors.YELLOW,
+        )
 
     if report["interrupted_rotation"]:
         typer.secho(

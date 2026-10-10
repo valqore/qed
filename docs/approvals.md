@@ -197,3 +197,74 @@ live feed reaches more screens than the queue does.
 ## Not built yet
 
 The web approval page (`/ui/approvals`). Every API it needs exists.
+
+## qed's own admin operations (SPEC §17)
+
+Every rule in the baseline pack constrains an agent. The operator is the one
+actor no rule touches — and the operator is who rotates the signing key and
+replaces the control catalogues. Self-governance puts those behind the same
+approval, with the same separation of duties.
+
+```yaml
+admin:
+  self_governed: true
+  approvers: ["group:platform-oncall"]
+  operations: [keys_rotate, packs_import]
+  timeout: 24h
+```
+
+**Off by default**, because it needs a second person and the common case is one
+operator on a laptop. `qed doctor` reports it either way, so an instance with no
+gate says so rather than being quiet about it.
+
+The flow, with two people:
+
+```bash
+# alice asks. Exit 3 -- REQUIRE_APPROVAL, the same code a gated agent action gets.
+qed keys rotate --by alice@example.com
+#   approval required: apr_01M4K8...
+
+# bob agrees. alice cannot: she is the requester, and AG-SOD-001 refuses it.
+qed approve apr_01M4K8... --by bob@example.com --groups group:platform-oncall
+
+# alice rotates.
+qed keys rotate --by alice@example.com --approval apr_01M4K8...
+```
+
+Three refusals worth knowing about:
+
+- **An approval is for the operation it was asked about.** One granted for
+  `packs_import` cannot rotate a key — that would be an administrative slip
+  that works as a privilege escalation.
+- **An approval is spent once**, and that is read out of the chain: the
+  `admin_action` carrying the approval id *is* the receipt.
+- **`admin.self_governed: true` with no `approvers` is refused at load.** A gate
+  nobody can open is an outage waiting for the first rotation.
+
+### Break-glass
+
+```bash
+qed keys rotate --by alice@example.com --break-glass "INC-412, key leaked, oncall unreachable"
+```
+
+The reason to rotate a key is that it may have leaked, which is exactly when the
+approver is asleep. A gate with no break-glass does not stop the rotation — it
+moves it outside the tool, where the operator sets `self_governed: false`,
+rotates, sets it back, and *nothing records any of it*.
+
+So this proceeds, and costs: the reason is required, the command prints a red
+warning, and the `admin_action` carries `break_glass: true` with the reason
+verbatim. `admin_action` is in `NEVER_PURGE`, so that record is permanent.
+
+### What this does and does not prove
+
+On the CLI, `--by` is **self-asserted** — as `qed approve --by` always has been,
+because the CLI runs on the operator's own machine. What self-governance buys
+there is that **two separate invocations naming two separate subjects** are
+required: a real obstacle to a careless action, and none at all to a determined
+operator who lies about who they are.
+
+The identity is proven on the API path, where a delegation token says who is
+asking. `THREAT_MODEL.md` and ADR-0014 say so plainly, because claiming
+cryptographic separation of duties here would be the same overclaim as a
+compliance mapping nobody checked.

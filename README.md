@@ -61,6 +61,7 @@ hardware, including air-gapped.
 | **Control catalogues** for 10 frameworks, with honest coverage | `qed/compliance/packs/`, `docs/compliance.md` |
 | **Signed catalogue import**, air-gap, recorded in the chain | `qed/remote/packs.py`, ADR-0012 |
 | **Transparency-log anchor client**, six values and no payload | `qed/remote/anchor.py`, ADR-0013 |
+| **Self-governance**: qed's own admin ops behind an approval | `qed/core/admin.py`, ADR-0014 |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
 
 Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),

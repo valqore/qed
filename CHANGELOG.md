@@ -6,6 +6,78 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - qed governs its own admin operations (week 10)
+
+Every rule in the baseline pack constrains an agent. The operator has been the
+one actor no rule touches, and the operator is who rotates the signing key,
+replaces the control catalogues, and edits the policy an agent is judged by.
+"Who governs the thing doing the governing" is the first question an auditor
+asks about a governance product, and until now the answer was "nobody".
+
+`qed keys rotate` and `qed packs import` can now require an approval, with the
+same separation of duties an agent's action gets -- the same
+`ApprovalRequest`, the same `qed approve`, the same
+`check_separation_of_duties`. Not a second approval system: two would be two
+places for the SoD check to live, and the one that mattered would be the one
+nobody tested.
+
+```yaml
+admin:
+  self_governed: true
+  approvers: ["group:platform-oncall"]
+  operations: [keys_rotate, packs_import]
+```
+
+**Off by default**, because it needs a second person and the common case is one
+operator on a laptop -- on by default would make `qed keys rotate` fail on
+first use, which teaches people the feature is an obstacle. What keeps that
+honest is that `qed doctor` reports it either way, in yellow, with the sentence
+an auditor would write. And the record carries `self_governed: false` rather
+than omitting the field, so a rotation that was unapproved *by configuration*
+is distinguishable from one that evaded a gate.
+
+**Break-glass exists and costs a permanent record.** The reason to rotate a key
+is that it may have leaked, which is exactly when the approver is asleep. A gate
+with no break-glass does not stop the rotation -- it moves it outside the tool,
+where the operator sets `self_governed: false`, rotates, sets it back, and
+nothing records any of it. So `--break-glass "<reason>"` proceeds, the reason is
+required, the command prints red, and the `admin_action` says `break_glass:
+true` for good.
+
+**An approval is bound to one operation and spent once.** The operation lives
+inside the synthetic proposal id the approver decided on, so an approval granted
+for a catalogue import cannot rotate a key -- a smaller ask spent on a larger
+one. Single use is read out of the chain rather than from a column: the
+`admin_action` carrying an approval id *is* the receipt, and a column could
+disagree with the chain after a restore.
+
+**What it does not prove.** On the CLI `--by` is self-asserted, as
+`qed approve --by` always has been. Self-governance there buys that two separate
+invocations naming two separate subjects are required: a real obstacle to a
+careless action, none at all to a determined operator who lies about who they
+are. ADR-0014 and `docs/approvals.md` say so rather than leaving it to be
+discovered.
+
+### Fixed - an invalid `qed.yaml` printed a pydantic traceback
+
+Found while testing the above, and nothing to do with it: `mode: nonsense`
+produced forty lines of frames and a URL, with the answer -- *mode must be
+shadow or enforce* -- somewhere in the middle. Every command did this, for a
+one-character typo in a config file.
+
+`ConfigError` carries the file path and the field path now, and the CLI's group
+handler prints it as a sentence like any other statement about the operator's
+own setup:
+
+```
+qed: /etc/qed/qed.yaml is not valid:
+  mode: Input should be 'shadow' or 'enforce'
+```
+
+It was found because a validation test asserted on output that did not exist --
+the assertion was right and the output was empty, because the exception had
+never been caught.
+
 ### Added - signed control catalogues, and the air-gap import (week 9)
 
 `qed packs import` and `qed packs verify`, with `qed/remote/packs.py` behind

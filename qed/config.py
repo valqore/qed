@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import yaml
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from qed.core.evidence.masking import MaskingProfile
 from qed.core.schemas import Budget, Decision, EvidenceType, Frozen, Mode
@@ -294,6 +294,74 @@ class ApprovalsConfig(Frozen):
         return list(self.groups_by_email.get(email, ()))
 
 
+class AdminConfig(Frozen):
+    """Self-governance: which of qed's own operations need an approval.
+
+    ```yaml
+    admin:
+      self_governed: true
+      approvers: ["group:platform-oncall"]
+      operations: [keys_rotate, packs_import]
+      timeout: 24h
+    ```
+
+    **Off by default**, and that is a considered default rather than a
+    placeholder. Self-governance needs a second person, and the common case is
+    one operator on a laptop; on by default would make `qed keys rotate` stop
+    working on first use, which teaches people the feature is an obstacle. What
+    makes it honest is that `qed doctor` reports it either way, so an instance
+    that is not self-governed says so rather than being quiet about it.
+
+    `operations` is validated against :class:`~qed.core.admin.AdminOperation`,
+    so a typo is an error at load. A misspelt operation name that silently
+    governed nothing would be the worst kind of security setting: one an
+    operator believes is on.
+    """
+
+    self_governed: bool = False
+    #: Groups or subjects who may approve. Empty with `self_governed: true` is
+    #: refused: a gate nobody can open is not a gate, it is an outage waiting
+    #: for the first rotation.
+    approvers: list[str] = Field(default_factory=list)
+    operations: list[str] = Field(default_factory=lambda: ["keys_rotate", "packs_import"])
+    #: How long a request stays open. Longer than an agent's approval by
+    #: default: nobody rotates a key in the ninety seconds an agent waits.
+    timeout: str = "24h"
+
+    @field_validator("operations")
+    @classmethod
+    def _known_operations(cls, value: list[str]) -> list[str]:
+        from qed.core.admin import AdminOperation
+
+        known = {item.value for item in AdminOperation}
+        unknown = [item for item in value if item not in known]
+        if unknown:
+            raise ValueError(
+                f"unknown admin operation(s) {unknown}. The ones qed can gate are: "
+                f"{sorted(known)}. A name that is nearly right would be a setting you "
+                "believe is in force and is not."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _a_gate_needs_somebody_to_open_it(self) -> AdminConfig:
+        if self.self_governed and not self.approvers:
+            raise ValueError(
+                "`admin.self_governed: true` with no `admin.approvers` is a gate nobody "
+                "can open: the first `qed keys rotate` would be refused with no way "
+                "forward but break-glass. Name the group that may approve."
+            )
+        return self
+
+    def governed(self) -> frozenset[object]:
+        """The operations this instance gates, as `AdminOperation` members."""
+        from qed.core.admin import AdminOperation
+
+        if not self.self_governed:
+            return frozenset()
+        return frozenset(AdminOperation(item) for item in self.operations)
+
+
 class BrokerConfig(Frozen):
     """Credential broker (SPEC §7). Empty means every adapter is advisory."""
 
@@ -317,6 +385,7 @@ class QedConfig(Frozen):
     broker: BrokerConfig = BrokerConfig()
     retention: RetentionConfig = RetentionConfig()
     observability: ObservabilityConfig = ObservabilityConfig()
+    admin: AdminConfig = AdminConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -340,12 +409,51 @@ class LoadedConfig(Frozen):
     ignored_sections: list[str] = Field(default_factory=list)
 
 
+class ConfigError(ValueError):
+    """`qed.yaml` is not usable, said in sentences.
+
+    Pydantic's `ValidationError` is a good developer message and a poor
+    operator one: `mode: nonsense` produced forty lines of frames and a URL,
+    and the answer -- "mode must be shadow or enforce, and your file says
+    nonsense" -- was in the middle of it. Worse, nothing caught it, so every
+    command printed a traceback for a one-character typo in a config file.
+
+    So the file path and the field path travel together here, and the CLI's
+    group handler prints it without a traceback like any other statement about
+    the operator's own setup.
+    """
+
+
+def _readable(path: Path, error: Exception) -> ConfigError:
+    """Turn a pydantic `ValidationError` into something worth reading."""
+    from pydantic import ValidationError
+
+    if not isinstance(error, ValidationError):
+        return ConfigError(f"{path}: {error}")
+
+    lines = [f"{path} is not valid:"]
+    for item in error.errors():
+        # `('admin', 'operations')` -> `admin.operations`, and `()` -> the file
+        # itself, which is what a model-level validator reports against.
+        where = ".".join(str(part) for part in item["loc"]) or "(top level)"
+        message = item["msg"].removeprefix("Value error, ")
+        lines.append(f"  {where}: {message}")
+    return ConfigError("\n".join(lines))
+
+
 def load_config(path: Path | None) -> LoadedConfig:
     """Read ``qed.yaml`` if it exists; otherwise return defaults."""
     if path is None or not path.is_file():
         return LoadedConfig(config=QedConfig(), path=None)
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
-        raise ValueError(f"{path}: expected a mapping at the top level")
+        raise ConfigError(f"{path}: expected a mapping at the top level")
     ignored = [key for key in UNIMPLEMENTED_SECTIONS if key in raw]
-    return LoadedConfig(config=QedConfig.model_validate(raw), path=path, ignored_sections=ignored)
+    try:
+        config = QedConfig.model_validate(raw)
+    except Exception as exc:
+        raise _readable(path, exc) from exc
+    return LoadedConfig(config=config, path=path, ignored_sections=ignored)

@@ -746,7 +746,7 @@ Secrets never in `qed.yaml`; only env names or secret-store refs.
 
 Full STRIDE in `THREAT_MODEL.md`. Key MUSTs:
 - Service refuses to start without evidence signing key and token key (`readyz=false`).
-- Admin operations (`policies:reload`, `keys:rotate`, upstream changes, adapter add) go through the approval service with SoD and produce `admin_action` evidence — qed governs itself.
+- Admin operations (`policies:reload`, `keys:rotate`, upstream changes, adapter add) go through the approval service with SoD and produce `admin_action` evidence — qed governs itself. **Built in week 10 (ADR-0014)** for `keys_rotate` and `packs_import`, the two that exist: `admin.self_governed` with `admin.approvers`, reusing the same `ApprovalRequest` and `check_separation_of_duties` as an agent's action. **Off by default** (it needs a second person; `qed doctor` reports which it is either way, and the record carries `self_governed: false` rather than omitting it). An approval is bound to one operation and spent once, read back out of the chain. `--break-glass` proceeds and records that it did — a gate with no break-glass moves the rotation outside the tool, where nothing records it. On the CLI the requester is **self-asserted**, so what this buys there is two invocations by two subjects, not proof of identity; the API path proves it with a token.
 - Broker credentials in memory only; redact in all logs; never in evidence or events.
 - Adapter authentication mandatory; unknown adapters rejected.
 - Replay: duplicate `proposal.id` → 409 and `correction`-free rejection record.

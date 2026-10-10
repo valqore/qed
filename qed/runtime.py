@@ -20,6 +20,13 @@ from ulid import ULID
 from qed.compliance.packs import unsigned_catalogues, use_imported
 from qed.config import DEFAULT_DIR, LoadedConfig, QedConfig, load_config
 from qed.core import jcs
+from qed.core.admin import (
+    APPROVAL_FIELD,
+    AdminOperation,
+    AdminRefusal,
+    GateDecision,
+    decide_admin,
+)
 from qed.core.approval.model import (
     DEFAULT_DEDUPE_WINDOW,
     ApprovalRequest,
@@ -27,6 +34,7 @@ from qed.core.approval.model import (
     parse_duration,
 )
 from qed.core.budget import charge_for, newly_exhausted
+from qed.core.evidence.hashing import principal_hash
 from qed.core.evidence.retention import PurgePlan, plan_purge
 from qed.core.policy.engine import evaluate
 from qed.core.policy.loader import LoadResult, baseline_pack_dir, load_bundle
@@ -821,6 +829,154 @@ def apply_retention(session: Session, *, now: datetime | None = None) -> Retenti
     )
     logger.info("retention purged %d payload(s): %s", purged, plan.summary().get("by_type"))
     return RetentionResult(purged=purged, plan=plan, record=appended.record)
+
+
+# ---------------------------------------------------------------- self-governance
+
+
+#: The synthetic proposal id an admin approval hangs off. `ApprovalRequest`
+#: wants one, and an admin operation has no proposal -- so the id carries the
+#: operation instead, which is also what binds an approval to the thing it was
+#: asked about. Read back by `_approval_operation`, so the prefix is a constant
+#: rather than an f-string in two places.
+ADMIN_PROPOSAL_PREFIX: Final = "adm"
+
+
+def _admin_proposal_id(operation: AdminOperation) -> str:
+    return f"{ADMIN_PROPOSAL_PREFIX}:{operation.value}:{ULID()}"
+
+
+def _approval_operation(request: ApprovalRequest) -> AdminOperation | None:
+    """Which admin operation an approval was granted for, or None.
+
+    From the proposal id rather than from a side table: the id is inside the
+    request the approver saw and decided on, so it cannot be changed afterwards
+    without the approval becoming a different approval.
+    """
+    parts = request.proposal_id.split(":", 2)
+    if len(parts) != 3 or parts[0] != ADMIN_PROPOSAL_PREFIX:
+        return None
+    try:
+        return AdminOperation(parts[1])
+    except ValueError:
+        return None
+
+
+def admin_gate(
+    session: Session,
+    operation: AdminOperation,
+    *,
+    requester: str = "",
+    approval_id: str | None = None,
+    break_glass: str = "",
+    now: datetime | None = None,
+) -> GateDecision:
+    """Decide whether an admin operation may proceed (SPEC §17).
+
+    Raises :class:`~qed.core.admin.AdminRefusal` when it may not, with a
+    message naming the command that would unblock it. The decision itself is
+    :func:`~qed.core.admin.decide_admin`, which is pure; this function's only
+    job is gathering the facts.
+    """
+    governed = cast("frozenset[AdminOperation]", session.config.admin.governed())
+    status: str | None = None
+    granted_for: AdminOperation | None = None
+    spent = False
+
+    if approval_id is not None and operation in governed:
+        stored = session.store.load_approval(approval_id)
+        if stored is None:
+            raise AdminRefusal(
+                f"no approval {approval_id} on this instance. `qed approvals` lists the "
+                "open ones; an id from another instance means nothing here, because the "
+                "request and the chain that records it are local."
+            )
+        status = stored.status.value
+        granted_for = _approval_operation(stored)
+        spent = _approval_was_spent(session, approval_id)
+
+    return decide_admin(
+        operation,
+        governed_operations=governed,
+        approval_id=approval_id,
+        approval_status=status,
+        approval_operation=granted_for,
+        approval_already_spent=spent,
+        break_glass_reason=break_glass,
+        requester=requester,
+    )
+
+
+def _approval_was_spent(session: Session, approval_id: str) -> bool:
+    """Has an `admin_action` already spent this approval?
+
+    The chain is the source of truth, not a column: the `admin_action` record
+    *is* the receipt, and a flag in a table could disagree with it after a
+    restore from backup. `admin_action` is in `NEVER_PURGE`, so the receipt
+    cannot age out from under this check either.
+
+    Scans only `admin_action` records, of which a real instance has a handful,
+    and this is a human-latency path -- somebody is waiting at a terminal for a
+    key rotation.
+    """
+    for record in session.store.iter_evidence():
+        if record.type is not EvidenceType.admin_action:
+            continue
+        payload = record.payload or {}
+        if payload.get(APPROVAL_FIELD) == approval_id and not payload.get("requested"):
+            return True
+    return False
+
+
+def open_admin_request(
+    session: Session,
+    operation: AdminOperation,
+    *,
+    requester: str,
+    detail: dict[str, object] | None = None,
+    now: datetime | None = None,
+) -> ApprovalRequest:
+    """Open an approval for an admin operation, and record that it was asked.
+
+    The `admin_action` written here carries ``requested: true``, which is what
+    separates "somebody asked to rotate the key" from "the key was rotated".
+    Both belong in the chain: a request that was never approved is a thing an
+    auditor should be able to see, and it is also how
+    :func:`_approval_was_spent` tells a request apart from a completed
+    operation that spent the same approval.
+    """
+    stamp = now if now is not None else utcnow()
+    config = session.config.admin
+    timeout = parse_duration(config.timeout) or timedelta(hours=24)
+    request = ApprovalRequest(
+        id=f"apr_{ULID()}",
+        proposal_id=_admin_proposal_id(operation),
+        dedupe_key=f"admin:{operation.value}",
+        approvers=list(config.approvers),
+        # The requester is the one subject who may not approve. This is what
+        # makes `check_separation_of_duties` refuse a self-approval, and it is
+        # the whole security content of self-governance on the CLI.
+        principal_hash=principal_hash(requester),
+        created_at=stamp,
+        expires_at=stamp + timeout,
+    )
+    session.store.record_approval(request, request_json=request.model_dump_json())
+    session.writer.append(
+        type_=EvidenceType.admin_action,
+        assurance=Assurance.kernel,
+        payload={
+            "action": f"{operation.value}_requested",
+            "requested": True,
+            "self_governed": True,
+            APPROVAL_FIELD: request.id,
+            "requested_by": principal_hash(requester),
+            "approvers": list(config.approvers),
+            "expires_at": rfc3339_ms(request.expires_at),
+            **(detail or {}),
+        },
+        ts=stamp,
+    )
+    return request
 
 
 def chain_status(session: Session) -> dict[str, object]:
