@@ -230,11 +230,17 @@ jobs:
 
         run: |
           set -euo pipefail
-          # No `| head`: with `pipefail`, `head` closing the pipe early kills
-          # the producer with SIGPIPE and the whole step fails on a build that
-          # is fine. `grep -q` reads to the end.
-          docker run --rm "${IMAGE}:${{ needs.verify.outputs.version }}" --help \
-            | grep -q "Policy and evidence kernel"
+          # Captured, not piped. Under `pipefail` *any* consumer that can
+          # exit early kills the producer with SIGPIPE and fails the step
+          # on an image that is fine -- `write /dev/stdout: broken pipe`.
+          # `head` did it, and `grep -q` does it just as much, which is how
+          # this step failed twice. Command substitution reads to the end,
+          # so there is no pipe to break.
+          help=$(docker run --rm "${IMAGE}:${{ needs.verify.outputs.version }}" --help)
+          case "$help" in
+            *"Policy and evidence kernel"*) echo "ok: the image starts" ;;
+            *) echo "::error::the image started but printed no help"; exit 1 ;;
+          esac
           docker run --rm --entrypoint python3.12 "${IMAGE}:${{ needs.verify.outputs.version }}" -c \
             "import qed, psycopg, pydantic, fastapi, uvicorn, cryptography, yaml, sqlite3, httpx, qed_verify; print('imports ok')"
           # The architecture's own library directory. A hardcoded triplet meant
