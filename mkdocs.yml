@@ -23,6 +23,23 @@
 # are the same set, in both directions, so adding a page without listing it is a
 # test failure rather than a page nobody finds.
 
+# ## Versioning is deferred, deliberately
+#
+# SPEC §26 says "mkdocs-material, **versioned**", which means `mike` and a
+# `gh-pages` branch holding one subdirectory per release. That is not set up,
+# because it cannot be meaningfully tested while the repository is private and
+# the site is published nowhere: `mike deploy` against a branch no reader can
+# reach proves only that the command runs.
+#
+# What versioning is *for* is a reader on v0.7.0 not being shown v1.0.0's
+# instructions, and that matters from the first public release. So it lands with
+# publication, in the same change that turns the site on -- not before, as a
+# configuration nobody has used.
+#
+# Until then `docs/evidence-format.md` carries the compatibility promise that
+# actually protects a reader: a record written today verifies under every later
+# verifier, with cross-version fixtures in CI.
+
 site_name: Valqore QED
 site_description: Policy and evidence kernel for AI-agent actions
 site_url: https://valqore.github.io/qed/
