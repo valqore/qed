@@ -1,0 +1,425 @@
+<!doctype html>
+<!--
+  The landing page (SPEC §22 week 12, §25.3: "qed gets its own domain and a
+  single-sentence landing page").
+
+  One file, no build step, no external request. That is not minimalism for its
+  own sake: the product's first claim is that zero bytes leave by default, and a
+  landing page that loads a font from a CDN and a script from an analytics
+  vendor contradicts it before a reader reaches the first sentence.
+
+  Every number on this page comes from the repository and can be re-derived:
+
+    46 baseline rules      `qed policy lint`
+    35 of 76 controls      `qed packs list`  (10 catalogues; unmapped ones named)
+    p95 4.5 ms / 10.6 ms   `docs/performance.md`, SQLite and PostgreSQL
+    2,639 fast tests       `pytest -m "not slow"`
+
+  The terminal transcript is real output, pasted from a run on 10 October 2026
+  against `examples/proposals/`, not a mock-up. `tests/docs/test_landing.py`
+  checks that every command shown is a command the CLI has, and that no claim
+  from a short deny-list (stars, customers, certifications, compliance
+  percentages) has crept in.
+
+  The pre-launch notice at the top comes off in the same commit that sets
+  `PUBLISH_PYPI=true` in the release workflow -- see `landing/README.md` for the
+  checklist. Until then the install commands do not work, and the page says so
+  rather than letting a reader find out.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valqore QED</title>
+<meta name="description" content="Every action an AI agent takes, gated by deterministic rules and recorded as evidence an auditor can verify without trusting us. Self-hosted, Apache-2.0.">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fbfbfa;
+    --surface: #ffffff;
+    --ink: #16181d;
+    --ink-soft: #5b6270;
+    --line: #e2e3e0;
+    --accent: #1b4de4;
+    --accent-soft: #eef1fe;
+    --ok: #1a6b3c;
+    --warn: #8a5a00;
+    --block: #a62020;
+    --code-bg: #15171c;
+    --code-ink: #e6e8ec;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0e1013;
+      --surface: #16191f;
+      --ink: #e9eaee;
+      --ink-soft: #99a1ae;
+      --line: #272c35;
+      --accent: #7b9bff;
+      --accent-soft: #1a2133;
+      --ok: #6fcf97;
+      --warn: #e3b341;
+      --block: #ff8080;
+      --code-bg: #0a0c0f;
+      --code-ink: #e6e8ec;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1013;
+    --surface: #16191f;
+    --ink: #e9eaee;
+    --ink-soft: #99a1ae;
+    --line: #272c35;
+    --accent: #7b9bff;
+    --accent-soft: #1a2133;
+    --ok: #6fcf97;
+    --warn: #e3b341;
+    --block: #ff8080;
+    --code-bg: #0a0c0f;
+    --code-ink: #e6e8ec;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 56rem; margin: 0 auto; padding-inline: 20px; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  /* ----------------------------------------------------- pre-launch notice */
+  .notice {
+    background: var(--accent-soft);
+    border-bottom: 1px solid var(--line);
+    font: 13px/1.5 var(--mono);
+    color: var(--ink-soft);
+  }
+  .notice .wrap { padding-block: 10px; }
+  .notice strong { color: var(--ink); font-weight: 600; }
+
+  /* ------------------------------------------------------------------ head */
+  header { border-bottom: 1px solid var(--line); }
+  header .wrap { padding-block: 18px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  .mark { font: 600 15px/1 var(--mono); letter-spacing: .02em; }
+  .mark span { color: var(--ink-soft); font-weight: 400; }
+  nav { margin-left: auto; display: flex; gap: 18px; font-size: 14px; flex-wrap: wrap; }
+
+  /* ------------------------------------------------------------------ hero */
+  .hero .wrap { padding-block: 56px 40px; }
+  h1 {
+    font-size: clamp(1.75rem, 4.4vw, 2.7rem);
+    line-height: 1.18;
+    letter-spacing: -0.02em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    max-width: 34ch;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 1.0625rem; color: var(--ink-soft); max-width: 62ch; margin: 0 0 8px; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; }
+  .badge {
+    font: 12px/1 var(--mono);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 11px;
+    color: var(--ink-soft);
+    background: var(--surface);
+  }
+
+  /* -------------------------------------------------------------- terminal */
+  .term {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border-radius: 10px;
+    overflow-x: auto;
+    margin: 0;
+    padding: 18px 20px;
+    font: 13px/1.65 var(--mono);
+    tab-size: 2;
+  }
+  .term b { color: #9fb4ff; font-weight: 600; }
+  .term .c { color: #8d93a1; }
+  .term .allow { color: #6fcf97; font-weight: 600; }
+  .term .appr { color: #e3b341; font-weight: 600; }
+  .term .hit { color: #ff9c9c; }
+  .term .ok { color: #6fcf97; }
+  figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 10px; }
+
+  /* ---------------------------------------------------------------- blocks */
+  section { border-top: 1px solid var(--line); }
+  section .wrap { padding-block: 44px; }
+  h2 {
+    font-size: 0.8125rem;
+    font-family: var(--mono);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 22px;
+  }
+  h3 { font-size: 1.0625rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .grid { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+  .grid p { margin: 0; color: var(--ink-soft); font-size: 0.9375rem; }
+  .grid code { font-family: var(--mono); font-size: 0.85em; }
+
+  .facts { display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .fact { background: var(--surface); padding: 18px 20px; }
+  .fact dt { font: 12px/1.4 var(--mono); color: var(--ink-soft); margin-bottom: 6px; }
+  .fact dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .fact dd small { display: block; font-size: 0.75rem; color: var(--ink-soft); font-weight: 400; letter-spacing: 0; margin-top: 4px; }
+
+  .limits { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .limits li { padding-left: 1.6em; position: relative; color: var(--ink-soft); font-size: 0.9375rem; max-width: 70ch; }
+  .limits li::before { content: "—"; position: absolute; left: 0; color: var(--block); }
+  .limits b { color: var(--ink); font-weight: 600; }
+
+  footer { border-top: 1px solid var(--line); }
+  footer .wrap { padding-block: 32px 48px; display: flex; gap: 20px 32px; flex-wrap: wrap; font-size: 14px; color: var(--ink-soft); }
+  footer .cols { display: flex; gap: 32px; flex-wrap: wrap; }
+  footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+
+<div class="notice">
+  <div class="wrap">
+    <strong>Not published yet.</strong> QED is finished code and an unreleased
+    package: the PyPI, Homebrew and container names are not reserved, so the
+    install commands below do not work yet. Run it from the repository in the
+    meantime.
+  </div>
+</div>
+
+<header>
+  <div class="wrap">
+    <div class="mark">valqore&nbsp;<span>/</span>&nbsp;qed</div>
+    <nav>
+      <a href="https://github.com/valqore/qed">Repository</a>
+      <a href="https://github.com/valqore/qed/blob/main/docs/evidence-format.md">Evidence format</a>
+      <a href="https://github.com/valqore/qed/blob/main/THREAT_MODEL.md">Threat model</a>
+      <a href="https://github.com/valqore/qed/blob/main/docs/onboarding-shadow-to-enforce.md">Get started</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>Every action an AI agent takes, gated by deterministic rules and recorded as evidence <em>an auditor can verify without trusting us</em>.</h1>
+    <p class="lede">
+      QED is one self-hosted process between an agent and whatever it is about
+      to touch — an MCP server, an HTTP API, a database, a coding agent's tool
+      call. For each action it produces a verdict from a signed policy bundle,
+      and appends the proposal and the verdict to an Ed25519 hash-chained
+      ledger.
+    </p>
+    <p class="lede">
+      There is no model in the decision path. Identical inputs produce
+      byte-identical output, and a test fails the build if an LLM SDK is ever
+      imported into the kernel.
+    </p>
+    <div class="badges">
+      <span class="badge">Apache-2.0</span>
+      <span class="badge">self-hosted</span>
+      <span class="badge">offline by default</span>
+      <span class="badge">Python 3.12+</span>
+      <span class="badge">evidence format 1.0, frozen</span>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <h2>Two commands</h2>
+    <figure style="margin:0">
+<pre class="term"><span class="c"># the agent proposes; qed decides and records</span>
+$ <b>qed check prod-db-drop.json</b>
+<span class="appr">REQUIRE_APPROVAL</span>
+  blast radius : 75/100
+  would decide : REQUIRE_APPROVAL
+  policy hash  : 7618895d28d35b79...
+  evidence seq : 4, 5, 6
+  <span class="hit">! AG-BLR-003 [HIGH] Destructive change to a production resource.</span>
+      fix: Run it against staging first, or request approval with an explicit intent.
+  <span class="hit">! AG-BLR-005 [HIGH] The blast-radius score for this action is above 60.</span>
+      fix: Narrow the scope until the score drops, or request approval.
+$ <b>echo $?</b>
+3
+
+<span class="c"># months later, an auditor with a file and a public key and no access to you</span>
+$ <b>qed export --out chain.jsonl</b>
+7 record(s) -&gt; chain.jsonl
+$ <b>qed-verify chain.jsonl --keys public --instance-id acme-prod</b>
+records   : 7 (seq 0..6)
+keys      : ed25519:6a9923cfaa79dcac
+checkpoint: 0
+purged    : 0 payload(s) removed under retention
+<span class="ok">result    : OK -- chain is contiguous, unmodified and signed</span></pre>
+      <figcaption>
+        Real output, 10 October 2026, against
+        <code>examples/proposals/prod-db-drop.json</code>. Exit codes are
+        0&nbsp;ALLOW, 2&nbsp;BLOCK, 3&nbsp;REQUIRE_APPROVAL, so a CI job is one
+        line.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Three parts</h2>
+    <div class="grid">
+      <div>
+        <h3>Decide</h3>
+        <p>
+          A verdict is a pure function of the proposal, the policy bundle, the
+          budget and a derived context. 46 baseline rules ship, covering
+          identity, blast radius, data, skills and budget; you write your own in
+          YAML and test them with <code>qed policy test</code>.
+        </p>
+      </div>
+      <div>
+        <h3>Record</h3>
+        <p>
+          Every proposal, verdict, approval and key rotation is appended to a
+          hash-chained ledger, signed with Ed25519 and checkpointed into a
+          Merkle root. Payloads can be purged for GDPR and the chain still
+          verifies, because the hash covers the payload's digest and not the
+          payload.
+        </p>
+      </div>
+      <div>
+        <h3>Verify</h3>
+        <p>
+          <code>qed-verify</code> is a separate package whose only dependency is
+          <code>cryptography</code>, written as an independent reimplementation
+          of the format from its specification. It never contacts the instance
+          that produced the records. Agreement between two implementations is
+          the claim.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Measured, not estimated</h2>
+    <dl class="facts">
+      <div class="fact">
+        <dt>p95 decision</dt>
+        <dd>4.5 ms<small>SQLite; 10.6 ms on PostgreSQL, against a 50 ms budget</small></dd>
+      </div>
+      <div class="fact">
+        <dt>baseline rules</dt>
+        <dd>46<small>16 ship in shadow mode, so a first install blocks nothing</small></dd>
+      </div>
+      <div class="fact">
+        <dt>control mapping</dt>
+        <dd>35 / 76<small>across 10 catalogues; the 41 unmapped ones are named</small></dd>
+      </div>
+      <div class="fact">
+        <dt>tests</dt>
+        <dd>2,639<small>plus a slow tier that runs the container and the wheel</small></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What it will not do</h2>
+    <ul class="limits">
+      <li>
+        <b>Print a compliance percentage it cannot stand behind.</b> Where a
+        control catalogue is partial, <code>qed packs list</code> says
+        <code>partial</code> and names what is missing. ISO 42001's Annex A is
+        not mapped at all, because the standard is not freely published and
+        inventing control titles would be worse than a gap.
+      </li>
+      <li>
+        <b>Claim it stopped something when it only said no.</b> An adapter that
+        does not hold the credential can tell an agent no; it cannot stop an
+        agent that ignores it. Every record carries which of the two it was, and
+        <code>qed doctor</code> says it in plain words: <em>none configured, so
+        every adapter is ADVISORY.</em>
+      </li>
+      <li>
+        <b>Pretend a Merkle root you computed yourself proves anything.</b>
+        Until you configure an external anchor, <code>qed doctor</code> reports
+        that the root attests to nothing an operator who could rewrite the chain
+        could not recompute.
+      </li>
+      <li>
+        <b>Put a model in the decision path.</b> Not as a fallback, not for
+        "ambiguous" cases. A probabilistic component in a control an auditor
+        signs off on is not a control.
+      </li>
+      <li>
+        <b>Hide what a green test suite missed.</b>
+        <a href="https://github.com/valqore/qed/blob/main/docs/validation.md">docs/validation.md</a>
+        lists every bug that shipped past a passing suite, with the reason each
+        one was invisible — including a mandate signature nothing verified for
+        eight weeks while its unit tests passed.
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Install</h2>
+<pre class="term"><span class="c"># from the repository, which works today</span>
+$ <b>git clone https://github.com/valqore/qed &amp;&amp; cd qed</b>
+$ <b>pip install -e .</b>
+$ <b>qed keys init &amp;&amp; qed doctor</b>
+
+<span class="c"># once the names are reserved -- see the notice at the top of this page</span>
+$ <b>pip install valqore-qed</b>
+$ <b>brew install valqore/tap/qed</b>
+$ <b>docker run ghcr.io/valqore/qed:1.0.0 serve</b></pre>
+    <p class="lede" style="margin-top:22px">
+      Start in shadow mode, where QED decides and records and tells the agent to
+      proceed regardless. The
+      <a href="https://github.com/valqore/qed/blob/main/docs/onboarding-shadow-to-enforce.md">shadow-to-enforce guide</a>
+      is six stages long and the only one that matters is stage 3: read the gap
+      between <code>decision</code> and <code>would_decision</code> before you
+      turn anything on.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <ul>
+        <li><a href="https://github.com/valqore/qed">Repository</a></li>
+        <li><a href="https://github.com/valqore/qed/blob/main/QED_SPEC.md">Specification</a></li>
+        <li><a href="https://github.com/valqore/qed/blob/main/CHANGELOG.md">Changelog</a></li>
+      </ul>
+      <ul>
+        <li><a href="https://github.com/valqore/qed/blob/main/docs/evidence-format.md">Evidence format 1.0</a></li>
+        <li><a href="https://github.com/valqore/qed/blob/main/THREAT_MODEL.md">Threat model</a></li>
+        <li><a href="https://github.com/valqore/qed/blob/main/SECURITY.md">Security policy</a></li>
+      </ul>
+      <ul>
+        <li><a href="https://github.com/valqore/qed/blob/main/GOVERNANCE.md">Governance</a></li>
+        <li><a href="https://github.com/valqore/qed/blob/main/CONTRIBUTING.md">Contributing</a></li>
+        <li><a href="https://valqore.io">Valqore</a></li>
+      </ul>
+    </div>
+    <p style="margin:0; max-width:34ch">
+      Built by Valqore. Apache-2.0. QED is a separate product from the Valqore
+      engine and imports nothing from it.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

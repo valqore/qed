@@ -49,11 +49,11 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
 ## The container
 
 ```bash
-docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:0.7.0 \
+docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.0.0 \
   keys init --dir /var/lib/qed
 
 docker run --rm -p 8710:8710 -v qed-state:/var/lib/qed \
-  ghcr.io/valqore/qed:0.7.0
+  ghcr.io/valqore/qed:1.0.0
 ```
 
 Distroless and non-root (SPEC §20.4): no shell, no package manager, no pip. A
@@ -211,10 +211,10 @@ Settings → Secrets and variables → Actions → Variables.
 
 ```bash
 # qed/version.py is the only literal; everything else is checked against it
-vim qed/version.py            # VERSION = "0.7.0"
+vim qed/version.py            # VERSION = "1.0.0"
 pytest tests/test_version.py  # the chart, the Dockerfile label, the docs
 # move the [Unreleased] entries under `## [0.7.0] — <date>` in CHANGELOG.md
-git commit -am "release: 0.7.0" && git tag v0.7.0 && git push --tags
+git commit -am "release: 1.0.0" && git tag v1.0.0 && git push --tags
 ```
 
 The workflow refuses a tag that disagrees with `qed/version.py`, and refuses

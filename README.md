@@ -30,7 +30,11 @@ hardware, including air-gapped.
 
 ## Status
 
-**Weeks 1–7 of the §22 build order are complete.** What works today:
+**All twelve weeks of the §22 build order are code-complete.** The exit criteria that depend on people — two design partners in enforce mode, written auditor acceptance, 1,000 gated actions — are not met and are tracked separately; what follows is what the code does.
+
+**Evidence format 1.0 is frozen** (ADR-0015). A record written under `schema_version: "1.0"` verifies under every later verifier, and the repository carries the records that prove it: `tests/evidence/fixtures/evidence-format-1.0/` is a real export produced once and never regenerated, checked on every CI run. `docs/evidence-format.md` is the specification, with a conformance section for anyone writing a second verifier.
+
+What works today:
 
 | Capability | Entry point |
 |---|---|
@@ -63,6 +67,8 @@ hardware, including air-gapped.
 | **Signed catalogue import**, air-gap, recorded in the chain | `qed/remote/packs.py`, ADR-0012 |
 | **Transparency-log anchor client**, six values and no payload | `qed/remote/anchor.py`, ADR-0013 |
 | **Self-governance**: qed's own admin ops behind an approval | `qed/core/admin.py`, ADR-0014 |
+| **Frozen evidence format 1.0** + conformance fixture and cross-version test | `docs/evidence-format.md`, `tests/evidence/fixtures/`, ADR-0015 |
+| **Landing page**, one file, no external request | `landing/index.html` |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
 
 Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
@@ -304,6 +310,11 @@ fixes) is still live, and that work belongs to the Valqore repos, not here.
 | The OSCAL export validates against the NIST schema | `tests/evidence/test_oscal_schema.py` |
 | Tool-call classification imports nothing that can fail | `tests/adapters/test_import_boundary.py` |
 | A destructive payload under a mild tool name still routes to approval | `tests/policy/test_golden_mcp.py` |
+| A mandate's signature is verified before it reaches the engine | `tests/delegation/test_mandate_is_verified_at_runtime.py` |
+| Records frozen under `schema_version` 1.0 still hash and verify | `tests/evidence/test_frozen_format.py` |
+| A `schema_version` bump fails CI until it has a fixture | `tests/evidence/test_frozen_format.py` |
+| Every path a document cites exists | `tests/docs/test_claims.py` |
+| Every number on the landing page is derived from its source | `tests/docs/test_landing.py` |
 
 ## Development
 

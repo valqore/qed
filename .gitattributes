@@ -5,3 +5,12 @@
 * text=auto eol=lf
 *.png binary
 *.jpg binary
+
+# The frozen conformance fixture is hashed byte for byte by
+# `tests/evidence/test_frozen_format.py`, so its line endings are not hygiene
+# here -- they are part of the pinned digest. LF in the repository and LF on
+# every checkout, which is what `* text=auto eol=lf` above already gives; this
+# line is here so that anyone changing that rule sees what depends on it. The
+# generator writes bytes rather than text for the same reason: `write_text` on
+# Windows would have produced CRLF and a digest that matched on one machine.
+tests/evidence/fixtures/evidence-format-*/** text eol=lf

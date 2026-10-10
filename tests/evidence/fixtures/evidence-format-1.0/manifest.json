@@ -1,0 +1,25 @@
+{
+  "head_hash": "a3428b06fcdf9217d0da25a8c9976c82eabfb71b693dbf3d5008fde5533a0e61",
+  "head_seq": 13,
+  "instance_id": "qed-conformance-1.0",
+  "key_ids": [
+    "ed25519:464e88767c380dcd",
+    "ed25519:e4b402f9126abfa9"
+  ],
+  "purged_seqs": [
+    2
+  ],
+  "records": 14,
+  "schema_version": "1.0",
+  "types": [
+    "admin_action",
+    "approval_decided",
+    "approval_requested",
+    "checkpoint",
+    "genesis",
+    "key_rotated",
+    "policy_loaded",
+    "proposal",
+    "verdict"
+  ]
+}

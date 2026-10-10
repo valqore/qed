@@ -6,6 +6,132 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.0.0] — 2026-10-10
+
+**The evidence format is frozen.** That is what the major version means here,
+and it is the only promise in this release that cannot be walked back: a record
+written under `schema_version: "1.0"` verifies under every later verifier,
+forever, and the repository now contains the records that prove it rather than a
+sentence saying so.
+
+Weeks 11 and 12 of the twelve-week plan (SPEC §22). Week 11's security fix is
+below, under its own heading, because it is the more serious entry.
+
+### Added - evidence format 1.0, frozen against a committed fixture (ADR-0015)
+
+SPEC §25.6 has promised "cross-version fixtures in CI" since week 1. There were
+none. The suite had something that looked like one -- `test_chain.py` writes a
+chain with the real signer and store and verifies it with the real verifier --
+and it cannot see the failure that matters, because a producer and a verifier
+that change together pass it while the records already in a customer's database
+do not change with them.
+
+`tests/evidence/fixtures/evidence-format-1.0/` is now a real export produced on
+10 October 2026 and never regenerated: fourteen records over five simulated
+days, with genesis, `policy_loaded`, three real proposals from
+`examples/proposals/` deciding ALLOW / REQUIRE_APPROVAL / BLOCK, an approval
+decided by a different human through the real separation-of-duties check, a
+signing-key rotation, two Merkle checkpoints, a retention purge that recorded
+itself, and one proposal whose payload is gone. Both public keys are committed;
+no private key is, so the chain cannot be extended.
+
+`tests/evidence/test_frozen_format.py` checks four things against those bytes:
+
+| Layer | What only it can catch |
+|---|---|
+| `qed-verify` verifies the export | the auditor's whole position, in one line |
+| `record_hash` -- the *producer's* function -- recomputes every frozen hash | that the producer still **writes** 1.0, not just that the verifier reads it |
+| `qed.core.jcs` and `qed_verify.jcs` agree on every frozen payload | a divergence between two deliberately separate canonicalisers |
+| twelve mutations each produce the documented failure code | that the conformance table in the fixture's README is tested, not asserted |
+
+The fixture's digest is pinned **in the test file**, not in the fixture: a
+checksum a regeneration rewrites alongside the thing it describes verifies
+nothing. Refreshing it is therefore a deliberate edit in two places, with a
+failure message explaining why it is almost certainly wrong.
+
+And the freeze is a rule rather than a habit:
+`test_every_schema_version_the_code_can_write_has_a_fixture` reads the
+`schema_version: Literal[...]` declarations out of `qed/core/schemas.py` and
+fails until each has a fixture directory. A bump to `"1.1"` is red until 1.1 has
+records of its own, and 1.0 goes on being verified beside it.
+
+### Changed - `docs/evidence-format.md` is a specification, not a draft
+
+It carries a status line, two tables drawing the line between what freezing
+covers and what it does not, and a **conformance section**: ten MUSTs, three
+MUST NOTs, and an acceptance test an independent implementer runs against the
+committed fixture. The MUST most often got wrong is called out -- an unsupplied
+`key_id` is a **failure, not a skip**, or a verifier reports a forged chain as
+clean.
+
+**One claim in it was backwards, and freezing it would have been expensive.**
+The draft said the masking pattern set "is part of the format: changing it
+changes record hashes for future records". Both halves of that sentence are
+true and the conclusion was wrong. Masking runs before hashing, so a new
+pattern changes what *future* records contain; it cannot change a record
+already written, and a verifier never re-derives a mask -- it hashes the payload
+as it finds it. Published as written, 1.0 would have frozen the
+secret-detection patterns for the life of the product. The pattern set is
+producer-side policy and is now explicitly outside the freeze.
+
+### Added - a landing page (`landing/index.html`)
+
+One file, no build step, no external request -- no CDN font, no analytics
+script. That is a constraint, not minimalism: the product's first claim is that
+zero bytes leave by default, and a page that contradicts it above the fold is
+not a landing page for this product.
+
+The terminal transcript on it is real output from a run on 10 October 2026, and
+`tests/docs/test_landing.py` keeps it honest in three ways: every command shown
+is one the CLI registers, every number is re-derived from its source (46 rules,
+16 of them shadow, p95 4.5 ms, 35 of 76 controls), and a deny-list of thirteen
+phrases -- "trusted by", "SOC 2 compliant", "tamper-proof", "% compliant" --
+must not appear. `tamper-proof` is on that list because the chain detects
+modification and does not prevent it, and `qed doctor` says so.
+
+The page carries a visible pre-launch notice, because `pip install valqore-qed`
+does not work: the names are unreserved. `landing/README.md` has the launch
+checklist and says to remove the notice in the same commit that turns publishing
+on. A test asserts publishing is still gated, so the two cannot drift apart
+quietly.
+
+### Changed - version 1.0.0 everywhere
+
+`qed/version.py` is still the one literal; `pyproject.toml` (both of them), the
+Helm chart, the Dockerfile label and `docs/deployment.md` follow it, and
+`tests/test_version.py` checks all five. `ENGINE_VERSION` -- which goes into
+every verdict record -- now reads `1.0.0`.
+
+**The tag is not the format.** `schema_version` stays `"1.0"` and is
+independent of the package version by design (SPEC §25.6): the next release
+that changes nothing about records will be `1.0.1` and the records will still
+say `1.0`.
+
+### Fixed - two ways a byte-pinned fixture almost shipped broken
+
+Neither reached a release; both are in `docs/validation.md` because the class
+is what matters, and a byte-pinned artefact turns out to have two hidden
+dependencies that are invisible from the machine that produced it.
+
+**`.gitignore`'s `*.pem` matched the fixture's public keys.** The rule sits
+under "never commit keys or chains" and is right for a private key. The first
+commit would have published a chain with nothing to verify it against, and
+locally every test passed because the files were on disk. In CI it would have
+surfaced as `unknown_key` on a frozen fixture, which reads like a format
+regression. There is now an explicit negation for
+`evidence-format-*/public/*.pem`, and a test that asks **git** what it tracks
+rather than asking the filesystem what exists -- the same correction as the
+packaging guard that used `fnmatch` while setuptools expands with `glob`.
+
+**The fixture was written with CRLF.** `Path.write_text` translates on Windows,
+and the digest is over bytes while `.gitattributes` checks the repository out as
+LF -- so the pin matched on one machine and no other. The generator writes bytes
+now, a test asserts it on the bytes, and `.gitattributes` says what depends on
+its rule.
+
+
 ### Security - a mandate's signature was never verified (week 11)
 
 **A forged mandate authorised unattended action.** Found while writing the

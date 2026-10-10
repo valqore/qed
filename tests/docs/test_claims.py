@@ -102,6 +102,27 @@ def test_the_regex_finds_something() -> None:
     assert total > 25, f"only {total} cited paths found; the pattern is probably wrong"
 
 
+def invariant_section(text: str) -> list[str]:
+    """The lines under the "Invariants" heading, up to the next one.
+
+    Scoped rather than scanning the whole document, which is how this was
+    written first. `README.md` also has a *capability* table, and a row of it
+    that cited `tests/evidence/fixtures/` as well as the module it describes
+    was read as an invariant row with prose in its last cell. The guard was
+    right that the row did not end in a test path and wrong that it was
+    supposed to -- a guard that cannot tell one table from another, which is
+    the recurring shape in `docs/validation.md`.
+    """
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith("## ") and "Invariant" in line]
+    if not starts:
+        return []
+    start = starts[0]
+    rest = lines[start + 1 :]
+    end = next((i for i, line in enumerate(rest) if line.startswith("## ")), len(rest))
+    return rest[:end]
+
+
 def test_the_invariant_tables_name_a_test_each() -> None:
     """Every row of an invariant table ends in a path, not prose.
 
@@ -110,9 +131,11 @@ def test_the_invariant_tables_name_a_test_each() -> None:
     """
     for name in ("README.md", "SECURITY.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
+        section = invariant_section(text)
+        assert section, f"{name} has no Invariants section; has it been restructured?"
         rows = [
             line
-            for line in text.splitlines()
+            for line in section
             if line.startswith("|") and "`tests/" in line and "---" not in line
         ]
         assert rows, f"{name} has no invariant table rows; has it been restructured?"

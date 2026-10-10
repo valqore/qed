@@ -1,6 +1,6 @@
 # Validating a release
 
-The test suite is 2,610 fast tests and green. This page is about the things it
+The test suite is 2,639 fast tests and green. This page is about the things it
 cannot see, because every one of them has shipped at least once.
 
 The pattern is consistent enough to name: **a test that imports the source tree
@@ -29,6 +29,10 @@ several replicas starting at the same moment.
 | A frozen binary telling a Python-less user to run `pip install` | the build succeeded; nothing ran the binary |
 | **A mandate's signature was never verified** | `verify_mandate` was unit-tested from week 3 and nothing called it |
 | `README.md` citing `tests/policy/test_determinism.py` | no test asserts that a cited path exists |
+| A format spec that would have frozen the secret-masking patterns | the sentence was true; the conclusion drawn from it was not, and no test reads a conclusion |
+| Eleven weeks of "cross-version fixtures in CI" with no fixtures | the test that looked like one regenerates its own input |
+| A frozen fixture's public keys, matched by `.gitignore`'s `*.pem` | the files were on disk, so everything passed locally |
+| A byte-pinned fixture written with CRLF on Windows | the pin matched on the machine that made it |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
@@ -64,6 +68,82 @@ Three passages of the onboarding guide were wrong on the first draft -- a flag
 that is positional, a config block with the wrong keys, and output invented
 from the help text -- and all three would have shipped had the page been
 written from the source rather than from a terminal.
+
+## The two week-12 entries, which are about tests rather than code
+
+Neither of these was a bug in `qed`. Both were a test or a document that could
+not have failed, which is worse value for the same green tick.
+
+**"Cross-version fixtures in CI" existed as a sentence for eleven weeks.**
+SPEC §25.6 promised that a `schema_version` bump keeps `qed-verify` able to
+verify every prior version, with fixtures in CI to prove it. There were no
+fixtures. What there was is `tests/evidence/test_chain.py`, which writes a chain
+with the real signer and the real store and verifies it with the real verifier,
+end to end -- a good test that cannot see this failure at all, because a
+producer and a verifier that change together pass it, while the records already
+in a customer's database do not change with them.
+
+The shape to look for: **a test that regenerates its own input is not a test of
+compatibility.** It is a test that today's code agrees with itself. The fix was
+to commit an export produced once, pin its digest in the test file rather than
+inside the fixture, and make a `schema_version` bump fail until it has a fixture
+of its own (ADR-0015).
+
+**A document froze the wrong thing.** The draft `docs/evidence-format.md` said
+the masking pattern set "is part of the format: changing it changes record
+hashes for future records". Every clause there is true. The conclusion is wrong:
+masking runs before hashing, so a new pattern changes what future records
+*contain* and cannot change one already written, and a verifier never re-derives
+a mask. Freezing 1.0 as written would have frozen the secret-detection patterns
+for the life of the product.
+
+No test could have caught it, and that is the entry. A guard can check that a
+document's cited paths exist (`tests/docs/test_claims.py`) and that its commands
+run; it cannot check that an inference drawn in prose is sound. The only control
+for that is writing down what a commitment covers in two explicit tables --
+inside the freeze, outside the freeze -- before committing to it, which is what
+the page now does. A promise whose boundary is implied is a promise nobody can
+check.
+
+## Two things the fixture itself nearly shipped broken
+
+Both were caught between writing the fixture and committing it, by asking what
+a *different machine* would see. Both are in the table above because they are
+the recurring class, not because they reached a release.
+
+**`.gitignore` matched the fixture's public keys.** Line 15 is `*.pem`, under
+the comment "never commit keys or chains" -- correct for a private key, and it
+matched the two **public** ones the frozen chain cannot be verified without.
+The first commit would have published a chain with no keys. Locally nothing
+would have shown it: the files are on disk and every test passed. In CI it
+would have surfaced as `unknown_key` on a frozen fixture, which reads like a
+format regression rather than a missing file.
+
+`.gitignore` now carries an explicit negation for
+`evidence-format-*/public/*.pem`, and
+`test_every_fixture_file_is_tracked_by_git` asks git what it is tracking rather
+than asking the filesystem what exists -- the same correction as the packaging
+guard that used `fnmatch` while setuptools expands with `glob`: ask the thing
+that actually decides.
+
+**The fixture was written with CRLF.** The generator used
+`Path.write_text`, which on Windows translates every `
+` to `
+`. The test
+pins a sha256 over the fixture's bytes, and `.gitattributes` checks the
+repository out as LF everywhere -- so the pin matched on the machine that made
+it and would have failed on every other one, again reading as a format
+regression.
+
+The generator now writes bytes, `test_no_fixture_file_carries_a_carriage_return`
+asserts it on the bytes rather than trusting `.gitattributes`, and
+`.gitattributes` says what depends on its rule. This is the week-11
+Windows/Linux asymmetry in the worse direction: that one failed locally and
+passed in CI, which is the direction you find out about.
+
+The general shape, for the next fixture: **a byte-pinned artefact has two
+hidden dependencies, the version-control system's filters and the platform's
+line endings, and neither is visible from the machine that produced it.**
 
 ## A guard written in a different matcher than the thing it guards
 

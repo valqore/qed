@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qed-verify"
-version = "0.7.0"
+version = "1.0.0"
 description = "Independent verifier for qed evidence chains"
 requires-python = ">=3.12"
 # `license-files` globs are resolved inside this project directory, so the

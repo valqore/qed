@@ -13,6 +13,16 @@ htmlcov/
 
 # local runtime state — never commit keys or chains
 *.pem
+
+# ...except the frozen conformance fixture's PUBLIC keys, which are published
+# on purpose: `qed-verify` cannot check the fixture without them, so a clone
+# that silently lacked them would fail CI with `unknown_key` and look like a
+# format regression. `*.pem` matched them, and nothing would have said so --
+# the same shape as the wheel that shipped without `compliance/packs/*.yaml`.
+# `tests/evidence/test_frozen_format.py` now asserts every fixture file is
+# tracked by git, so the next rule that swallows one fails loudly.
+# There is deliberately no private key in that directory.
+!tests/evidence/fixtures/evidence-format-*/public/*.pem
 *.db
 *.db-journal
 *.db-wal
