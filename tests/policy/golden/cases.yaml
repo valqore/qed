@@ -762,6 +762,68 @@
     decision: BLOCK
     rules: [AG-BLR-007]
 
+# The same teardown named as a tool call rather than typed as a command. Found
+# by writing examples/policy-cases.yaml: `terraform destroy` was caught only in
+# `params_redacted.command`, so an IaC adapter sending `action.name:
+# terraform.destroy` got ALLOW with a blast radius of 40 -- the most
+# destructive verb in infrastructure, in production, unremarked.
+- id: blr-007-terraform-destroy-as-a-tool-name
+  patch:
+    action: { name: "terraform.destroy", target: "stack:prod/payments" }
+    context: { intent: "tear down the old stack" }
+  expect:
+    decision: BLOCK
+    rules: [AG-BLR-007]
+
+# Underscore, not a dot. That boundary is the one the rule's own comment warns
+# about: a word boundary would not have matched here, because `_` is itself a
+# word character.
+#
+# AG-SKL-007 co-fires and is listed: it is a shadow-mode LOW that notices an
+# `mcp_tool` call whose name does not look like the adapter's family, which a
+# bare `pulumi_destroy` from the MCP adapter genuinely is. Listing it is the
+# point of `rules` being exact -- a case that only checked the decision would
+# hide it.
+- id: blr-007-pulumi-destroy-too
+  patch:
+    action: { name: "pulumi_destroy", target: "stack:prod/payments" }
+    context: { intent: "tear down" }
+  expect:
+    decision: BLOCK
+    rules: [AG-BLR-007, AG-SKL-007]
+
+- id: blr-007-helm-uninstall-removes-a-release
+  patch:
+    action: { name: "helm.uninstall", target: "release:prod/payments" }
+    context: { intent: "remove the chart" }
+  expect:
+    decision: BLOCK
+    rules: [AG-BLR-007]
+
+# The other half: widening to tool names must not catch the read-only verbs
+# that share the tool. `destroy_session` is the near-miss the scoping is for --
+# a bare `destroy` alternation would have taken it.
+- id: blr-007-planning-is-not-tearing-down
+  patch:
+    action: { name: "terraform.plan", target: "stack:prod/payments" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+- id: blr-007-apply-is-not-destroy
+  patch:
+    action: { name: "terraform.apply", target: "stack:prod/payments" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
+- id: blr-007-destroy-session-is-not-a-teardown
+  patch:
+    action: { name: "auth.destroy_session", target: "session:abc" }
+  expect:
+    decision: ALLOW
+    rules: [AG-DEF-001]
+
 - id: blr-008-dev-context-but-prod-target
   patch:
     action: { name: "db.write", target: "db:prod/orders" }

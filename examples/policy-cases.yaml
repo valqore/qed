@@ -1,0 +1,160 @@
+# Runnable policy cases for the shipped baseline pack (SPEC §12, §21).
+#
+#   qed policy test examples/policy-cases.yaml
+#
+# This file exists because the docs described the format and nothing shipped an
+# example: somebody who ran `pip install valqore-qed` got 46 rules and no way
+# to see them decide anything, which is a poor first five minutes for a tool
+# whose whole claim is that its decisions are inspectable.
+#
+# It is also a worked example of the format. `base:` is a complete proposal;
+# every case's `patch` is deep-merged over it, so a case says only what it
+# changes. `expect.rules` is the **exact** set of rule ids in the verdict --
+# not a subset -- which is what makes a case fail when an unrelated rule
+# starts matching as well as when the intended one stops. That second kind of
+# failure is the one worth having: it catches a rule accidentally widened.
+#
+# These cases are about the *shape* of the baseline pack and are deliberately
+# few. The project's own exhaustive table (107 cases, every rule covered) is in
+# `tests/policy/golden/cases.yaml`, which is a test fixture: it patches over a
+# proposal defined in Python, so it is not self-contained and cannot be run
+# through this command.
+
+base:
+  id: 01JBEXAMPLE0000000000000AA
+  ts: "2026-10-07T12:00:00.000Z"
+  principal:
+    token_jti: 01JBEXAMPLE000000000000JTI
+    human_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+    agent_chain: ["claude-code@workstation"]
+  action:
+    kind: mcp_tool
+    name: github.list_issues
+    target: repo:acme/payments
+    params_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+  context:
+    environment: dev
+    adapter: example/1.0
+    adapter_id: adp_example
+    enforcement: advisory
+    mode: enforce
+    summary: list open issues
+
+cases:
+  # ------------------------------------------------------------------ allowed
+  - id: a-read-in-dev-matches-no-rule
+    # Nothing in the pack objects to this, so the bundle default applies and
+    # says so with AG-DEF-001. "No rule matched" is itself recorded: a verdict
+    # that fell through is not the same as one nothing looked at.
+    expect:
+      decision: ALLOW
+      rules: [AG-DEF-001]
+
+  # ------------------------------------------------------------------ blocked
+  - id: a-security-group-open-to-the-world
+    patch:
+      action:
+        name: ec2.authorize_security_group_ingress
+        target: sg:prod/web
+        params_redacted:
+          cidr: 0.0.0.0/0
+      context:
+        environment: prod
+        blast_radius_hints:
+          writes: true
+          scope: account
+    expect:
+      decision: BLOCK
+      rules: [AG-BLR-001, AG-BLR-005, AG-BLR-009, AG-BUD-005, AG-DAT-007, AG-IDN-011]
+
+  - id: a-request-for-cloud-instance-metadata
+    # AG-DAT-013. An agent that can read the metadata endpoint can read the
+    # instance's own credentials, so there is no approval path for this one.
+    patch:
+      action:
+        kind: http
+        name: GET
+        target: http://169.254.169.254/latest/meta-data/iam/security-credentials/
+      context:
+        environment: prod
+    expect:
+      decision: BLOCK
+      rules: [AG-DAT-003, AG-DAT-013, AG-IDN-011]
+
+  # ----------------------------------------------------------------- approval
+  - id: a-destructive-change-in-prod-needs-a-human
+    patch:
+      action:
+        name: postgres.execute_sql
+        target: db:prod/orders
+        params_redacted:
+          sql: DROP TABLE orders_archive;
+      context:
+        environment: prod
+        blast_radius_hints:
+          writes: true
+          deletes: true
+          scope: single_resource
+    expect:
+      decision: REQUIRE_APPROVAL
+      rules: [AG-BLR-003, AG-BLR-005, AG-BLR-009, AG-BUD-005, AG-IDN-011]
+
+  - id: the-same-change-in-dev-does-not
+    # The only difference from the case above is the environment. Worth
+    # pinning: a rule that ignored `environment` would make both of these
+    # REQUIRE_APPROVAL and nobody would notice until staging work started
+    # waiting on approvals.
+    patch:
+      action:
+        name: postgres.execute_sql
+        target: db:dev/orders
+        params_redacted:
+          sql: DROP TABLE orders_archive;
+      context:
+        environment: dev
+        blast_radius_hints:
+          writes: true
+          deletes: true
+          scope: single_resource
+    expect:
+      decision: ALLOW
+      rules: [AG-DEF-001]
+
+  # -------------------------------------------------------------- blast radius
+  - id: a-teardown-is-blocked-on-the-verb-alone
+    # No hints at all: no `writes`, no `deletes`, scope unset. AG-BLR-007
+    # matches the verb, because an adapter that forgot to set `deletes` on a
+    # teardown call is exactly the case hints cannot catch.
+    #
+    # BLOCK and not REQUIRE_APPROVAL, and that is deliberate: AG-BLR-007 has
+    # no approvers list, because there is no useful approval conversation to
+    # have about tearing down production mid-incident. Teardown goes through a
+    # change window with a named owner.
+    #
+    # This case is why the file exists. It failed when it was written: the rule
+    # caught `terraform destroy` only as a shell command string, so an IaC
+    # adapter sending `action.name: terraform.destroy` got ALLOW.
+    patch:
+      action:
+        kind: custom
+        name: terraform.destroy
+        target: stack:prod/payments
+      context:
+        environment: prod
+    expect:
+      decision: BLOCK
+      rules: [AG-BLR-007, AG-IDN-011]
+
+  - id: planning-is-not-tearing-down
+    # The other half of the rule change. `terraform.plan` reads; widening
+    # AG-BLR-007 to tool names must not have caught it.
+    patch:
+      action:
+        kind: custom
+        name: terraform.plan
+        target: stack:prod/payments
+      context:
+        environment: prod
+    expect:
+      decision: ALLOW
+      rules: [AG-DEF-001, AG-IDN-011]

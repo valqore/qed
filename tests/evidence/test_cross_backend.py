@@ -429,3 +429,108 @@ class TestTheWholeDecisionPathRunsOnPostgres:
             assert report.ok, report.summary()
         finally:
             session.close(settle_chain=False)
+
+
+class TestReplicasStartingAtTheSameMoment:
+    """SPEC §104's rolling restart, as the thing that nearly broke it.
+
+    Two replicas booting together both called `record_bundle`, both saw no row,
+    both inserted, and the loser died on `UniqueViolation: policy_bundles_pkey`
+    **before its API came up**. A simultaneous start or a rolling restart could
+    therefore leave a replica refusing to serve, over a bundle the other
+    replica had already recorded correctly.
+
+    Found by starting the docker-compose HA stack, not by a test -- which is
+    why there is now a test.
+    """
+
+    @pytest.fixture(autouse=True)
+    def clean(self) -> Iterator[None]:
+        store = PostgresStore(DSN)
+        _wipe(store)
+        store.close()
+        yield
+
+    def test_two_stores_can_record_the_same_bundle(self, signer) -> None:  # type: ignore[no-untyped-def]
+        """One insert wins, the other is told it was not first. Neither
+        raises: another replica getting there first is the normal case for
+        every replica after the first, not an error."""
+        now = utcnow()
+        first, second = PostgresStore(DSN), PostgresStore(DSN)
+        try:
+            a = first.record_bundle(
+                bundle_hash="b" * 64, version="1", rules_count=46, loaded_at=now
+            )
+            b = second.record_bundle(
+                bundle_hash="b" * 64, version="1", rules_count=46, loaded_at=now
+            )
+            assert [a, b] == [True, False]
+        finally:
+            first.close()
+            second.close()
+
+    def test_four_replicas_racing_produce_one_winner(self, signer) -> None:  # type: ignore[no-untyped-def]
+        """The real shape: N replicas, one bundle, exactly one `policy_loaded`
+        record. More than one would claim the bundle was loaded twice; none
+        would mean the chain never recorded which rules were in force."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        now = utcnow()
+        stores = [PostgresStore(DSN) for _ in range(4)]
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(
+                    pool.map(
+                        lambda store: store.record_bundle(
+                            bundle_hash="c" * 64, version="1", rules_count=46, loaded_at=now
+                        ),
+                        stores,
+                    )
+                )
+        finally:
+            for store in stores:
+                store.close()
+        assert sum(results) == 1, results
+
+    def test_two_sessions_opening_together_both_come_up(
+        self, signer, qed_dir: Path, tmp_path: Path
+    ) -> None:  # type: ignore[no-untyped-def]
+        """End to end: `open_session` is what calls `record_bundle`, and it is
+        what was dying. Both have to return a usable session."""
+        import yaml
+
+        from qed.runtime import open_session
+
+        config = tmp_path / "qed.yaml"
+        config.write_text(
+            yaml.safe_dump(
+                {
+                    "instance_id": INSTANCE,
+                    "evidence": {"store_env": "QED_TEST_POSTGRES_DSN"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        sessions = []
+        try:
+            for _ in range(3):
+                sessions.append(
+                    open_session(directory=qed_dir, config_path=config, strict_policy=False)
+                )
+            assert len(sessions) == 3
+            # Drain first: on the deferred path `policy_loaded` sits in the
+            # outbox until a leader chains it, so counting chained records
+            # straight after opening finds nothing -- which is correct
+            # behaviour and not what this test is about.
+            from qed.runtime import settle
+
+            settle(sessions[0])
+            loaded = [
+                record
+                for record in sessions[0].store.iter_evidence()
+                if record.type is EvidenceType.policy_loaded
+            ]
+            assert len(loaded) == 1, f"{len(loaded)} policy_loaded records for one bundle"
+        finally:
+            for session in sessions:
+                session.close(settle_chain=False)

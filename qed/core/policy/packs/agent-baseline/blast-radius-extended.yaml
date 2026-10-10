@@ -45,6 +45,17 @@
         regex: "(?i)(?:^|[^a-z0-9])(delete_cluster|destroy_cluster|drop_database|delete_database|decommission|delete_organization|close_account)(?:[^a-z0-9]|$)"
       - field: action.params_redacted.command
         regex: "(?i)(terraform\\s+destroy|kubectl\\s+delete\\s+(ns|namespace)\\b)"
+      # The same teardown, named as a tool call rather than typed as a
+      # shell command. The regex above only sees `terraform destroy` when
+      # somebody shells out; an IaC adapter sends `action.name:
+      # terraform.destroy`, and without this the most destructive verb in
+      # infrastructure returned ALLOW with a blast radius of 40. Scoped to
+      # the tool names rather than a bare `destroy`, which would also
+      # catch things like `destroy_session`.
+      - field: action.name
+        regex: "(?i)(?:^|[^a-z0-9])(?:terraform|tf|pulumi|cdk|cdktf)[^a-z0-9]+destroy(?:[^a-z0-9]|$)"
+      - field: action.name
+        regex: "(?i)(?:^|[^a-z0-9])helm[^a-z0-9]+(?:uninstall|delete)(?:[^a-z0-9]|$)"
   verdict: BLOCK
   message: "This action tears down infrastructure."
   fix: "Teardown goes through a change window with a named owner, not through an agent."

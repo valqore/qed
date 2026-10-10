@@ -486,17 +486,26 @@ class SqlStore:
     def record_bundle(
         self, *, bundle_hash: str, version: str | None, rules_count: int, loaded_at: datetime
     ) -> bool:
-        """Returns True when this is the first time the bundle has been seen."""
-        existing = self._conn.execute(
-            "SELECT 1 FROM policy_bundles WHERE hash = ?", (bundle_hash,)
-        ).fetchone()
-        if existing is not None:
-            return False
-        self._conn.execute(
-            "INSERT INTO policy_bundles (hash, version, loaded_at, rules_count) VALUES (?,?,?,?)",
+        """Returns True when this is the first time the bundle has been seen.
+
+        One statement, not a SELECT then an INSERT. Two replicas starting at
+        the same moment both saw no row, both inserted, and the loser died on
+        `UniqueViolation: policy_bundles_pkey` **before the API came up** -- so
+        a simultaneous start or a rolling restart could leave a replica
+        refusing to serve, for a bundle the other had already recorded.
+
+        `ON CONFLICT DO NOTHING` makes the race decide itself: exactly one
+        caller inserts, and `rowcount` says which. That is also the semantics
+        the name promises, and it is why the loser must return False rather
+        than raise -- it is not an error that another replica got there first,
+        it is the normal case for every replica after the first.
+        """
+        cursor = self._conn.execute(
+            "INSERT INTO policy_bundles (hash, version, loaded_at, rules_count) "
+            "VALUES (?,?,?,?) ON CONFLICT(hash) DO NOTHING",
             (bundle_hash, version, rfc3339_ms(loaded_at), rules_count),
         )
-        return True
+        return int(cursor.rowcount) > 0
 
     # ------------------------------------------------------------- checkpoints
 
