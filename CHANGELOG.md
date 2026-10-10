@@ -6,6 +6,10 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.6.1] — 2026-10-10
+
 Four fixes from validating `v0.6.0` end to end -- installing the built wheels
 into a clean venv, driving the installed scripts, and starting the HA stack.
 Three of the four were invisible to a green 2,200-test suite, and all of them

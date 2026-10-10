@@ -49,11 +49,11 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
 ## The container
 
 ```bash
-docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:0.6.0 \
+docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:0.6.1 \
   keys init --dir /var/lib/qed
 
 docker run --rm -p 8710:8710 -v qed-state:/var/lib/qed \
-  ghcr.io/valqore/qed:0.6.0
+  ghcr.io/valqore/qed:0.6.1
 ```
 
 Distroless and non-root (SPEC §20.4): no shell, no package manager, no pip. A
