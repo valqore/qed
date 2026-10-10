@@ -253,11 +253,13 @@ leaves the chain behind as an artifact anyone can check with the public key.
    that links from the planning folder keep working.)
 2. `DESIGN_DECISIONS.md` — ADR-001…008, accepted.
 3. `docs/adr/` — decisions made while implementing, where the spec was silent.
-4. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
-5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
+4. **`THREAT_MODEL.md`** — STRIDE, and eleven things qed does not protect
+   against. Read that section first.
+5. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
+6. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
    `docs/assurance-classes.md`, `docs/compliance.md`, `docs/policy-testing.md`.
-6. Running it: `docs/deployment.md` (process, container, Helm, HA, releasing),
+7. Running it: `docs/deployment.md` (process, container, Helm, HA, releasing),
    `docs/ci.md` (`qed check` in a pipeline), `docs/checkpoints.md` (anchors),
    `docs/siem.md` (OCSF), `docs/performance.md` (what it actually costs) and
    `docs/validation.md` (what a green test suite cannot see).

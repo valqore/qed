@@ -58,6 +58,47 @@ careless action, none at all to a determined operator who lies about who they
 are. ADR-0014 and `docs/approvals.md` say so rather than leaving it to be
 discovered.
 
+### Added - `THREAT_MODEL.md`, and a test that keeps it true (week 10)
+
+SPEC §17 has named this file since week 1 and nothing was behind it. It is the
+document the first auditor session opens with.
+
+It is written for somebody deciding whether the evidence is worth anything, so
+it **leads with the limits**: the "What qed does not protect against" section is
+eleven numbered items and is deliberately longer than the STRIDE table. The
+first one is the one that matters most -- *on most paths qed does not stop
+anything*. An adapter enforces only where it holds the credential the action
+needs; everywhere else the agent holds its own and qed decides and records. What
+the evidence supports is "this is what the agent proposed and what policy
+concluded", not "this is what the agent was able to do".
+
+The other ten, briefly: CLI identity is self-asserted; an operator with the
+signing key can rewrite the chain and only a published anchor catches it;
+break-glass bypasses self-governance by design; rate limits are per process;
+the clock is not verified against anything; a signed bundle is only as
+trustworthy as its publisher; shadow mode is the shipped default; the kernel
+judges what the adapter tells it; coverage is a property of the rules, not of
+qed; and four things are not built.
+
+There is also a table of SPEC §17's nine MUSTs with the state of each, which is
+the quickest way for an auditor to find the two that are qualified: admin
+self-governance is off by default, and supply-chain signing is gated off until
+the name reservations are done.
+
+**`tests/test_threat_model.py` checks the claims that are checkable** -- every
+rule id it cites exists, every number matches the constant, every file and ADR
+it points at is there, every config key resolves on the real model, and the
+limitations section is longer than the controls. Not a lint pass on prose: the
+same discipline as `tests/test_packaging.py`, which exists because a list
+nobody verified was wrong.
+
+It earned itself immediately. It caught the advisory-adapter concession
+attributed to **ADR-0001, which is the blast-radius table**; a MUST table with
+**eight** of nine rows; two cited things that were not in the document at all;
+and the limitations section being *shorter* than the STRIDE table, which the
+document's own opening claims it is not. Four errors in a document I had just
+finished writing, found by a test rather than by rereading it.
+
 ### Added - fuzzing the parsers, and the two bugs it found (week 10)
 
 SPEC §17's "fuzz on parsers", with `hypothesis` -- already in §20.3's dev/test
