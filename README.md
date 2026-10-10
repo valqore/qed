@@ -60,13 +60,15 @@ hardware, including air-gapped.
 | **Prometheus `/metrics`** and **OCSF SIEM** events | `qed/api/routers/metrics.py`, `qed/infra/siem.py` |
 | **Control catalogues** for 10 frameworks, 65 controls, with coverage | `qed/compliance/packs/`, `docs/compliance.md` |
 | **Signed catalogue import**, air-gap, recorded in the chain | `qed/remote/packs.py`, ADR-0012 |
+| **Transparency-log anchor client**, six values and no payload | `qed/remote/anchor.py`, ADR-0013 |
 | CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
 
 Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
 `mode: mitm` for the HTTP proxy, the `remote.packs` **feed** (the air-gap
 import is built; fetching a bundle from a URL is the same verification with a
-download in front of it), `qed.remote.anchor`, and SPEC §19's live-stream and
-budget pages.
+download in front of it), the anchor **log** itself (the client is built; the
+log is `qed-cloud`'s, SPEC §24.2), and SPEC §19's live-stream and budget
+pages.
 
 **Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
 10.6 ms on PostgreSQL, against SPEC §18's 50 ms target — though that budget is

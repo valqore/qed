@@ -213,6 +213,10 @@ def open_session(
             # flag somebody has to remember to set. SQLite is one process
             # writing for itself and has nothing to coordinate.
             write_mode="deferred" if config.evidence.is_postgres else "direct",
+            # SPEC §10.4's thresholds, from the config rather than from the
+            # module defaults. They were parsed and never read.
+            every_records=config.evidence.checkpoint.every_records,
+            every_seconds=config.evidence.checkpoint.every_seconds,
         )
 
         paths = [baseline_pack_dir(), *(policy_paths or [Path(p) for p in config.policies])]

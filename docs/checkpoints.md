@@ -27,6 +27,19 @@ default is the weak case.
 
 ## When one is written
 
+```yaml
+evidence:
+  checkpoint:
+    every_records: 1000      # SPEC 10.4's thresholds, whichever comes first
+    every_seconds: 3600
+```
+
+Both are read (they were not, until week 9 -- see the changelog). `qed
+checkpoint --force` writes one below either threshold, and the age is measured
+from the **oldest uncovered record**, not the newest: a record that has been
+sitting unanchored for an hour is what the threshold is about, whatever arrived
+since.
+
 Every 1,000 records or 3,600 seconds, **whichever comes first**. The age is
 measured from the *oldest record not yet covered*, which is the thing the
 threshold is about: a record that has been sitting unanchored for an hour,
@@ -109,6 +122,66 @@ credentials, SSH agent and signing key are already configured for.
 
 **Pushing is what makes it an anchor.** `push: false` produces a local tag that
 is as rewritable as the chain beside it, and the receipt says so.
+
+### `qed-anchor`
+
+```yaml
+evidence:
+  checkpoint:
+    publishers:
+      - type: qed-anchor
+        url: https://anchor.example            # https only
+        log_id: acme-prod                      # required, see below
+        token_env: QED_ANCHOR_TOKEN            # optional
+        timeout_seconds: 5
+```
+
+The only publisher that sends anything to a **third party**, and for that reason
+the only one that does not copy the whole record. It POSTs six values to
+`<url>/v1/anchors`:
+
+```json
+{"log_id": "acme-prod", "seq": 7, "hash": "...", "merkle_root": "...",
+ "key_id": "...", "sig": "..."}
+```
+
+**Why not the record.** A checkpoint payload carries the *previous* checkpoint's
+receipts, and a receipt's `target` is an `s3://bucket/key` or a git remote.
+Posting the record would hand an anchor service a running inventory of your
+bucket names — infrastructure nobody agreed to publish, arriving as a side
+effect of a privacy feature. Invariant §1.7 says these features carry hashes
+and signatures only, so they carry hashes and signatures only.
+
+Every value in that body is one your auditor already holds in their export, so
+the log learns nothing new and the auditor can compare the log's entry against
+their own copy. The honest consequence: **the log cannot check that the
+signature covers a meaningful payload**, because it never sees the payload. It
+does not need to — a transparency log witnesses that a value existed at a time,
+and the value is a hash whose preimage is in the export.
+
+**`log_id` is required.** It is the name your entries carry in somebody else's
+log, and that is your decision. `instance_id` would have named your company and
+environment (and is not even on the record); deriving one from the signing key
+would move your entries to a new scope at the next `qed keys rotate`, splitting
+your own history in the log.
+
+`https` is enforced, not warned about: the root is the evidence that the chain
+was not rewritten, and in clear anything on the path can substitute it. A
+`token:` in the config file is refused with a pointer to `token_env` (SPEC §16).
+The token goes in an `Authorization: Bearer` header, never in the body, and the
+environment is read at publish time — so a secret that arrives after startup
+still works, and an empty one returns a failed receipt without sending
+anything.
+
+The receipt keeps the status code and whichever of `log_index`, `log_id`,
+`inclusion_proof`, `signed_timestamp` and `tree_size` the log returned, and
+nothing else. A receipt lands in the chain, which is immutable; a log answering
+with a kilobyte of banner text would put a kilobyte there for good.
+
+**The log itself is not in this repository.** SPEC §24.2 puts the transparency
+log in `qed-cloud`. What ships here is the client; the stub it is tested
+against is in `tests/evidence/test_anchor_client.py`. ADR-0013 has the
+reasoning.
 
 ## Receipts
 

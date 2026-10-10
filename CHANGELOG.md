@@ -35,6 +35,74 @@ Unsigned import is possible, takes a flag, and is loud: the record says
 `unsigned: true` and the command prints `UNSIGNED`. Refusing outright would
 push people to edit the installed files by hand, where nothing would record it.
 
+### Added - the transparency-log anchor client (week 9)
+
+`qed/remote/anchor.py`, a fourth checkpoint publisher: `{type: qed-anchor, url,
+log_id}`. The first one that sends anything to a third party, and for that
+reason the only one that does not copy the whole checkpoint record.
+
+It POSTs six values -- `log_id`, `seq`, `hash`, `merkle_root`, `key_id`, `sig`
+-- and nothing else. The record was not an option: SPEC §10.4 requires a
+checkpoint payload to carry the *previous* checkpoint's receipts, and a
+receipt's `target` is an `s3://bucket/key` or a git remote. Posting the record
+would hand an anchor service a running inventory of the operator's bucket names,
+arriving as a side effect of a feature whose whole premise (invariant §1.7) is
+that it carries hashes and signatures only. A test renders the body and fails if
+a bucket name or git remote appears in it.
+
+Every value sent is one the auditor already holds, so the log learns nothing new
+and the auditor can check the log's entry against their own export. The honest
+consequence: the log cannot verify that the signature covers a meaningful
+payload, because it never sees the payload. It does not need to -- a
+transparency log witnesses that a value existed at a time.
+
+`log_id` is **required**, with no default. `instance_id` names a company and an
+environment (and is not on the record at all), and deriving one from the signing
+key would move an instance's entries to a new scope at the next rotation,
+splitting its own history in the log. The name your entries carry in somebody
+else's log is your decision.
+
+`https` is enforced rather than warned about; a `token:` in `qed.yaml` is
+refused with a pointer to `token_env`; the token goes in a header and never in
+the body; the environment is read at publish time so a secret arriving after
+startup still works. The receipt keeps the status plus the attestation fields a
+log actually returns and drops the rest, because a receipt lands in the
+immutable chain and a log answering with a kilobyte would put a kilobyte there
+for good.
+
+Plain `http` is allowed to **loopback only**, matched on the literal host so no
+DNS name can resolve its way in. The guard was doing real harm without that: a
+local relay or sidecar holding the log credential and talking https onward is a
+legitimate deployment, and an operator blocked from `http://127.0.0.1` turns the
+publisher off instead, which is strictly worse than anchoring through a relay.
+
+Tested against a real HTTP server in a thread rather than a mocked `httpx`: the
+thing worth asserting is what crosses the wire, and a mock tells you what the
+code meant to send. Then driven end to end -- two checkpoints through the CLI
+against a stub log -- which is how both of the fixes below were found. ADR-0013
+has the decisions. The log itself stays out of this repository (SPEC §24.2).
+
+### Fixed - `evidence.checkpoint.every_records` was parsed and never read
+
+`ChainWriter.checkpoint` compared against the module constants directly, so
+`every_records` and `every_seconds` in `qed.yaml` were validated, reported by
+`qed doctor`, and ignored. The defaults match SPEC §10.4, so an operator who
+left them alone saw correct behaviour and an operator who tuned them saw none.
+
+Found by running it, which is the only way this kind is ever found: an
+end-to-end script set `every_records: 1`, wrote nine records, and
+`qed checkpoint` answered *"nothing to checkpoint yet"*. Twice, before I stopped
+assuming the script was wrong.
+
+The thresholds are instance attributes now, filled by the session from the
+config; the constants remain the defaults. Five tests, two of which fail if the
+fix is reverted -- including one that asserts a *large* `every_records` keeps a
+long chain undue, so reading the attribute and then ignoring it would not pass.
+
+This is the same shape as `observability` sitting in `UNIMPLEMENTED_SECTIONS`
+while the code read it: a config key and the code that should read it, drifting
+apart quietly, with the defaults hiding it.
+
 ### Fixed - an import could stop the kernel deciding
 
 Found by running it, before any of this had tests. An imported catalogue

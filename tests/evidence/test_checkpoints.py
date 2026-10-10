@@ -65,11 +65,87 @@ def fill(session, count: int, *, age: timedelta = timedelta(0)) -> None:  # type
 # --------------------------------------------------------------------------
 
 
-class TestWhenACheckpointIsDue:
-    def test_the_thresholds_are_the_ones_the_spec_names(self) -> None:
+class TestTheConfiguredThresholdsAreTheOnesUsed:
+    """`evidence.checkpoint.every_records` was parsed and never read.
+
+    `ChainWriter.checkpoint` compared against the module constants directly,
+    so the config keys were validated, reported by `qed doctor`, and ignored.
+    The defaults match SPEC §10.4, so an operator who left them alone saw
+    correct behaviour and an operator who tuned them saw none -- the quiet half
+    of the same bug that had `observability` in `UNIMPLEMENTED_SECTIONS` while
+    the code read it.
+
+    Found by running it: an end-to-end script set `every_records: 1`, wrote
+    nine records, and `qed checkpoint` answered "nothing to checkpoint yet".
+    """
+
+    def test_a_small_every_records_makes_a_short_chain_due(self, qed_dir: Path) -> None:
+        session = open_session(directory=qed_dir, strict_policy=False)
+        try:
+            session.writer.every_records = 2
+            fill(session, 3)
+            assert session.writer.checkpoint() is not None
+        finally:
+            session.close()
+
+    def test_a_large_every_records_keeps_it_undue(self, qed_dir: Path) -> None:
+        """The other direction, so the test would fail if the attribute were
+        read and then ignored."""
+        session = open_session(directory=qed_dir, strict_policy=False)
+        try:
+            session.writer.every_records = 10_000
+            fill(session, 50)
+            assert session.writer.checkpoint() is None
+        finally:
+            session.close()
+
+    def test_a_small_every_seconds_makes_a_young_chain_due(self, qed_dir: Path) -> None:
+        session = open_session(directory=qed_dir, strict_policy=False)
+        try:
+            session.writer.every_seconds = 1
+            fill(session, 2)
+            later = utcnow() + timedelta(seconds=5)
+            assert session.writer.checkpoint(now=later) is not None
+        finally:
+            session.close()
+
+    def test_the_session_fills_them_from_the_config(self, qed_dir: Path, tmp_path: Path) -> None:
+        """The wiring, not just the attribute. A writer that reads
+        `self.every_records` and a session that never sets it is the same bug
+        with an extra step."""
+        config = tmp_path / "qed.yaml"
+        config.write_text(
+            "evidence:"
+            + chr(10)
+            + "  checkpoint:"
+            + chr(10)
+            + "    every_records: 7"
+            + chr(10)
+            + "    every_seconds: 11"
+            + chr(10),
+            encoding="utf-8",
+        )
+        session = open_session(directory=qed_dir, config_path=config, strict_policy=False)
+        try:
+            assert session.writer.every_records == 7
+            assert session.writer.every_seconds == 11
+        finally:
+            session.close()
+
+    def test_the_defaults_are_the_ones_the_spec_names(self, qed_dir: Path) -> None:
+        """And a session with no config gets them, so the constants are still
+        the defaults rather than dead code."""
         assert CHECKPOINT_EVERY_RECORDS == 1000
         assert CHECKPOINT_EVERY_SECONDS == 3600
+        session = open_session(directory=qed_dir, strict_policy=False)
+        try:
+            assert session.writer.every_records == CHECKPOINT_EVERY_RECORDS
+            assert session.writer.every_seconds == CHECKPOINT_EVERY_SECONDS
+        finally:
+            session.close()
 
+
+class TestWhenACheckpointIsDue:
     def test_a_young_short_chain_is_not_due(self, qed_dir: Path) -> None:
         session = open_session(directory=qed_dir, strict_policy=False)
         try:

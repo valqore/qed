@@ -23,6 +23,7 @@ several replicas starting at the same moment.
 | Both arm64 tests skipping one step after the emulator was installed | a probe that could not tell "no emulator" from "the registry did not answer" |
 | An imported catalogue that stopped the kernel deciding | nothing had tested an import against the installed rules |
 | `policy_loaded` saying `unsigned: false` after an unsigned import | the policy hash does not change, so the record is never re-emitted |
+| `evidence.checkpoint.every_records` being ignored | the default matches the spec, so only a tuned value shows it |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
@@ -124,6 +125,29 @@ Then read the chain. An unsigned import must show `unsigned: true` in the
 ```bash
 qed export --dir .qed | grep policy_loaded | tail -1
 ```
+
+### Anchor two checkpoints to a log you can watch
+
+```bash
+# a stub log on loopback; plain http is allowed there and nowhere else
+qed checkpoint --dir .qed --config qed.yaml     # publishes checkpoint 1
+qed checkpoint --dir .qed --config qed.yaml     # publishes checkpoint 2
+qed export --dir .qed --config qed.yaml | grep -o '"previous_receipts":[^]]*]'
+```
+
+Two checkpoints, not one, because the receipt for the first appears in the
+*second* one's payload -- a receipt cannot live inside the record it describes.
+Watch what the log receives: it must be six values (`log_id`, `seq`, `hash`,
+`merkle_root`, `key_id`, `sig`) and nothing from the payload, because a
+checkpoint payload carries the previous checkpoint's receipts and those name
+your buckets.
+
+Two bugs came out of running exactly this. `every_records: 1` was ignored, so
+nothing was ever due; and the first version of the script looked for
+`published_to` in the payload when the field is `previous_receipts` -- **that
+one was my mistake, not the code's**, and it is in this list because a
+validation script that cries wolf is worse than none. Check the field name
+before reporting the bug.
 
 ### Start more than one replica
 

@@ -67,11 +67,15 @@ def build_publishers(specs: list[dict[str, object]]) -> list[Publisher]:
     from qed.infra.publishers.file import FilePublisher
     from qed.infra.publishers.git import GitTagPublisher
     from qed.infra.publishers.s3 import S3ObjectLockPublisher
+    from qed.remote.anchor import AnchorPublisher
 
     builders: dict[str, Callable[[dict[str, object]], Publisher]] = {
         "file": FilePublisher.from_config,
         "s3-object-lock": S3ObjectLockPublisher.from_config,
         "git-tag": GitTagPublisher.from_config,
+        # The only publisher that sends anything to a third party, and the only
+        # one that does not copy the whole record. See `qed/remote/anchor.py`.
+        "qed-anchor": AnchorPublisher.from_config,
     }
     publishers: list[Publisher] = []
     for spec in specs:

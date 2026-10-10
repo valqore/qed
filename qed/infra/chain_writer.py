@@ -72,6 +72,14 @@ __all__ = [
 
 WriteMode = Literal["direct", "deferred"]
 
+#: SPEC §10.4's thresholds, and the defaults when nothing configures them.
+#:
+#: These used to be the *only* values: `checkpoint()` read them directly, so
+#: `evidence.checkpoint.every_records` in `qed.yaml` was parsed, validated, and
+#: never read. The defaults match the spec, so an operator who left them alone
+#: saw correct behaviour and an operator who tuned them saw none -- the quiet
+#: half of the same bug that had `observability` in `UNIMPLEMENTED_SECTIONS`
+#: while the code read it.
 CHECKPOINT_EVERY_RECORDS = 1000
 CHECKPOINT_EVERY_SECONDS = 3600
 
@@ -164,6 +172,8 @@ class ChainWriter:
         dev: bool = False,
         masking: MaskingProfile = "default",
         write_mode: WriteMode = "direct",
+        every_records: int = CHECKPOINT_EVERY_RECORDS,
+        every_seconds: int = CHECKPOINT_EVERY_SECONDS,
     ) -> None:
         self.store = store
         self.signer = signer
@@ -174,6 +184,12 @@ class ChainWriter:
         #: chain it. `direct` is one process writing for itself, which is what
         #: SQLite always is.
         self.write_mode: WriteMode = write_mode
+        #: SPEC §10.4's thresholds, from `evidence.checkpoint`. Instance
+        #: attributes rather than module constants because they are
+        #: configurable and were not being read -- see the note on
+        #: `CHECKPOINT_EVERY_RECORDS`.
+        self.every_records = every_records
+        self.every_seconds = every_seconds
         recorded = store.get_meta("instance_id")
         if recorded is None:
             store.set_meta("instance_id", instance_id)
@@ -417,6 +433,10 @@ class ChainWriter:
         carries. So each range begins at the *previous checkpoint record*, which
         means every record in the chain, checkpoints included, ends up covered
         by exactly one Merkle root.
+
+        The thresholds come from `self.every_records` / `self.every_seconds`,
+        which the session fills from `evidence.checkpoint` -- not from the
+        module constants, which are now only the defaults.
         """
         last_seq = self.store.last_seq()
         if last_seq is None:
@@ -427,9 +447,9 @@ class ChainWriter:
         if not pending:
             return None
         stamp = now if now is not None else utcnow()
-        if not force and len(pending) < CHECKPOINT_EVERY_RECORDS:
+        if not force and len(pending) < self.every_records:
             oldest = pending[0].ts
-            if (stamp - oldest).total_seconds() < CHECKPOINT_EVERY_SECONDS:
+            if (stamp - oldest).total_seconds() < self.every_seconds:
                 return None
         root = merkle_root([r.hash for r in pending])
         # The previous checkpoint's receipts, carried forward. They cannot go
