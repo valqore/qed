@@ -1,0 +1,140 @@
+# The documentation site (SPEC §26: mkdocs-material, versioned; ADRs in docs/adr/).
+#
+# ## Why the normative files are included rather than moved
+#
+# `THREAT_MODEL.md`, `GOVERNANCE.md`, `SECURITY.md`, `CHANGELOG.md` and
+# `QED_SPEC.md` live at the repository root because that is where GitHub looks
+# for them and where a reader cloning the repo expects them. mkdocs will not
+# read a path outside `docs_dir`, so the usual workarounds are to move the files
+# (breaking every existing link) or to copy them in at build time (two copies,
+# which drift).
+#
+# Neither. `pymdownx.snippets` ships with mkdocs-material and includes a file at
+# build time with `--8<-- "FILE.md"`, resolved against `base_path`. So each of
+# those pages in `docs/` is a two-line stub around the one real file. There is
+# exactly one copy of every normative document, and it is the one at the root.
+#
+# ## Why the nav is written out in full
+#
+# `mkdocs` will happily build a site with a page missing from the nav: the page
+# is published, reachable by URL, and invisible. That is the same failure as the
+# wheel that shipped without `compliance/packs/*.yaml` -- the build is green and
+# the artifact is wrong. `tests/docs/test_site.py` asserts the nav and `docs/`
+# are the same set, in both directions, so adding a page without listing it is a
+# test failure rather than a page nobody finds.
+
+site_name: Valqore QED
+site_description: Policy and evidence kernel for AI-agent actions
+site_url: https://valqore.github.io/qed/
+repo_url: https://github.com/valqore/qed
+repo_name: valqore/qed
+edit_uri: edit/main/docs/
+copyright: Apache-2.0
+
+# `strict` turns a broken internal link into a build failure. The site is the
+# published form of the audit trail's documentation; a dead link in it is a
+# reader who cannot check a claim.
+strict: true
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - search.highlight
+    - toc.follow
+  palette:
+    # The site follows the reader's OS theme and offers both, for the same
+    # reason the CLI does not assume a dark terminal.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  # `check_paths` makes a missing include a build error instead of a page that
+  # silently renders the literal `--8<--` line.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Start here:
+      - Shadow to enforce: onboarding-shadow-to-enforce.md
+      - Threat model: threat-model.md
+      - What a green test suite cannot see: validation.md
+  - The kernel:
+      - Policy language: policy-language.md
+      - Testing a rule set: policy-testing.md
+      - Blast radius: blast-radius.md
+      - Evidence format: evidence-format.md
+      - Assurance classes: assurance-classes.md
+  - Putting it in front of something:
+      - MCP proxy: mcp-proxy.md
+      - HTTP forward proxy: http-proxy.md
+      - Coding-agent hook: hooks.md
+      - CI: ci.md
+      - Credential broker: credential-broker.md
+      - Delegation: delegation.md
+      - Approvals: approvals.md
+      - HTTP API: api.md
+  - Evidence and compliance:
+      - Checkpoints and anchors: checkpoints.md
+      - Control catalogues: compliance.md
+      - OSCAL export: oscal.md
+      - SIEM events: siem.md
+  - Running it:
+      - Deployment: deployment.md
+      - Performance: performance.md
+  - Project:
+      - Governance: governance.md
+      - Security: security.md
+      - Changelog: changelog.md
+      - Specification: spec.md
+  - Decisions:
+      - Why there are ADRs: adr/index.md
+      - ADR-0001 Blast radius is written fresh: adr/0001-blast-radius-table.md
+      - ADR-0002 A missing field is falsy: adr/0002-predicate-semantics.md
+      - ADR-0003 Budget comparisons are precomputed: adr/0003-derived-budget-fields.md
+      - ADR-0004 policy_hash ignores file layout: adr/0004-bundle-hash.md
+      - ADR-0005 Record encoding: adr/0005-record-encoding.md
+      - ADR-0006 Separators carry no product name: adr/0006-format-constants-carry-no-product-name.md
+      - ADR-0007 GET /v1/status does not verify: adr/0007-status-endpoint-for-the-ui-badge.md
+      - ADR-0008 The hook answers ask: adr/0008-hook-answers-ask-and-never-allow.md
+      - ADR-0009 The outbox and one chain leader: adr/0009-the-outbox-and-one-chain-leader.md
+      - ADR-0010 Rotation destroys the old key: adr/0010-rotation-destroys-the-old-private-key.md
+      - ADR-0011 Catalogues are authored: adr/0011-catalogues-are-authored-and-coverage-refuses-a-percentage.md
+      - ADR-0012 A pack bundle is one envelope: adr/0012-a-pack-bundle-is-one-signed-envelope.md
+      - ADR-0013 The anchor client sends six values: adr/0013-the-anchor-client-sends-six-values.md
+      - ADR-0014 QED governs its own admin operations: adr/0014-qed-governs-its-own-admin-operations.md

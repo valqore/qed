@@ -6,6 +6,109 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added - the docs site, and the guide that says how to reach enforce (week 11)
+
+SPEC §26 names mkdocs-material; `mkdocs.yml` is it, and
+`docs/onboarding-shadow-to-enforce.md` is the page SPEC §24 has had in the file
+listing since week 1 with nothing behind it.
+
+The guide exists because **three separate dials all have to point at "enforce"
+before a `BLOCK` stops anything** -- the instance `mode`, each rule's `mode`,
+and whether the credential broker holds the credential at all -- and turning
+the wrong one is how an operator ends up with a chain full of enforcing
+verdicts in front of an agent that was never gated. Every command on the page
+was run to write it, and the output is quoted rather than invented. Three
+passages were wrong on the first draft and are now what the tool actually
+prints: `qed policy test` takes the case file positionally, the broker's
+`upstreams.yaml` uses `credential: {source, ref, inject}`, and `qed doctor`
+ends with a table and a count rather than a sentence.
+
+That last one is worth keeping. An upstream whose credential cannot be resolved
+does not fail -- it degrades to advisory and says so:
+
+```
+UPSTREAM             MODE       INJECT   CREDENTIAL
+postgres-prod        ADVISORY   env      unavailable: $PROD_DATABASE_URL is not set, ...
+
+0 enforcing, 1 advisory
+```
+
+`0 enforcing` is the number to read. The presence of a `broker:` block is not.
+
+**Normative documents are included, not copied.** `THREAT_MODEL.md`,
+`GOVERNANCE.md`, `SECURITY.md`, `CHANGELOG.md` and `QED_SPEC.md` stay at the
+repository root, where GitHub and a fresh clone look for them; the site reaches
+them through `pymdownx.snippets`, which ships with the theme. One copy of each,
+and `tests/docs/test_site.py` fails if one is ever duplicated into `docs/`.
+
+**`tests/docs/test_site.py` asserts the nav and `docs/` are the same set, in
+both directions.** `mkdocs build` will happily publish a page that no nav entry
+points at: reachable by URL, invisible to a reader, green build, wrong
+artifact. That is the same shape as the wheel that shipped without
+`compliance/packs/*.yaml`, and `docs/validation.md` keeps the list.
+
+It found a bug in itself on the first run, which is the direction worth
+recording: `test_no_root_document_was_copied_into_docs` used `Path.exists()`,
+and Windows is case-insensitive, so `docs/governance.md` -- the stub that is
+supposed to be there -- answered `True` to `(docs / "GOVERNANCE.md").exists()`.
+Written that way the test failed on Windows and would have passed in CI on
+Linux, which is the worse of the two directions. It now compares against the
+real directory listing.
+
+### Added - examples/README.md and a gap report that runs (week 11)
+
+`examples/onboarding/gap_report.py` answers "how far is this instance from
+`mode: enforce`?". Every verdict carries `decision` and `would_decision`; the
+records where they differ are exactly the work remaining, and the script counts
+them per shadow rule:
+
+```
+2 verdict(s); 1 would have decided differently under enforce
+
+ COUNT  RULE             WOULD MOVE
+     1  AG-SKL-003       ALLOW -> REQUIRE_APPROVAL
+```
+
+Stdlib only, and it reads an **export** rather than the instance -- the same
+file an auditor is handed, with no access to the database that produced it. An
+empty report explicitly says it may mean "not enough traffic" rather than
+"ready".
+
+`examples/README.md` indexes what runs, and says what is deliberately absent:
+there is no Okta or AWS AgentCore example, because one written against a
+service it had never touched would be a configuration file presented as a
+tested integration.
+
+**`examples/` is now in mypy's scope.** An example is code a reader copies, so
+one that does not type-check teaches the habit. Adding it caught
+`gap_report.py` having shipped with an `object` parameter and a `type: ignore`,
+because nothing had been checking. 119 source files became 122.
+
+### Fixed - two lint errors that said what was refused and not what to do
+
+`AG-BUD-002`'s own comment said "Flip to enforce deliberately." Both obvious
+ways to do that are hard errors, and nothing anywhere documented the one that
+works.
+
+ADR-002.4 settles the direction -- an override may only soften or narrow, and
+"for hardening, a new rule is written, not an override" -- and that is right: an
+overlay file that could silently *tighten* central policy can break production
+from a directory nobody reviews. The defect was that neither refusal named the
+alternative, while the `verdict -> ALLOW` case next to them already did:
+
+```
+override_hardening: an override may only soften or narrow:
+  mode shadow -> enforce (write your own rule with your own rule_id)
+duplicate_rule_id: already defined in skills.yaml;
+  write your own rule with your own rule_id, or use `override:` to soften this one
+```
+
+Three baseline rules carried comments implying a promotion path that errors
+(`budget.yaml`, `data.yaml`, `skills-extended.yaml`); they now name the real
+mechanism, and `data.yaml` additionally says not to edit the shipped file,
+since it lives in the wheel and an upgrade replaces it.
+
+
 ### Added - qed governs its own admin operations (week 10)
 
 Every rule in the baseline pack constrains an agent. The operator has been the

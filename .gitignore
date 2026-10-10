@@ -34,3 +34,7 @@ ci-oscal.json
 ci-healthz.json
 ci-readyz*.json
 ci-serve*.log
+
+# mkdocs build output (SPEC 26). The site is built in CI and published from
+# there; a committed copy would be a second, stale answer to every question.
+site/

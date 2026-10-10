@@ -247,6 +247,17 @@ alive after the job. Without an instance, `--evidence-out qed-evidence.jsonl`
 leaves the chain behind as an artifact anyone can check with the public key.
 `docs/ci.md` has the Actions workflow.
 
+## Documentation
+
+The site is built from `docs/` with mkdocs-material and published from CI
+(`mkdocs serve` to read it locally). **New here?**
+[`docs/onboarding-shadow-to-enforce.md`](docs/onboarding-shadow-to-enforce.md)
+is the install path, in the order that keeps you able to roll back at every
+step — and it explains the three separate dials that all have to point at
+"enforce" before a `BLOCK` stops anything.
+
+[`examples/README.md`](examples/README.md) is the index of things that run.
+
 ## Reading order
 
 1. `QED_SPEC.md` — the implementation specification (v0.3.1). Normative.
@@ -256,11 +267,12 @@ leaves the chain behind as an artifact anyone can check with the public key.
 3. `docs/adr/` — decisions made while implementing, where the spec was silent.
 4. **`THREAT_MODEL.md`** — STRIDE, and eleven things qed does not protect
    against. Read that section first.
-5. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
-6. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
+5. `docs/onboarding-shadow-to-enforce.md` — getting from shadow to enforce.
+6. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
+7. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
    `docs/assurance-classes.md`, `docs/compliance.md`, `docs/policy-testing.md`.
-7. Running it: `docs/deployment.md` (process, container, Helm, HA, releasing),
+8. Running it: `docs/deployment.md` (process, container, Helm, HA, releasing),
    `docs/ci.md` (`qed check` in a pipeline), `docs/checkpoints.md` (anchors),
    `docs/siem.md` (OCSF), `docs/performance.md` (what it actually costs) and
    `docs/validation.md` (what a green test suite cannot see).

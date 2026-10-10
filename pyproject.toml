@@ -65,6 +65,16 @@ dev = [
     # `deploy` CI job fails on any skip, so it has to be installed there
     # rather than skipped politely.
     "pyinstaller>=6.10",
+    # Week 11. SPEC 26 names mkdocs-material as the docs site. Dev/test only --
+    # never imported by `qed`; `tests/docs/test_site.py` builds the site with
+    # `--strict`, which is the only check that catches a dead cross-reference.
+    #
+    # Capped below MkDocs 2.0 deliberately. The Material maintainers' own notice
+    # says 2.0 removes the plugin system, rewrites theming, offers no migration
+    # path and is currently unlicensed. An uncapped range would turn that into a
+    # surprise failure on an unrelated commit.
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5,<10",
 ]
 # SPEC 19, 20.4. The web pages are AGPL-3.0 and ship as their own wheel from
 # their own repository, so that a third party cannot offer a hosted
@@ -126,11 +136,24 @@ ignore = ["ANN401", "RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["qed", "packages/qed-verify/qed_verify"]
+# `examples` is in scope deliberately: an example is code a reader copies into
+# their own repository, so an example that does not type-check teaches the
+# habit. Week 11 added `examples/onboarding/gap_report.py` and found it had
+# shipped with an `object` parameter and a `type: ignore` because nothing
+# checked it.
+files = ["qed", "packages/qed-verify/qed_verify", "examples"]
 mypy_path = "packages/qed-verify"
 
 [[tool.mypy.overrides]]
 module = ["ulid.*", "regex.*", "yaml.*"]
+ignore_missing_imports = true
+
+# The agent frameworks the SDK examples demonstrate. Neither is a dependency of
+# anything -- `examples/sdk/*.py` import them inside a `try` and fall back to
+# calling the same function directly, because the point being demonstrated is
+# not the framework. So the modules are legitimately absent in every CI cell.
+[[tool.mypy.overrides]]
+module = ["langchain_core.*", "crewai.*"]
 ignore_missing_imports = true
 
 # `psycopg` is an optional extra, so most CI cells type-check without it

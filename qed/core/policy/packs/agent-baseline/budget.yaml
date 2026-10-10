@@ -8,7 +8,10 @@
   name: Budget at or past 80 percent consumed
   severity: LOW
   # Shipped in shadow: it is a useful signal, but an agent being stopped at 80%
-  # of its budget surprises people on day one. Flip to enforce deliberately.
+  # of its budget surprises people on day one. To enforce it, copy this `when`
+  # block into a rule of your own with your own id -- an override may only
+  # soften or narrow (ADR-002.4). `docs/onboarding-shadow-to-enforce.md` stage 3
+  # has the recipe.
   mode: shadow
   when:
     any:

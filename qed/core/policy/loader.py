@@ -230,6 +230,15 @@ def _lint_rule(rule: Rule) -> list[LintFinding]:
     return findings
 
 
+#: What to do instead of hardening an override. ADR-002.4 settles the direction
+#: -- "for hardening, a new rule is written, not an override" -- and this names
+#: it in the finding, because a lint error that says only what is refused
+#: leaves the operator to guess. The `disabled: true` case already did this; the
+#: other three said nothing, and the shipped shadow rules told operators to
+#: "flip to enforce" with no supported way to do it.
+HARDEN_INSTEAD = "write your own rule with your own rule_id"
+
+
 def _apply_override(rule: Rule, override: RuleOverride, source: str) -> tuple[Rule, list[str]]:
     """Return the overridden rule plus the names of any hardening attempts."""
     hardening: list[str] = []
@@ -237,7 +246,9 @@ def _apply_override(rule: Rule, override: RuleOverride, source: str) -> tuple[Ru
 
     if override.verdict is not None:
         if _SOFTENING_ORDER[override.verdict] > _SOFTENING_ORDER[rule.verdict]:
-            hardening.append(f"verdict {rule.verdict.value} -> {override.verdict.value}")
+            hardening.append(
+                f"verdict {rule.verdict.value} -> {override.verdict.value} ({HARDEN_INSTEAD})"
+            )
         elif override.verdict is Decision.ALLOW:
             hardening.append("verdict -> ALLOW (use `disabled: true` with a reason)")
         else:
@@ -245,13 +256,13 @@ def _apply_override(rule: Rule, override: RuleOverride, source: str) -> tuple[Ru
 
     if override.mode is not None:
         if rule.mode is Mode.shadow and override.mode is Mode.enforce:
-            hardening.append("mode shadow -> enforce")
+            hardening.append(f"mode shadow -> enforce ({HARDEN_INSTEAD})")
         else:
             changes["mode"] = override.mode
 
     if override.applies_to is not None:
         if not override.applies_to.narrows(rule.applies_to):
-            hardening.append("applies_to widens the rule")
+            hardening.append(f"applies_to widens the rule ({HARDEN_INSTEAD})")
         else:
             changes["applies_to"] = override.applies_to
 
@@ -317,7 +328,14 @@ def load_bundle(
             findings.append(
                 LintFinding(
                     code="duplicate_rule_id",
-                    message=f"already defined in {rules[rule_id].source}",
+                    # Naming the remedy, because the commonest way to reach
+                    # this finding is copying a shipped rule in order to
+                    # change its `mode`, and the first definition wins
+                    # silently otherwise.
+                    message=(
+                        f"already defined in {rules[rule_id].source}; "
+                        f"{HARDEN_INSTEAD}, or use `override:` to soften this one"
+                    ),
                     rule_id=rule_id,
                     source=source,
                 )

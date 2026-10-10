@@ -68,7 +68,9 @@
   # Shadow, not enforce. A manifest listing `bash` makes the rest of the
   # manifest decorative -- but plenty of legitimate internal skills do exactly
   # that today, and a BLOCK here would be the first rule an operator turned
-  # off. Surfacing it is useful; tightening it is their call, not the pack's.
+  # off. Surfacing it is useful; tightening it is their call, not the pack's --
+  # made by writing their own rule, since an override may only soften
+  # (ADR-002.4, `docs/onboarding-shadow-to-enforce.md` stage 3).
   mode: shadow
   applies_to:
     kinds: [skill]
