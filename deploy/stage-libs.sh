@@ -7,8 +7,23 @@
 # rather than keep a list of Debian package names in a comment.
 set -eu
 
-STAGE=/stage/libs
+# The architecture's library directory, from the interpreter that is about to
+# be copied. Not hardcoded: `x86_64-linux-gnu` was, and the arm64 image was
+# therefore built with every library in a directory that architecture's loader
+# does not look in -- `python3.12: error while loading shared libraries:
+# libpython3.12.so.1.0`. Nothing caught it because the container test only ever
+# built for the host.
+MULTIARCH=$(python3.12 -c 'import sysconfig; print(sysconfig.get_config_var("MULTIARCH"))')
+test -n "$MULTIARCH"
+
+# Staged as a filesystem tree rather than a flat directory, so the Dockerfile
+# copies it to `/` and every file lands at its real path. The top level is
+# `usr`, which is a real directory in the distroless base -- unlike `/lib`,
+# which is a symlink to `usr/lib`, and a COPY through it replaces the symlink
+# with a directory the base image's ld.so.cache has never heard of.
+STAGE="/stage/root/usr/lib/$MULTIARCH"
 mkdir -p "$STAGE"
+echo "staging into /usr/lib/$MULTIARCH"
 
 # Every ELF object that will be in the runtime image: the interpreter, the
 # standard library's own extension modules in lib-dynload, and the compiled
@@ -56,4 +71,9 @@ while read -r lib; do
 	cp -L "$lib" "$STAGE/$(basename "$lib")"
 done < /tmp/extra
 
-echo "staged $(wc -l < /tmp/extra) libraries into $STAGE"
+# libpython is the one whose absence stops the interpreter before it can say
+# anything useful, so its presence is asserted by name rather than trusted to
+# the count.
+test -e "$STAGE/libpython3.12.so.1.0"
+
+echo "staged $(wc -l < /tmp/extra) libraries into /usr/lib/$MULTIARCH"

@@ -25,6 +25,7 @@ Skipped without a Docker daemon.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -35,6 +36,9 @@ REPO = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO / "deploy" / "Dockerfile"
 STAGE_SCRIPT = REPO / "deploy" / "stage-libs.sh"
 TAG = "qed-test:pytest"
+
+#: The architecture this machine is not. Release builds both.
+FOREIGN_PLATFORM = "linux/arm64" if platform.machine() in {"x86_64", "AMD64"} else "linux/amd64"
 
 
 def dockerfile() -> str:
@@ -116,6 +120,27 @@ class TestWhatTheDockerfileSays:
         assert "ldd" in script
         # It must fail rather than ship an image that cannot start.
         assert "test -s /tmp/extra" in script
+
+    def test_no_architecture_triplet_is_hardcoded(self) -> None:
+        """`x86_64-linux-gnu` was, and the arm64 image therefore put every
+        shared library in a directory that architecture's loader does not look
+        in -- `python3.12: error while loading shared libraries:
+        libpython3.12.so.1.0`. Nothing caught it because this file only ever
+        built for the host.
+        """
+        for path in (DOCKERFILE, STAGE_SCRIPT):
+            text = path.read_text(encoding="utf-8")
+            code = "\n".join(line for line in text.splitlines() if not line.strip().startswith("#"))
+            assert "x86_64-linux-gnu" not in code, (
+                f"{path.name} hardcodes an architecture; derive it from "
+                "`sysconfig.get_config_var('MULTIARCH')`"
+            )
+
+    def test_the_stage_script_asserts_libpython_is_there(self) -> None:
+        """The one library whose absence stops the interpreter before it can
+        say anything useful, so it is checked by name rather than trusted to
+        the count."""
+        assert "libpython3.12.so.1.0" in STAGE_SCRIPT.read_text(encoding="utf-8")
 
     def test_the_stage_script_has_unix_line_endings(self) -> None:
         """`sh` reads the carriage return as part of the argument: `set -eu\\r`
@@ -296,3 +321,105 @@ class TestTheImageActuallyRuns:
             load_jsonl(export.stdout), load_public_keys(state / PUBLIC_DIR_NAME)
         )
         assert report.ok, report.summary()
+
+
+def emulation_available() -> bool:
+    """Whether this machine can run a foreign architecture.
+
+    Docker Desktop ships QEMU; a bare Linux runner needs `binfmt` installed.
+    Without it the build still succeeds and the image cannot be started, which
+    is the half that matters here -- so the test skips rather than passing on
+    the easy half.
+    """
+    if not docker_available():
+        return False
+    probe = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            FOREIGN_PLATFORM,
+            "public.ecr.aws/docker/library/busybox:latest",
+            "true",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+@pytest.fixture(scope="module")
+def foreign_image(tmp_path_factory: pytest.TempPathFactory) -> str:
+    tag = "qed-test:foreign"
+    log = tmp_path_factory.mktemp("docker-foreign") / "build.log"
+    with log.open("wb") as sink:
+        build = subprocess.run(
+            [
+                "docker",
+                "buildx",
+                "build",
+                "--platform",
+                FOREIGN_PLATFORM,
+                "-f",
+                str(DOCKERFILE),
+                "-t",
+                tag,
+                "--load",
+                str(REPO),
+            ],
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    assert build.returncode == 0, log.read_text(encoding="utf-8", errors="replace")[-4000:]
+    return tag
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not emulation_available(), reason="no emulation for another architecture")
+class TestTheImageWorksOnTheOtherArchitecture:
+    """The gap that shipped: `/usr/lib/x86_64-linux-gnu` was hardcoded, so the
+    arm64 image put every shared library where that loader does not look and
+    could not start. The release workflow builds both architectures; this file
+    only ever built for the host, so nothing said so until a tag did.
+
+    One build and one start, under emulation. Slow -- minutes, not seconds --
+    which is why it is `slow` and why the assertion is "it runs" rather than
+    anything about performance.
+    """
+
+    def test_it_starts(self, foreign_image: str) -> None:
+        result = subprocess.run(
+            ["docker", "run", "--rm", "--platform", FOREIGN_PLATFORM, foreign_image, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Policy and evidence kernel" in result.stdout
+
+    def test_the_libraries_are_where_that_loader_looks(self, foreign_image: str) -> None:
+        """The specific failure, asserted specifically."""
+        result = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                FOREIGN_PLATFORM,
+                "--entrypoint",
+                "python3.12",
+                foreign_image,
+                "-c",
+                "import pathlib, sysconfig; "
+                "triplet = sysconfig.get_config_var('MULTIARCH'); "
+                "path = pathlib.Path('/usr/lib') / triplet / 'libpython3.12.so.1.0'; "
+                "assert path.exists(), f'{path} missing'; print(triplet)",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "linux-gnu" in result.stdout

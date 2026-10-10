@@ -80,15 +80,22 @@ LABEL org.opencontainers.image.title="Valqore QED" \
 
 # The interpreter, its standard library, the libraries both need, and qed.
 #
-# The library destination is /usr/lib/x86_64-linux-gnu and not the /lib/... the
-# builder resolves them from. On merged-/usr Debian, /lib is a symlink to
-# usr/lib, and a COPY through it replaces that symlink with a real directory
-# the base image's ld.so.cache has never heard of -- so every library would
-# land somewhere the loader does not look, and a distroless image has no
-# ldconfig to tell it otherwise.
+# The libraries arrive as a filesystem tree rooted at `usr`, so each lands at
+# its real `/usr/lib/<arch triplet>/` path. Two reasons it is shaped that way:
+#
+# the triplet differs by architecture -- it was hardcoded to
+# `x86_64-linux-gnu`, which meant the arm64 image put every library in a
+# directory that architecture's loader does not look in, and nothing caught it
+# because the container test only ever built for the host;
+#
+# and `/lib` cannot be copied through: on merged-/usr Debian it is a symlink to
+# `usr/lib`, and a COPY through it replaces the symlink with a real directory
+# the base image's ld.so.cache has never heard of -- so the files exist and the
+# loader still reports them missing, with no ldconfig in a distroless image to
+# tell it otherwise.
 COPY --from=staging /usr/local/bin/python3.12 /usr/local/bin/python3.12
 COPY --from=staging /usr/local/lib/python3.12 /usr/local/lib/python3.12
-COPY --from=staging /stage/libs/ /usr/lib/x86_64-linux-gnu/
+COPY --from=staging /stage/root/ /
 COPY --from=staging /install /usr/local
 
 ENV PATH=/usr/local/bin:/usr/bin:/bin \
