@@ -50,6 +50,13 @@ soc2             pack         9/9      partial  27
 
 Three deliberate refusals in that table.
 
+**A percentage is a share of a scope, and the scope prints with it.** Every
+catalogue declares what it covers, and `qed packs list` puts that sentence
+under the table -- for the complete ones most of all. `eu_ai_act 44.4%` reads
+as 44% of the Regulation; it is 4 of the 9 articles this catalogue covers, out
+of 113. A `complete` catalogue is complete **for its scope**, never for the
+whole standard.
+
 **A percentage needs a complete catalogue.** `soc2` is 9 of 9 and prints
 `partial`, not 100%. The nine are the Trust Services criteria this rule set maps
 to; they are not all of SOC 2. A percentage over a list somebody curated reads
@@ -126,7 +133,8 @@ nothing.
 1. The control must be in `qed/compliance/packs/<framework>.yaml`. If the
    framework's catalogue is `complete`, the control is already there; if it is
    `partial`, add it with a label and keep `scope` honest about what the file
-   still leaves out.
+   still leaves out. `scope` is required either way, because it is what a
+   reader needs beside the number.
 2. Add the `compliance:` entry to the rule.
 3. `qed policy lint` and `qed packs list` — the coverage moves, or the id is
    wrong.

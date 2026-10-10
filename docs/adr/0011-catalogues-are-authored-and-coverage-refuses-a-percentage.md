@@ -54,9 +54,13 @@ articles and the three OWASP Top 10s.
 The alternative — a percentage with a footnote — was rejected because the number
 is what gets copied into a slide and the footnote is not.
 
-A `partial` catalogue also has to say what it leaves out: `scope` is required,
-and it is the sentence an auditor needs, because absence from a partial
-catalogue means *not mapped* and never *not applicable*.
+`scope` is required on **every** pack, not only the partial ones, and
+`qed packs list` prints it beside the table. For a partial catalogue it says
+that absence means *not mapped* and never *not applicable*. For a complete one
+it says what the completeness is *of*: the EU AI Act pack prints 44.4%, which
+reads as a share of the Regulation and is 4 of the 9 articles this catalogue
+covers, out of 113. A number without its scope is the same overclaim as a
+percentage over a curated list, one level up.
 
 ## Decision 3 — An unmapped framework still ships a catalogue
 

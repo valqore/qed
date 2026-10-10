@@ -321,12 +321,31 @@ class TestLeadership:
     def test_a_dead_connection_releases_it(self, postgres: PostgresStore) -> None:
         """The reason the lock is session-scoped rather than a row in a table.
         A lease would need a heartbeat, a clock, and a decision about what to
-        do when the clock is wrong."""
+        do when the clock is wrong.
+
+        The release is **prompt, not synchronous**. `close()` sends a terminate
+        and returns; the server releases the session's advisory locks when it
+        reaps that backend, and the next `pg_try_advisory_lock` can arrive
+        first. This asserted the immediate retry and failed on CI while passing
+        on every local run -- a race in the test, but it names a real property
+        of the takeover: a crashed leader's lock frees up *shortly* after the
+        crash, which is why `qed/api/leader.py` retries on an interval instead
+        of once.
+        """
+        import time
+
         leader = PostgresStore(DSN)
         assert leader.try_become_leader() is True
         assert postgres.try_become_leader() is False
         leader.close()  # as a crashed replica's connection would
-        assert postgres.try_become_leader() is True
+
+        deadline = time.monotonic() + 10.0
+        while not postgres.try_become_leader():
+            assert time.monotonic() < deadline, (
+                "the lock was still held 10s after the leader's connection closed; "
+                "a crashed replica would have stalled the chain for at least that long"
+            )
+            time.sleep(0.05)
 
 
 class TestTheWholeDecisionPathRunsOnPostgres:

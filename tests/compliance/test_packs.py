@@ -84,11 +84,16 @@ class TestEveryPackIsWellFormed:
         assert len(ids) == len(set(ids)), item.framework
 
     @pytest.mark.parametrize("item", packs(), ids=lambda p: p.framework)
-    def test_a_partial_catalogue_says_what_it_leaves_out(self, item: Pack) -> None:
-        """`scope` is the sentence an auditor needs: absence from a partial
-        catalogue means "not mapped", not "not applicable"."""
-        if not item.complete:
-            assert item.scope, f"{item.framework} is partial and says nothing about scope"
+    def test_every_catalogue_says_what_it_covers(self, item: Pack) -> None:
+        """`scope` is the sentence an auditor needs, and **a complete catalogue
+        needs it too**.
+
+        For a partial one it says that absence means "not mapped" rather than
+        "not applicable". For a complete one it says what the completeness is
+        *of*: `eu_ai_act` prints a percentage, and 44.4% reads as a share of
+        the Regulation when it is a share of nine articles out of 113.
+        """
+        assert item.scope, f"{item.framework} says nothing about its scope"
 
     def test_the_edition_is_recorded_where_identifiers_depend_on_it(self) -> None:
         """`PR.AC-4` is a CSF 1.1 identifier and does not exist in 2.0, where
@@ -209,6 +214,11 @@ class TestCoverage:
         assert "Art. 9" in rows["eu_ai_act"].unmapped
         assert "Art. 14" not in rows["eu_ai_act"].unmapped
 
+    def test_the_scope_travels_with_the_row(self, rules) -> None:  # type: ignore[no-untyped-def]
+        rows = {row.framework: row for row in coverage(rules)}
+        assert "Chapter III Section 2" in rows["eu_ai_act"].scope
+        assert all(row.scope for row in rows.values())
+
     def test_the_depth_flag_comes_from_the_registry(self, rules) -> None:  # type: ignore[no-untyped-def]
         """SPEC §11's honesty flag: how deep the mapping goes, not how good."""
         rows = {row.framework: row for row in coverage(rules)}
@@ -275,6 +285,23 @@ class TestPacksList:
         assert result.exit_code == 0, result.output
         assert "not mapped" in result.output
         assert "Art. 9" in result.output
+
+    def test_a_percentage_never_appears_without_its_scope(self) -> None:
+        """The scope is the half a reader drops, so it prints with the number
+        instead of staying in a YAML file nobody opens."""
+        output = runner.invoke(app, ["packs", "list"]).output
+        assert "44.4%" in output
+        assert "Chapter III Section 2" in output
+        assert "complete for the scope" in output
+
+    def test_every_framework_scope_is_printed(self) -> None:
+        output = runner.invoke(app, ["packs", "list"]).output
+        for item in packs():
+            assert f"  {item.framework}:" in output, item.framework
+
+    def test_the_scope_is_in_the_json(self) -> None:
+        report = json.loads(runner.invoke(app, ["packs", "list", "--json"]).output)
+        assert all(item["scope"] for item in report["catalogues"])
 
     def test_the_table_explains_what_partial_means(self) -> None:
         """Otherwise a reader sees `partial` in a coverage column and assumes

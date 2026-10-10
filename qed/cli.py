@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
@@ -519,6 +520,21 @@ def packs_list(
             fg=colour,
         )
 
+    # Every percentage above is a share of a *scope*, and the scope is the half a
+    # reader drops. `eu_ai_act 44.4%` reads as 44% of the Regulation and is 4 of
+    # the 9 articles this catalogue covers, out of 113. So the scope prints with
+    # the number rather than staying in the YAML file nobody opens.
+    typer.echo("")
+    typer.echo("Each figure is a share of the catalogue's scope:")
+    for row in rows:
+        if not row.scope:
+            continue
+        scope = " ".join(row.scope.split())
+        wrapped = textwrap.wrap(scope, width=76, initial_indent="    ", subsequent_indent="    ")
+        typer.echo(f"  {row.framework}:")
+        for line in wrapped:
+            typer.echo(line)
+
     typer.echo("")
     for row in rows:
         if row.unmapped:
@@ -526,8 +542,9 @@ def packs_list(
     typer.echo("")
     typer.echo(
         "`partial` means the catalogue lists the controls this rule set maps to and not "
-        "the whole framework, so there is no honest percentage to print. `depth` is "
-        "SPEC 11's flag: how deep the mapping goes, not how good it is."
+        "the whole framework, so there is no honest percentage to print. A `complete` "
+        "catalogue is complete for the scope above it and not for the whole standard. "
+        "`depth` is SPEC 11's flag: how deep the mapping goes, not how good it is."
     )
 
 

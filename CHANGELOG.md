@@ -29,6 +29,11 @@ refuses to say:
   all of SOC 2. A percentage over a curated list reads as *complete* and is
   not. Only a `catalogue: complete` file gets a number: EU AI Act 44.4%, OWASP
   Agentic 70%, OWASP LLM 30%, OWASP MCP 10%.
+- **And a percentage never prints without its scope.** `eu_ai_act 44.4%` reads
+  as a share of the Regulation; it is 4 of the 9 articles this catalogue covers,
+  out of 113. Every pack states its scope, the coverage report prints it beside
+  the table, and a `complete` catalogue is complete *for that scope* and not for
+  the whole standard.
 - **An unmapped framework still gets a catalogue.** ISO 42001 is 0 of 8, with
   all eight clauses named. Omitting the file would have made it look like a
   framework nobody had considered; a visible zero is a gap somebody can close.
@@ -78,6 +83,19 @@ checkout were green, because the checkout has the files.
 
 The matcher is `PurePosixPath.match` now, which segments the way setuptools
 does, and removing the pattern fails ten tests by name instead of none.
+
+### Fixed - a leadership test raced the Postgres backend reaper
+
+`test_a_dead_connection_releases_it` closed the leader's connection and
+asserted the *immediate* retry took the lock. `close()` sends a terminate and
+returns; PostgreSQL releases that session's advisory locks when it reaps the
+backend, so the next `pg_try_advisory_lock` can arrive first. It passed on
+every local run and failed on CI.
+
+The race was in the test, but it names a real property of the takeover: a
+crashed leader's lock frees up *shortly* after the crash, not instantly, which
+is why `qed/api/leader.py` asks every tick rather than once. The test now waits
+up to ten seconds and says what a longer stall would mean.
 
 ### Fixed - `qed packs list` printed a section sign
 

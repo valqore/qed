@@ -125,6 +125,11 @@ class Coverage:
     unmapped: tuple[str, ...]
     #: Rules that map to this framework, by rule id.
     rules: tuple[str, ...]
+    #: What the catalogue covers, from the pack. It belongs in the coverage
+    #: report and not only in the YAML file, because `eu_ai_act 44.4%` reads as
+    #: a share of the whole Regulation and is a share of Chapter III Section 2
+    #: plus two articles. A complete catalogue is complete *for a scope*.
+    scope: str = ""
 
     @property
     def percentage(self) -> float | None:
@@ -150,6 +155,7 @@ class Coverage:
             "percentage": self.percentage,
             "unmapped": list(self.unmapped),
             "rules": len(self.rules),
+            "scope": self.scope,
         }
 
 
@@ -225,6 +231,7 @@ def coverage(rules: Iterable[Mappable]) -> list[Coverage]:
                 mapped=sum(1 for entry in item.controls if entry.id in hits),
                 unmapped=tuple(entry.id for entry in item.controls if entry.id not in hits),
                 rules=tuple(sorted({rid for ids in hits.values() for rid in ids})),
+                scope=item.scope,
             )
         )
     return out
