@@ -141,11 +141,22 @@ class TestTheRootDocumentsAreReachable:
 
         `mkdocs build --strict` would catch this anyway, which is why it is
         configured. This names it without a build.
+
+        Code spans and fenced blocks are stripped first. Without that, this
+        test flagged the `CHANGELOG.md` entry *explaining the rule*, which
+        quotes a bad link inside backticks as the example of what not to do --
+        a guard that cannot tell prose from an example of prose. The same
+        mistake in a different costume as the packaging guard written in
+        `fnmatch` while setuptools expands with `glob`.
         """
-        pattern = re.compile(r"\]\((?!https?://|#)([^)]+\.md[^)]*)\)")
+        fenced = re.compile(r"```.*?```", re.DOTALL)
+        inline = re.compile(r"`[^`\n]*`")
+        pattern = re.compile(r"\]\((?!https?://|#|mailto:)([^)]+\.md[^)]*)\)")
         offenders: list[str] = []
         for name in INCLUDED_FROM_ROOT:
-            for target in pattern.findall((ROOT / name).read_text(encoding="utf-8")):
+            prose = fenced.sub("", (ROOT / name).read_text(encoding="utf-8"))
+            prose = inline.sub("", prose)
+            for target in pattern.findall(prose):
                 offenders.append(f"{name} links relatively to {target}")
         assert not offenders, (
             "a relative link in a root document cannot resolve both on GitHub "

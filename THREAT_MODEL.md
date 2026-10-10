@@ -77,6 +77,7 @@ is the shape of the product.
 | A replayed signed request | Timestamp window (`api.max_clock_skew_seconds`, 300s) plus nonce | `qed/api/auth.py` |
 | An agent claims a human principal it does not have | Delegation token; `AG-IDN-001` blocks a proposal with no token | `qed/core/delegation/` |
 | A token from another issuer or audience | Issuer allow-list, `alg` fixed per issuer, audience checked | `qed/core/delegation/claims.py` |
+| A forged mandate authorises an unattended agent | The signature is verified against this instance's public keys before the mandate reaches the engine; an unknown `key_id` is a refusal, not a skip | `verify_session_mandate` in `qed/runtime.py`; `tests/delegation/test_mandate_is_verified_at_runtime.py` |
 | An approver approves as somebody else | **Not prevented on the CLI.** See limitation 2 | — |
 
 ### Tampering

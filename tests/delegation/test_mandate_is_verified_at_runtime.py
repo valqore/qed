@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -213,7 +214,7 @@ class TestEveryEntryPointGoesThroughIt:
     #: verifying it, each with the reason. Both hold no keys, and both are
     #: dry-runs that write nothing to the chain. Anything else added here needs
     #: an argument for why an unverified mandate is acceptable in it.
-    EXEMPT = {
+    EXEMPT: ClassVar[dict[str, str]] = {
         # `qed policy explain` takes no `--dir`, so there is no `public/`
         # directory to check against. It now prints a warning saying the
         # signature was not verified, which is the honest version: its JSON
