@@ -218,8 +218,37 @@ jobs:
           set -euo pipefail
           qed keys init --dir ci-qed
           qed check examples/proposals/prod-db-drop.json --dir ci-qed --json
+
+          # The example mandate is a *template*: unsigned, meant to be signed.
+          # This step used to pass it straight to `--mandate` and get a verdict,
+          # which it could only do because nothing verified the signature -- the
+          # bug `verify_session_mandate` fixes. Sign it first, which is also what
+          # an operator does.
+          qed mandate sign examples/mandates/sre-agent.json --dir ci-qed \
+            --out ci-mandate.json > /dev/null
           qed check examples/proposals/open-ingress.json --dir ci-qed --json \
-            --mandate examples/mandates/sre-agent.json
+            --mandate ci-mandate.json
+
+          # And a forged one must be refused. Asserted here as well as in
+          # `tests/delegation/test_mandate_is_verified_at_runtime.py`, because
+          # this step drives the *installed* console script rather than the
+          # source tree -- the distinction `docs/validation.md` is about.
+          python - <<'FORGE'
+          import json, pathlib
+          document = json.loads(pathlib.Path("ci-mandate.json").read_text())
+          document["signature"]["sig"] = "A" * 86
+          pathlib.Path("ci-mandate-forged.json").write_text(json.dumps(document))
+          FORGE
+          # Deliberately a proposal id nothing has decided yet. Reusing
+          # `open-ingress` here made this exit 1 for the wrong reason --
+          # DuplicateProposal, not the forgery -- which is the trap
+          # `docs/validation.md` calls "use a fresh proposal id each time".
+          if qed check examples/proposals/github-read.json --dir ci-qed --json \
+               --mandate ci-mandate-forged.json; then
+            echo "::error::a forged mandate was accepted"
+            exit 1
+          fi
+          echo "ok: the forged mandate was refused"
           qed check examples/proposals/github-read.json --dir ci-qed --json
           qed checkpoint --dir ci-qed --force
           qed export --dir ci-qed --out ci-chain.jsonl
