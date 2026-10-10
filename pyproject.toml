@@ -54,6 +54,10 @@ dev = [
     # (tests/oscal/). Test-only; SPEC 10.8 allows JSON Schema in place of
     # oscal-cli, which would add a JVM to CI.
     "jsonschema>=4.22",
+    # Week 10. SPEC 17 asks for "fuzz on parsers" and 20.3 already lists
+    # `hypothesis` in the dev/test set, so this is not a new dependency so much
+    # as the one that was reserved for it. `tests/test_fuzz_parsers.py`.
+    "hypothesis>=6.100",
 ]
 # SPEC 19, 20.4. The web pages are AGPL-3.0 and ship as their own wheel from
 # their own repository, so that a third party cannot offer a hosted

@@ -24,6 +24,8 @@ several replicas starting at the same moment.
 | An imported catalogue that stopped the kernel deciding | nothing had tested an import against the installed rules |
 | `policy_loaded` saying `unsigned: false` after an unsigned import | the policy hash does not change, so the record is never re-emitted |
 | `evidence.checkpoint.every_records` being ignored | the default matches the spec, so only a tuned value shows it |
+| A traceback from `qed policy lint` on a malformed rule file | every test fixture is valid YAML |
+| `UnicodeDecodeError` from a pack bundle with one stray byte | every test bundle was written by the test |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.

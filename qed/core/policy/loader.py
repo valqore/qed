@@ -70,16 +70,52 @@ def _yaml_files(paths: Sequence[Path]) -> list[Path]:
     return out
 
 
-def read_entries(paths: Sequence[Path]) -> list[tuple[str, dict[str, object]]]:
-    """Read every rule-ish mapping from the given files or directories.
+def read_entries(
+    paths: Sequence[Path],
+) -> tuple[list[tuple[str, dict[str, object]]], list[LintFinding]]:
+    """Read every rule-ish mapping, plus findings for the files that would not read.
 
     Files are visited in sorted order so that two runs over the same tree see
     the same sequence; rule resolution is order-independent regardless, and a
     golden test shuffles the order to prove it.
+
+    **A file that is not readable YAML is a finding, not an exception.** It used
+    to raise whatever `yaml` raised -- `ScannerError` for an unterminated
+    quote, `ReaderError` for a stray control character -- so `qed policy lint`,
+    the command whose entire job is to tell an operator what is wrong with
+    their rule file, answered with a traceback. Found by fuzzing the loader
+    with arbitrary text, which is the input it is actually given.
+
+    The same applies to a file that is not valid UTF-8: a rule file saved in
+    another encoding is an ordinary mistake with an ordinary answer.
     """
     entries: list[tuple[str, dict[str, object]]] = []
+    findings: list[LintFinding] = []
     for file in _yaml_files(paths):
-        data = yaml.safe_load(file.read_text(encoding="utf-8"))
+        try:
+            text = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            findings.append(
+                LintFinding(
+                    code="unreadable_file",
+                    message=f"cannot read this file as UTF-8 text: {exc}",
+                    source=file.name,
+                    severity="error",
+                )
+            )
+            continue
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            findings.append(
+                LintFinding(
+                    code="invalid_yaml",
+                    message=f"this file is not valid YAML: {_one_line(exc)}",
+                    source=file.name,
+                    severity="error",
+                )
+            )
+            continue
         if data is None:
             continue
         items: Iterable[object]
@@ -94,7 +130,18 @@ def read_entries(paths: Sequence[Path]) -> list[tuple[str, dict[str, object]]]:
         for item in items:
             if isinstance(item, dict):
                 entries.append((source, {str(k): v for k, v in item.items()}))
-    return entries
+    return entries, findings
+
+
+def _one_line(error: Exception) -> str:
+    """A yaml error's message, flattened.
+
+    `yaml` formats its errors across several lines with a caret under the
+    offending column, which is good in a terminal and wrong inside a
+    `LintFinding` -- those are printed one per line, and a multi-line message
+    breaks the alignment of every other finding in the report.
+    """
+    return " ".join(str(error).split())
 
 
 def _rule_hash_payload(rule: Rule) -> dict[str, object]:
@@ -229,7 +276,9 @@ def load_bundle(
     overrides: list[tuple[str, str, RuleOverride]] = []
     disables: list[tuple[str, str, str | None, str | None]] = []
 
-    for source, entry in read_entries(paths):
+    entries, read_findings = read_entries(paths)
+    findings.extend(read_findings)
+    for source, entry in entries:
         rule_id = entry.get("rule_id")
         if not isinstance(rule_id, str):
             findings.append(

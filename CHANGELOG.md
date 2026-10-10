@@ -58,6 +58,50 @@ careless action, none at all to a determined operator who lies about who they
 are. ADR-0014 and `docs/approvals.md` say so rather than leaving it to be
 discovered.
 
+### Added - fuzzing the parsers, and the two bugs it found (week 10)
+
+SPEC §17's "fuzz on parsers", with `hypothesis` -- already in §20.3's dev/test
+set, so the dependency was reserved for exactly this.
+
+Every test asserts the same property, and it is a security one rather than a
+correctness one: **a malformed input produces a refusal, never a crash.** A
+parser that raises something its caller does not expect turns a 400 into a 500,
+and a 500 on the decision path is an adapter in `fail: closed` blocking an
+agent's work because somebody else sent bad JSON. So each test names the
+exception the caller handles and asserts nothing else escapes -- "it did not
+crash" is too weak, because a `KeyError` instead of a `ValidationError` is still
+a crash to the route above it.
+
+Five targets: the JCS canonicaliser (which sits under every signature in the
+product), the proposal schema, the policy loader, the pack-bundle envelope, and
+the config loader. A test at the bottom asserts each is named, so a parser added
+later and not fuzzed is a visible omission.
+
+**It found two.**
+
+`load_bundle` raised whatever `yaml` raised -- `ScannerError` for an
+unterminated quote, `ReaderError` for a stray control character -- so
+`qed policy lint`, the command whose entire job is to say what is wrong with a
+rule file, answered with a traceback. Unreadable files are findings now:
+
+```
+ERROR [invalid_yaml] broken.yaml: this file is not valid YAML: while scanning
+a quoted scalar ... found unexpected end of stream
+```
+
+`load_bundle_file` decoded a pack bundle as UTF-8 *outside* its own try, so a
+single `` raised `UnicodeDecodeError` instead of `BundleRejected`. That one
+matters more than it looks: a bundle is the one input in this product that
+comes from a third party by design.
+
+**And three of the failures were my tests being wrong, which is worth
+recording.** `json.loads(canonicalize(x)) == x` is too strong: JCS (RFC 8785)
+serialises an integral double without a decimal point, so `6.0e16` comes back
+as an int. And two strategies generated integers at `2**53`, which `jcs.py`
+refuses on purpose -- a number two JSON parsers read differently is a payload
+hash two verifiers disagree about. The code was right in all three cases; the
+properties now say what they actually depend on.
+
 ### Added - rate limits on the API (week 10)
 
 SPEC §13: *"per adapter 100 proposals/s default; per principal 20/s. 429 with

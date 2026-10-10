@@ -220,6 +220,13 @@ def load_bundle_file(path: Path) -> Bundle:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise BundleRejected(f"cannot read {path}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        # Not an OSError, and it was outside this handler until fuzzing sent a
+        # single `\x80`. A bundle is a third party's file: a stray byte in one
+        # has to be a refusal with a sentence, not a traceback at the CLI.
+        raise BundleRejected(
+            f"{path} is not UTF-8 text, so it is not a pack bundle: {exc}"
+        ) from exc
     try:
         envelope = json.loads(text)
     except json.JSONDecodeError as exc:
