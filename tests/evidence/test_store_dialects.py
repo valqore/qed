@@ -221,3 +221,79 @@ class TestAskingForPostgresWithoutTheExtra:
         with pytest.raises(PostgresUnavailable) as caught:
             PostgresStore("postgresql://user:sup3rsecret@host/db")
         assert "sup3rsecret" not in str(caught.value)
+
+
+class TestAnUnreachableDatabaseIsAnErrorRatherThanAHang:
+    """libpq has no default `connect_timeout`.
+
+    Without one, a database that does not answer -- a wrong port, a security
+    group that drops rather than refuses, a server that went away -- waits on
+    the operating system's connect timeout. Measured at over a minute on
+    Windows with nothing listening, and that is how it was found: a test run
+    stalled with no output after the local Postgres container stopped, which
+    reads exactly like a wedged process rather than a database that is down.
+
+    `qed serve` and `qed doctor` both open the store, so the operator-visible
+    symptom was a command that printed nothing for a minute. An error in ten
+    seconds is strictly better: it names the cause.
+    """
+
+    @pytest.fixture
+    def captured(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        """`connect`'s keyword arguments, with `import psycopg` faked.
+
+        The import is inside `connect`, so `sys.modules` is the seam -- the
+        same one the install-hint tests above use. Through the `monkeypatch`
+        **fixture**, so pytest undoes it: a hand-rolled `MonkeyPatch()` here
+        would leave a fake `psycopg` in `sys.modules` for every test that ran
+        afterwards, and this file passing alone would prove nothing.
+        """
+        import sys as _sys
+
+        seen: dict[str, object] = {}
+
+        rows = type(_sys)("psycopg.rows")
+        rows.dict_row = object()  # type: ignore[attr-defined]
+
+        class FakePsycopg:
+            Error = RuntimeError
+
+            @staticmethod
+            def connect(dsn: str, **kwargs: object) -> object:
+                seen.update(kwargs)
+                return object()
+
+        monkeypatch.setitem(_sys.modules, "psycopg", FakePsycopg)
+        monkeypatch.setitem(_sys.modules, "psycopg.rows", rows)
+        return seen
+
+    def test_the_connect_timeout_is_set_when_the_dsn_is_silent(
+        self, captured: dict[str, object]
+    ) -> None:
+        from qed.infra.storage.postgres import CONNECT_TIMEOUT_S, connect
+
+        connect("postgresql://user:pass@host/db")
+        assert captured["connect_timeout"] == CONNECT_TIMEOUT_S
+
+    def test_a_dsn_that_sets_its_own_timeout_wins(self, captured: dict[str, object]) -> None:
+        """An operator who wrote a timeout meant it. A keyword argument here
+        would silently override what they put in the connection string."""
+        from qed.infra.storage.postgres import connect
+
+        connect("postgresql://user:pass@host/db?connect_timeout=45")
+        assert "connect_timeout" not in captured
+
+    def test_the_bound_is_long_enough_for_libpq_to_honour(self) -> None:
+        """libpq silently raises anything under two seconds to two, so a `1`
+        here would be a number that does not mean what it says."""
+        from qed.infra.storage.postgres import CONNECT_TIMEOUT_S
+
+        assert CONNECT_TIMEOUT_S >= 2
+
+    def test_the_fake_does_not_outlive_these_tests(self) -> None:
+        """The guard on the fixture above: if `psycopg` is installed it is the
+        real module here, and if it is not installed it is absent."""
+        import sys as _sys
+
+        module = _sys.modules.get("psycopg")
+        assert module is None or getattr(module, "__name__", "") == "psycopg"

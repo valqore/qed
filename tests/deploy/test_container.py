@@ -154,16 +154,30 @@ class TestWhatTheDockerfileSays:
 # --------------------------------------------------------------------------
 
 
+#: Every probe below runs at **import** time, which is collection time for the
+#: whole suite. An unbounded `subprocess.run` there is a suite that hangs
+#: instead of failing, with no test name to blame and nothing on stdout -- and
+#: it is `docker` being asked, so a busy daemon or a stalled pull is the
+#: ordinary case, not the exotic one. A probe that cannot answer in time is a
+#: probe that answers False.
+PROBE_TIMEOUT_S = 20
+PULL_TIMEOUT_S = 180
+
+
+def _probe(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str] | None:
+    """Run `argv`, or None if it could not answer within `timeout`."""
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"probe timed out after {timeout}s: {' '.join(argv)}")
+        return None
+
+
 def docker_available() -> bool:
     if shutil.which("docker") is None:
         return False
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{.ServerVersion}}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return probe.returncode == 0
+    probe = _probe(["docker", "info", "--format", "{{.ServerVersion}}"], PROBE_TIMEOUT_S)
+    return probe is not None and probe.returncode == 0
 
 
 @pytest.fixture(scope="module")
@@ -345,23 +359,18 @@ def emulation_available() -> bool:
     """
     if not docker_available():
         return False
-    pull = subprocess.run(
-        ["docker", "pull", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if pull.returncode != 0:
-        # Not an answer about emulation. Say so, and let `--require-emulation`
+    pull = _probe(["docker", "pull", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE], PULL_TIMEOUT_S)
+    if pull is None or pull.returncode != 0:
+        # Not an answer about emulation. Say so, and let `QED_REQUIRE_EMULATION`
         # decide whether a run that cannot tell is allowed to pass.
-        print(f"emulation probe could not pull {PROBE_IMAGE}: {pull.stderr.strip()[-500:]}")
+        detail = "timed out" if pull is None else pull.stderr.strip()[-500:]
+        print(f"emulation probe could not pull {PROBE_IMAGE}: {detail}")
         return False
-    probe = subprocess.run(
+    probe = _probe(
         ["docker", "run", "--rm", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE, "true"],
-        capture_output=True,
-        check=False,
+        PROBE_TIMEOUT_S,
     )
-    return probe.returncode == 0
+    return probe is not None and probe.returncode == 0
 
 
 @pytest.fixture(scope="module")

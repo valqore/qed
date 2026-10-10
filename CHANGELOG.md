@@ -6,6 +6,23 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.0] — 2026-10-10
+
+Week 8: control catalogues, so a control reference in a rule means something to
+the auditor who reads the export.
+
+**What this release does not contain** is the other half of SPEC §22's week 8:
+the auditor session, and the deepening of the EU AI Act and NIST AI RMF
+mappings that the session is supposed to steer. The *mechanism* is complete and
+the catalogues are honest about where the mapping is not: EU AI Act is 4 of 9
+articles with a stated reason for each of the other five, and the NIST AI RMF
+catalogue lists 5 subcategories of roughly seventy and is marked `partial` for
+exactly that reason. Moving those numbers by writing rules to cover more
+controls is the overclaim this entire release refuses, so they move after
+somebody who audits for a living has looked at it.
+
 ### Added - control catalogues, so a control reference means something
 
 A rule could always say `compliance: [{framework: eu_ai_act, control: "Art.
@@ -91,6 +108,24 @@ checkout were green, because the checkout has the files.
 The matcher is `PurePosixPath.match` now, which segments the way setuptools
 does, and removing the pattern fails ten tests by name instead of none.
 
+### Fixed - an unreachable PostgreSQL hung instead of erroring
+
+libpq has no default `connect_timeout`, and this never set one. A database that
+does not answer -- a wrong port, a security group that drops rather than
+refuses, a server that went away -- waited on the operating system's connect
+timeout instead: measured at **over a minute** on Windows with nothing
+listening.
+
+`qed serve` and `qed doctor` both open the store, so the operator-visible
+symptom was a command that printed nothing for a minute, which reads like a
+wedged process rather than a database that is down. Now `PostgresUnavailable`
+in ten seconds, naming the cause. A `connect_timeout=` already in the DSN wins:
+an operator who wrote one meant it.
+
+Found by accident, which is the only honest way to describe it: a test run
+stalled after the local Postgres container stopped, and chasing the stall
+found a real hang underneath it.
+
 ### Fixed - the arm64 tests could vanish from a green CI run
 
 The emulation probe ran `docker run --platform <foreign> busybox true` and read
@@ -104,6 +139,11 @@ The pull is now its own step, so a registry failure prints as one. And because
 that job installs the emulator itself, it sets `QED_REQUIRE_EMULATION=1`: the
 tests then run and fail by name rather than skipping, since a skip there is a
 green run with the test that caught the last arm64 bug not having run.
+
+Every probe in that file also has a timeout now. They run at import, which is
+collection time for the whole suite, and an unbounded `subprocess.run` there is
+a suite that hangs with no test name to blame -- and it is `docker` being
+asked, so a busy daemon is the ordinary case.
 
 While there: the job ran `pytest tests/deploy` twice, building the container
 twice for one result. Once now.

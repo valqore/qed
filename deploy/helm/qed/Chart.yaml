@@ -9,13 +9,13 @@ type: application
 
 # The chart's own version. Bumped on a template change even when the app is
 # unchanged, because that is what `helm diff` compares.
-version: 0.6.1
+version: 0.7.0
 
 # Tracks the qed release this chart was written against. Overridable with
 # `image.tag`, but the default is pinned: a chart whose default is `latest`
 # installs something different every week and makes the evidence chain's
 # `engine_version` unpredictable.
-appVersion: "0.6.1"
+appVersion: "0.7.0"
 
 home: https://github.com/valqore/qed
 sources:

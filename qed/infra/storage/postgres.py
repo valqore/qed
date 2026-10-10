@@ -25,6 +25,19 @@ from qed.infra.storage.store import Connection, SqlStore
 
 __all__ = ["PostgresStore", "PostgresUnavailable", "connect"]
 
+#: Seconds to wait for the TCP connection and the server's handshake, when the
+#: DSN does not say. libpq has **no default**: without this, a database that
+#: does not answer -- a wrong port, a security group that drops rather than
+#: refuses, a server that went away -- hangs on the operating system's connect
+#: timeout. That was measured at over a minute on Windows with nothing
+#: listening, and a `qed serve` or `qed doctor` that hangs for a minute with no
+#: output is worse than one that says it cannot reach the database: the operator
+#: has no way to tell it from a wedged process.
+#:
+#: libpq's minimum is 2 seconds and values below that are silently raised to it.
+#: An operator who needs longer puts `connect_timeout=` in the DSN, which wins.
+CONNECT_TIMEOUT_S: Final = 10
+
 #: What the API's readiness probe reports when Postgres was asked for and is
 #: not installed. Not a crash: an operator fixes this with one pip install.
 INSTALL_HINT: Final = (
@@ -51,6 +64,9 @@ def connect(dsn: str) -> Any:
     ``dict_row`` so a row answers to ``row["seq"]``, which is what
     ``sqlite3.Row`` already does and what all forty methods are written
     against.
+
+    ``connect_timeout`` so that an unreachable database is an error rather than
+    a hang. See :data:`CONNECT_TIMEOUT_S`.
     """
     try:
         import psycopg
@@ -58,8 +74,14 @@ def connect(dsn: str) -> Any:
     except ImportError as exc:
         raise PostgresUnavailable(INSTALL_HINT) from exc
 
+    # Only when the DSN is silent: an operator who wrote a timeout meant it,
+    # and a keyword argument here would override what they wrote.
+    options: dict[str, Any] = {}
+    if "connect_timeout" not in dsn:
+        options["connect_timeout"] = CONNECT_TIMEOUT_S
+
     try:
-        return psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
+        return psycopg.connect(dsn, autocommit=True, row_factory=dict_row, **options)
     except psycopg.Error as exc:
         # The DSN is not echoed: it carries a password, and this message ends
         # up in logs and in `qed doctor` output.
