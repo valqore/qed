@@ -480,6 +480,17 @@ jobs:
           # an unpinned release changes the renderer under them.
           version: v3.16.3
 
+      # binfmt, so the container tests can build and *start* the other
+      # architecture. Without it that test skips -- and skipping is how the
+      # arm64 image shipped broken: `/usr/lib/x86_64-linux-gnu` was hardcoded,
+      # every library landed where aarch64's loader does not look, and nothing
+      # noticed because the tests only ever built for the host. The emulated
+      # build costs a few minutes; a release that builds two architectures
+      # should test two.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Helm lint
         run: helm lint deploy/helm/qed --set signingKey.existingSecret=qed-signing-key
 
