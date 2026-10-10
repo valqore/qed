@@ -41,11 +41,14 @@ from qed.infra.keys.file import MissingSigningKey
 from qed.infra.siem import SiemShipper
 from qed.infra.tokens import TokenIssuer, load_or_create_token_key
 from qed.runtime import PolicyErrors, open_session
+from qed.version import VERSION
 
 __all__ = ["API_VERSION", "create_app"]
 
 API_TITLE = "qed"
-API_VERSION = "0.1.0"
+#: The OpenAPI document's version, which is the product's. `/v1` is the API
+#: *path* and is versioned separately, by being in the path.
+API_VERSION = VERSION
 
 
 def create_app(

@@ -26,8 +26,12 @@ from pydantic import (
     PlainSerializer,
 )
 
+from qed.version import VERSION
+
 SCHEMA_VERSION = "1.0"
-ENGINE_VERSION = "0.1.0"
+#: Goes into every verdict. An auditor asking which engine decided a record
+#: reads this, so it has to be the release and not a literal nobody bumped.
+ENGINE_VERSION = VERSION
 
 # --------------------------------------------------------------------------
 # Timestamps

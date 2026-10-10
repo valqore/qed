@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valqore-qed"
-version = "0.1.0"
+version = "0.6.0"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
 requires-python = ">=3.12"
 # SPEC 25.1. An SPDX expression, not the old `{text = ...}` table: setuptools

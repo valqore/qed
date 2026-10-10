@@ -16,10 +16,10 @@
 # builder along with its library closure, computed rather than guessed.
 #
 # Build:
-#   docker build -f deploy/Dockerfile -t ghcr.io/valqore/qed:0.5.0 .
+#   docker build -f deploy/Dockerfile -t ghcr.io/valqore/qed:0.6.0 .
 # Run:
 #   docker run --rm -p 8710:8710 -v qed-state:/var/lib/qed \
-#     ghcr.io/valqore/qed:0.5.0 serve --dir /var/lib/qed --host 0.0.0.0
+#     ghcr.io/valqore/qed:0.6.0 serve --dir /var/lib/qed --host 0.0.0.0
 #
 # `qed keys init --dir /var/lib/qed` has to run once against the volume
 # first. The image deliberately does not create a key on start: a key generated
@@ -74,7 +74,7 @@ FROM gcr.io/distroless/base-debian12:nonroot AS runtime
 LABEL org.opencontainers.image.title="Valqore QED" \
       org.opencontainers.image.description="Policy and evidence kernel for AI-agent actions" \
       org.opencontainers.image.source="https://github.com/valqore/qed" \
-      org.opencontainers.image.version="0.5.0" \
+      org.opencontainers.image.version="0.6.0" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.vendor="Valqore"
 

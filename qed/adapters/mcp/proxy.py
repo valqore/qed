@@ -56,6 +56,7 @@ from qed.core.schemas import (
 )
 from qed.infra.secrets.broker import CredentialBroker
 from qed.runtime import CheckOutcome, Session, check_proposal
+from qed.version import VERSION
 
 __all__ = [
     "ADAPTER_NAME",
@@ -67,7 +68,7 @@ __all__ = [
 
 logger = logging.getLogger("qed.adapters.mcp")
 
-ADAPTER_NAME: Final = "mcp-proxy/0.1.0"
+ADAPTER_NAME: Final = f"mcp-proxy/{VERSION}"
 
 #: Appended to the upstream's ``instructions`` so a capable client can tell its
 #: model why a call might come back refused. Deliberately short; it lands in the
@@ -652,7 +653,7 @@ async def _connect(
 
 
 def _client_info() -> mcp_types.Implementation:
-    return mcp_types.Implementation(name="qed-mcp-proxy", version="0.1.0")
+    return mcp_types.Implementation(name="qed-mcp-proxy", version=VERSION)
 
 
 def _build_server(proxy: _Proxy, client: ClientSession) -> Server[object]:

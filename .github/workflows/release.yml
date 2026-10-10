@@ -1,0 +1,477 @@
+name: Release
+
+# Builds, signs and attaches everything a release is made of, from a `v*` tag.
+#
+# **Publishing is off until somebody turns it on.** SPEC §24.1's name
+# reservations -- PyPI `valqore-qed` and `qed-verify`, the GHCR path, the
+# Homebrew tap -- are not done, and publishing is the irreversible step: a
+# wheel on PyPI cannot be unpublished and reused, and an image pushed under a
+# name somebody else later owns is a mess. So every job here runs on every tag
+# and produces every artifact, and the three steps that *push* are each gated
+# on a repository variable:
+#
+#   PUBLISH_GHCR=true   -> push the image, sign it, push the Helm chart
+#   PUBLISH_PYPI=true   -> publish both wheels via trusted publishing
+#
+# Settings -> Secrets and variables -> Actions -> Variables. Until then a tag
+# still gets a verified build, an SBOM, a signed-off test run and a GitHub
+# Release with the wheels and the chart attached -- which is what proves the
+# pipeline before it is pointed at the world.
+#
+# One-time, before the first publish: make the GHCR package public (Packages ->
+# qed -> Package settings -> Change visibility), and add PyPI trusted
+# publishers for both projects.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to build, without the leading v (e.g. 0.6.0)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/valqore/qed
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The tag and the source have to agree before anything is built. This is the
+  # guard rail for a mistake already made once on the engine: tagging before
+  # bumping, which produces a release whose artifacts all report the previous
+  # version and cannot be corrected without deleting the tag.
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Resolve the version
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.tag }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "building $version"
+
+      - name: The tag must match the source
+        run: |
+          set -euo pipefail
+          declared=$(python -c "import re,pathlib; print(re.search(r'VERSION: Final = \"([^\"]+)\"', pathlib.Path('qed/version.py').read_text()).group(1))")
+          if [ "$declared" != "${{ steps.resolve.outputs.version }}" ]; then
+            echo "::error::qed/version.py says $declared, the tag says ${{ steps.resolve.outputs.version }}."
+            echo "::error::Bump qed/version.py (and let tests/test_version.py check the rest) BEFORE tagging."
+            echo "::error::A release whose artifacts report the previous version cannot be fixed without deleting the tag."
+            exit 1
+          fi
+          echo "ok: $declared"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" -e packages/qed-verify
+
+      # Every version literal in the repo, including the ones Python cannot
+      # import: the chart's appVersion, the Dockerfile label, the docs.
+      - name: Every stated version agrees
+        run: pytest tests/test_version.py -q
+
+      - name: Lint, types, tests
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy
+          pytest -q -m "not slow and not perf"
+
+  # ---------------------------------------------------------------------------
+  wheels:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build both distributions
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          # Two projects from one tag: the kernel and the standalone verifier.
+          # `qed-verify` is the one an auditor runs, and it is a separate
+          # distribution precisely so they can install it without installing
+          # the thing it is checking.
+          python -m build --outdir dist .
+          python -m build --outdir dist packages/qed-verify
+
+      - name: The wheel contains the data files it reads
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install dist/valqore_qed-*.whl
+          # The failure this catches shipped once: a wheel missing
+          # `compliance/frameworks.yaml` started, bound its port and died on
+          # the first request. Importing from the installed package, with the
+          # source tree out of the way, is the only way to see it.
+          cd "$(mktemp -d)"
+          python - <<'PY'
+          import pathlib
+
+          from qed.compliance.loader import frameworks
+          from qed.core.policy.loader import baseline_pack_dir
+
+          assert frameworks(), "frameworks.yaml is not in the wheel"
+          packs = list(pathlib.Path(baseline_pack_dir()).glob("*.yaml"))
+          assert packs, "the baseline policy pack is not in the wheel"
+          print(f"ok: {len(frameworks())} frameworks, {len(packs)} pack files")
+          PY
+
+      # Two artifacts, because PyPI's trusted publishing is scoped per project
+      # and an upload carrying the other project's files is rejected.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-qed
+          path: dist/valqore_qed-*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-qed-verify
+          path: dist/qed_verify-*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Each arch on its own runner. No QEMU: the builder stage compiles nothing,
+  # but emulating an arm64 pip install still costs minutes for no benefit when
+  # a native runner is free.
+  image:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: vars.PUBLISH_GHCR == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two steps rather than one with a conditional `outputs:`, because the
+      # two cases want different things: a local image to start, or an
+      # untagged push by digest for the manifest list to merge. A ternary in
+      # YAML that produced an empty `tags:` was the first version of this and
+      # it was not obvious why it failed.
+      - name: Build and load, for a tag that publishes nothing
+        id: local
+        if: vars.PUBLISH_GHCR != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          load: true
+          build-args: |
+            BUILDER_IMAGE=public.ecr.aws/docker/library/python:3.12-slim-bookworm
+          tags: ${{ env.IMAGE }}:${{ needs.verify.outputs.version }}
+
+      - name: Build and push by digest
+        id: build
+        if: vars.PUBLISH_GHCR == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          build-args: |
+            BUILDER_IMAGE=public.ecr.aws/docker/library/python:3.12-slim-bookworm
+          # oci-mediatypes so the merge step can build an OCI *index*: a Docker
+          # manifest list cannot carry the index-level source annotation
+          # GitHub's package-to-repo linker reads.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
+
+      - name: It runs
+        if: vars.PUBLISH_GHCR != 'true'
+        # The static Dockerfile assertions passed once on an image that could
+        # not import pydantic, so the image is started here rather than only
+        # inspected. `load: true` puts it in the local daemon, and each runner
+        # is its own architecture, so this is a native run.
+
+        run: |
+          set -euo pipefail
+          docker run --rm "${IMAGE}:${{ needs.verify.outputs.version }}" --help | head -3
+          docker run --rm --entrypoint python3.12 "${IMAGE}:${{ needs.verify.outputs.version }}" -c \
+            "import qed, psycopg, pydantic, fastapi, uvicorn, cryptography, yaml, sqlite3, httpx, qed_verify; print('imports ok')"
+
+      - name: Export the digest
+        if: vars.PUBLISH_GHCR == 'true'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: vars.PUBLISH_GHCR == 'true'
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # One manifest list, signed, with an SBOM attested against it. Skipped
+  # entirely until PUBLISH_GHCR is on, because there is nothing pushed to sign.
+  sign:
+    needs: [verify, image]
+    if: vars.PUBLISH_GHCR == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless cosign: OIDC -> Fulcio
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the manifest list
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          # The index-level annotation is what GitHub's package->repo linker
+          # reads; without it the package stays linked to whichever repo first
+          # published it.
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=https://github.com/valqore/qed" \
+            --annotation "index:org.opencontainers.image.description=Policy and evidence kernel for AI-agent actions. Apache-2.0." \
+            -t "${IMAGE}:${{ needs.verify.outputs.version }}" \
+            -t "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: Resolve the list digest
+        id: digest
+        run: |
+          echo "digest=$(docker buildx imagetools inspect ${IMAGE}:${{ needs.verify.outputs.version }} --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign, keyless
+        run: cosign sign --yes "${IMAGE}@${{ steps.digest.outputs.digest }}"
+
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}:${{ needs.verify.outputs.version }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attest the SBOM
+        run: cosign attest --yes --predicate sbom.spdx.json --type spdxjson "${IMAGE}@${{ steps.digest.outputs.digest }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  # ---------------------------------------------------------------------------
+  chart:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Lint and package
+        run: |
+          set -euo pipefail
+          helm lint deploy/helm/qed --set signingKey.existingSecret=qed-signing-key
+          helm package deploy/helm/qed -d chart
+          ls chart/*.tgz
+
+      - name: Push to the OCI registry
+        if: vars.PUBLISH_GHCR == 'true'
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push chart/qed-${{ needs.verify.outputs.version }}.tgz oci://ghcr.io/valqore/charts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chart
+          path: chart/*.tgz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  pypi:
+    needs: [verify, wheels]
+    if: vars.PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # trusted publishing; no API token to leak
+    steps:
+      # Two uploads, each from its own directory. Trusted publishing is scoped
+      # per project, so a single call carrying both projects' files is
+      # rejected -- and a rejection halfway through is a release where one of
+      # the two is public and the other is not.
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-qed
+          path: dist-qed
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-qed-verify
+          path: dist-qed-verify
+
+      - name: valqore-qed
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-qed
+
+      - name: qed-verify
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-qed-verify
+
+  # ---------------------------------------------------------------------------
+  # Always. A release with the artifacts attached is useful even when nothing
+  # is published anywhere: it is how somebody installs this today.
+  release:
+    needs: [verify, wheels, chart]
+    if: always() && needs.wheels.result == 'success' && needs.chart.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # The changelog section for this version, which says *why* rather than
+      # listing commits. It has to be the versioned section and not
+      # `[Unreleased]`: a release built from `[Unreleased]` ships notes that
+      # change the next time anybody edits the file, and the entries for the
+      # release are then filed under a heading that says they are not in one.
+      - name: Notes from the changelog
+        id: notes
+        run: |
+          set -euo pipefail
+          python - <<'PY' > notes.md
+          import pathlib
+          import re
+          import sys
+
+          version = "${{ needs.verify.outputs.version }}"
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+          match = re.search(
+              rf"^## \[{re.escape(version)}\].*?$(.*?)(?=^## |\Z)",
+              text,
+              re.MULTILINE | re.DOTALL,
+          )
+          if match is None:
+              print(
+                  f"::error::CHANGELOG.md has no `## [{version}]` section. "
+                  "Move the `[Unreleased]` entries under it before tagging -- "
+                  "notes built from `[Unreleased]` change the next time anybody "
+                  "edits the file.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          body = match.group(1).strip()
+
+          # GitHub accepts 125,000 characters. Cut at a heading rather than
+          # mid-sentence, and say so, because a release note that stops in the
+          # middle of a word reads as a broken pipeline.
+          LIMIT = 100_000
+          if len(body) > LIMIT:
+              cut = body.rfind("\n###", 0, LIMIT)
+              body = body[: cut if cut > 0 else LIMIT].rstrip()
+              body += "\n\n---\n\nTruncated. The full entry is in `CHANGELOG.md`."
+          print(body)
+          PY
+          echo "notes: $(wc -c < notes.md) bytes"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="v${{ needs.verify.outputs.version }}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file notes.md \
+            --prerelease \
+            artifacts/* || gh release upload "$tag" artifacts/* --clobber
+
+      - name: Summary
+        run: |
+          {
+            echo "### qed ${{ needs.verify.outputs.version }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| wheels | attached to the release |"
+            echo "| helm chart | attached to the release |"
+            echo "| image published | \`${{ vars.PUBLISH_GHCR == 'true' }}\` |"
+            echo "| wheels published to PyPI | \`${{ vars.PUBLISH_PYPI == 'true' }}\` |"
+            echo
+            if [ "${{ vars.PUBLISH_GHCR }}" != "true" ]; then
+              echo "Publishing is off. The image was built and started but not pushed;"
+              echo "set the \`PUBLISH_GHCR\` repository variable to \`true\` once the GHCR"
+              echo "name is reserved and the package has been made public."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

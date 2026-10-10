@@ -77,6 +77,7 @@ from qed.core.schemas import (
 )
 from qed.infra.secrets.broker import Brokerage, CredentialBroker
 from qed.runtime import CheckOutcome, Session, check_proposal
+from qed.version import VERSION
 
 __all__ = [
     "ADAPTER_NAME",
@@ -90,7 +91,7 @@ __all__ = [
 
 logger = logging.getLogger("qed.adapters.http")
 
-ADAPTER_NAME: Final = "http-proxy/0.1.0"
+ADAPTER_NAME: Final = f"http-proxy/{VERSION}"
 
 FailMode = Literal["closed", "open"]
 

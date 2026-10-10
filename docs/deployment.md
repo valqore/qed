@@ -49,11 +49,11 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
 ## The container
 
 ```bash
-docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:0.5.0 \
+docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:0.6.0 \
   keys init --dir /var/lib/qed
 
 docker run --rm -p 8710:8710 -v qed-state:/var/lib/qed \
-  ghcr.io/valqore/qed:0.5.0
+  ghcr.io/valqore/qed:0.6.0
 ```
 
 Distroless and non-root (SPEC §20.4): no shell, no package manager, no pip. A
@@ -183,3 +183,42 @@ Before anything irreversible, export:
 qed export --dir /var/lib/qed > chain-$(date +%F).jsonl
 qed-verify chain-$(date +%F).jsonl --keys /var/lib/qed/public
 ```
+
+## Releasing
+
+`.github/workflows/release.yml`, on a `v*` tag.
+
+**Publishing is off until somebody turns it on.** SPEC §24.1's name
+reservations — PyPI `valqore-qed` and `qed-verify`, the GHCR path, the Homebrew
+tap — are not done, and publishing is the irreversible step: a version on PyPI
+cannot be unpublished and reused, and an image pushed under a name somebody
+else later owns is a mess to undo.
+
+So a tag today produces the whole release and pushes none of it: the version
+gate, the full test suite, both wheels (checked for the data files they read at
+runtime), the container built *and started* on both architectures, the Helm
+chart linted and packaged, and a GitHub Release with all of it attached. Two
+repository variables turn the rest on:
+
+| Variable | What it enables |
+|---|---|
+| `PUBLISH_GHCR=true` | push the multi-arch image, cosign keyless signature, SBOM attestation, Helm chart to `oci://ghcr.io/valqore/charts` |
+| `PUBLISH_PYPI=true` | publish both wheels via trusted publishing |
+
+Settings → Secrets and variables → Actions → Variables.
+
+### Bump before you tag
+
+```bash
+# qed/version.py is the only literal; everything else is checked against it
+vim qed/version.py            # VERSION = "0.7.0"
+pytest tests/test_version.py  # the chart, the Dockerfile label, the docs
+# move the [Unreleased] entries under `## [0.7.0] — <date>` in CHANGELOG.md
+git commit -am "release: 0.7.0" && git tag v0.7.0 && git push --tags
+```
+
+The workflow refuses a tag that disagrees with `qed/version.py`, and refuses
+one with no matching `## [x.y.z]` changelog section. Both are guard rails for
+mistakes already made: a release whose artifacts all report the previous
+version cannot be fixed without deleting the tag, and notes built from
+`[Unreleased]` change the next time anybody edits the file.

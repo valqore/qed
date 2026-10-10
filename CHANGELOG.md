@@ -6,6 +6,16 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.6.0] — 2026-10-09
+
+Weeks 2–7 of the SPEC §22 build order. Everything below accumulated under
+`[Unreleased]` across six weeks and had never been cut: `v0.1.0` was the last
+tag, so the versions the exit criteria name (`v0.2.0` … `v0.6.0`) do not exist
+as releases. This is all of them, under the version week 7 asked for, rather
+than five tags invented after the fact for commits that were never shipped.
+
 ### Added - key rotation (SPEC 10.5, week 7)
 
 `qed keys rotate`. The rule it implements has been in `qed-verify` since week 1

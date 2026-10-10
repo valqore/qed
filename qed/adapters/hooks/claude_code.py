@@ -58,6 +58,7 @@ from qed.core.schemas import (
     Mode,
 )
 from qed.runtime import CheckOutcome, Session, check_proposal
+from qed.version import VERSION
 
 __all__ = [
     "ADAPTER_NAME",
@@ -75,7 +76,7 @@ __all__ = [
 
 logger = logging.getLogger("qed.adapters.hooks.claude_code")
 
-ADAPTER_NAME: Final = "claude-code-hook/0.1.0"
+ADAPTER_NAME: Final = f"claude-code-hook/{VERSION}"
 
 #: Exit 0 leaves the normal permission flow alone. Exit 2 is the only exit the
 #: hook contract treats as blocking; every other non-zero code is a
