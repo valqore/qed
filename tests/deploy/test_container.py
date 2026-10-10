@@ -342,8 +342,8 @@ class TestTheImageActuallyRuns:
 PROBE_IMAGE = "public.ecr.aws/docker/library/busybox:latest"
 
 
-def emulation_available() -> bool:
-    """Whether this machine can run a foreign architecture.
+def emulation_available() -> tuple[bool, str]:
+    """Whether this machine can run a foreign architecture, and why not.
 
     Docker Desktop ships QEMU; a bare Linux runner needs `binfmt` installed.
     Without it the build still succeeds and the image cannot be started, which
@@ -356,21 +356,36 @@ def emulation_available() -> bool:
     a CI run on a workflow that had installed the emulator a step earlier. A
     skip that is really a transient failure is the worst outcome available: it
     is a green run with the test that caught the last arm64 bug not having run.
+
+    **It returns the reason rather than printing it.** The first version
+    printed, and a failing CI run then said "the probe printed which" with no
+    probe output anywhere in the log: this runs at import, which is collection
+    time, and pytest discards module-level stdout under `-q`. A guard that
+    reports its symptom and not its cause is half a guard, and the half it
+    keeps is the one that cannot be acted on.
     """
     if not docker_available():
-        return False
+        return False, "no Docker daemon answered `docker info`"
+
     pull = _probe(["docker", "pull", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE], PULL_TIMEOUT_S)
-    if pull is None or pull.returncode != 0:
-        # Not an answer about emulation. Say so, and let `QED_REQUIRE_EMULATION`
-        # decide whether a run that cannot tell is allowed to pass.
-        detail = "timed out" if pull is None else pull.stderr.strip()[-500:]
-        print(f"emulation probe could not pull {PROBE_IMAGE}: {detail}")
-        return False
+    if pull is None:
+        return False, f"`docker pull {PROBE_IMAGE}` timed out after {PULL_TIMEOUT_S}s"
+    if pull.returncode != 0:
+        # Not an answer about emulation at all: the registry did not cooperate.
+        return False, f"could not pull {PROBE_IMAGE}: {pull.stderr.strip()[-400:]}"
+
     probe = _probe(
         ["docker", "run", "--rm", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE, "true"],
         PROBE_TIMEOUT_S,
     )
-    return probe is not None and probe.returncode == 0
+    if probe is None:
+        return False, f"starting a {FOREIGN_PLATFORM} image timed out after {PROBE_TIMEOUT_S}s"
+    if probe.returncode != 0:
+        return False, (
+            f"a {FOREIGN_PLATFORM} image would not start, which is what a missing or "
+            f"broken binfmt looks like: {probe.stderr.strip()[-400:]}"
+        )
+    return True, ""
 
 
 @pytest.fixture(scope="module")
@@ -406,11 +421,46 @@ def foreign_image(tmp_path_factory: pytest.TempPathFactory) -> str:
 REQUIRE_EMULATION = os.environ.get("QED_REQUIRE_EMULATION") == "1"
 
 
-#: Asked once. Where emulation is *required* the tests run anyway and fail with
-#: Docker's own output, which says more than any message composed here -- and a
-#: `pytest.fail` during collection would be a collection error rather than a
-#: named failing test.
-NO_EMULATION = not emulation_available()
+#: Asked once, with the reason kept for the failure message. A `pytest.fail`
+#: during collection would be a collection error rather than a named failing
+#: test, so the verdict is carried instead of raised.
+_HAS_EMULATION, EMULATION_REASON = emulation_available()
+NO_EMULATION = not _HAS_EMULATION
+
+
+class TestTheProbeSaysWhy:
+    """Runs everywhere, including where emulation is absent.
+
+    The class below is skipped on a laptop with no binfmt, so the thing that
+    would catch a probe reporting no reason is skipped exactly when it matters.
+    This is not -- and it does not skip in the other direction either: the
+    `deploy` job fails on *any* skip in this directory, so a test that skipped
+    when emulation works would turn a healthy runner red.
+    """
+
+    def test_the_verdict_and_its_reason_agree(self) -> None:
+        """A no must say why, and name which half failed.
+
+        Otherwise the failure message reads "The probe says: " and whoever is
+        reading CI has to reproduce the environment to find out why -- which
+        was the actual outcome of the first version, which printed the reason
+        at collection time where `-q` discards it.
+
+        "The registry did not answer" and "there is no emulator" are different
+        problems with different fixes, so the reason has to separate them.
+        """
+        if not NO_EMULATION:
+            assert EMULATION_REASON == "", "a yes should carry no reason"
+            return
+
+        assert EMULATION_REASON.strip(), (
+            "the probe said no and gave no reason, which is the bug this pair of "
+            "values exists to prevent"
+        )
+        lowered = EMULATION_REASON.lower()
+        assert any(word in lowered for word in ("pull", "binfmt", "docker daemon", "timed out")), (
+            EMULATION_REASON
+        )
 
 
 @pytest.mark.slow
@@ -431,14 +481,18 @@ class TestTheImageWorksOnTheOtherArchitecture:
 
     def test_the_emulator_is_actually_here(self) -> None:
         """First in the class, so a missing emulator is named rather than
-        showing up as a confusing build failure three minutes later."""
+        showing up as a confusing build failure three minutes later.
+
+        The reason is in the message because it has to be: it is gathered at
+        collection time, and nothing printed then survives `-q`.
+        """
         assert not NO_EMULATION, (
-            f"QED_REQUIRE_EMULATION=1 and this machine cannot start a "
-            f"{FOREIGN_PLATFORM} image. The job installed the emulator, so this is "
-            "a broken binfmt setup or a registry that did not answer -- the probe "
-            "printed which. These tests are not skipped here, because a skip would "
-            "be a green run with the test that caught the last arm64 bug not having "
-            "run."
+            f"QED_REQUIRE_EMULATION=1 and this machine cannot run {FOREIGN_PLATFORM}. "
+            f"The probe says: {EMULATION_REASON}\n"
+            "The job installs the emulator a step earlier, so this is either a broken "
+            "binfmt setup or a registry that did not answer -- and the sentence above "
+            "says which. These tests are not skipped here, because a skip would be a "
+            "green run with the test that caught the last arm64 bug not having run."
         )
 
     def test_it_starts(self, foreign_image: str) -> None:

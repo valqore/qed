@@ -472,6 +472,7 @@ def _write_evidence_artifact(session: Session, path: Path, *, as_json: bool) -> 
 
 @packs_app.command("list")
 def packs_list(
+    directory: DirOption = DEFAULT_DIR,
     policy: PolicyOption = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
     include_baseline: Annotated[
@@ -486,7 +487,12 @@ def packs_list(
     of the controls somebody chose to list, a percentage reads as complete and
     is not.
     """
-    from qed.compliance.packs import coverage, packs
+    from qed.compliance.packs import coverage, packs, use_imported
+    from qed.remote.packs import installed_dir
+
+    # Same as a session: an imported catalogue replaces a shipped one, and this
+    # report is where somebody looks to find out whether one has.
+    use_imported(installed_dir(directory))
 
     paths = list(policy or [])
     if include_baseline:
@@ -560,23 +566,203 @@ def packs_list(
     )
 
 
+@packs_app.command("verify")
+def packs_verify(
+    path: Annotated[Path, typer.Argument(help="A pack bundle.")],
+    public_key: Annotated[
+        Path | None,
+        typer.Option("--public-key", help="PEM public key of the publisher's pack key."),
+    ] = None,
+) -> None:
+    """Show what a bundle contains, and whether it verifies. Installs nothing.
+
+    Separate from `import` on purpose: whether to trust a catalogue is a
+    decision somebody should make with the contents in front of them, and a
+    command that showed you the contents by installing them would not be
+    giving you the choice.
+    """
+    from qed.remote.packs import BundleRejected, load_bundle_file, load_public_key, verify
+
+    try:
+        bundle = load_bundle_file(path)
+    except BundleRejected as exc:
+        _fail(str(exc))
+        return
+
+    typer.echo(f"issuer     : {bundle.issuer}")
+    typer.echo(f"issued at  : {bundle.issued_at}")
+    typer.echo(f"bundle hash: {bundle.bundle_hash}")
+    typer.echo(f"key id     : {bundle.key_id or '(none: unsigned)'}")
+    for item in bundle.packs:
+        mark = "complete" if item.complete else "partial"
+        typer.echo(f"  {item.framework:<16} {len(item.controls):>3} controls  {mark}")
+
+    if public_key is None:
+        typer.secho(
+            "not verified: no --public-key given. A bundle names the key that signed "
+            "it, which proves nothing on its own -- get the public key from the "
+            "publisher, by some route other than the bundle.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    try:
+        verify(bundle, load_public_key(public_key))
+    except BundleRejected as exc:
+        _fail(str(exc))
+        return
+    typer.secho(f"signature verifies under {bundle.key_id}", fg=typer.colors.GREEN)
+
+
 @packs_app.command("import")
 def packs_import(
-    path: Annotated[Path, typer.Argument(help="A signed pack bundle.")],
+    path: Annotated[Path, typer.Argument(help="A pack bundle.")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    public_key: Annotated[
+        Path | None,
+        typer.Option("--public-key", help="PEM public key of the publisher's pack key."),
+    ] = None,
+    unsigned: Annotated[
+        bool,
+        typer.Option(
+            "--unsigned",
+            help="Import a bundle with no signature. Recorded as unsigned, for good.",
+        ),
+    ] = False,
+    allow_rollback: Annotated[
+        bool,
+        typer.Option("--allow-rollback", help="Permit a bundle older than the installed one."),
+    ] = False,
+    allow_orphans: Annotated[
+        bool,
+        typer.Option(
+            "--allow-orphaned-rules",
+            help="Import even if it leaves rules citing controls it does not define.",
+        ),
+    ] = False,
 ) -> None:
-    """Import a signed control catalogue (SPEC 11, week 9).
+    """Import a control catalogue (SPEC 11).
 
-    Not implemented. The signed-pack feed is `qed.remote.packs`, which week 9
-    builds together with the signature verification this would need -- and an
-    import that accepted an unsigned catalogue would be a way to put control
-    titles an auditor reads in front of them without anybody vouching for the
-    source.
+    An imported catalogue decides what `qed packs list` reports and what an
+    OSCAL finding's `control-label` says, so the import is recorded in the
+    chain as an `admin_action`: a control title an auditor reads has to be
+    traceable to a moment and a key.
+
+    Reads a file and nothing else. That is the air-gap case, and it is the only
+    case there is until the `remote.packs` feed exists -- which is this same
+    verification with a download in front of it.
     """
-    _fail(
-        "signed pack import is week 9 (SPEC 11's `qed.remote.packs`). Until then the "
-        "catalogues ship with the package: `qed packs list` shows them. Importing an "
-        "unsigned catalogue would put control titles in front of an auditor with nobody "
-        "vouching for where they came from."
+    from qed.compliance.packs import use_imported
+    from qed.core.schemas import Assurance, EvidenceType
+    from qed.remote.packs import (
+        BundleRejected,
+        check_not_older,
+        installed_dir,
+        load_bundle_file,
+        load_public_key,
+        verify,
+        would_break,
+        write_installed,
+    )
+
+    try:
+        bundle = load_bundle_file(path)
+        if unsigned:
+            if bundle.signed:
+                _fail(
+                    "this bundle is signed, so `--unsigned` is not what you want: pass "
+                    "`--public-key` and have the signature checked. Importing a signed "
+                    "bundle as unsigned throws away the one thing that makes its "
+                    "control titles traceable."
+                )
+                return
+        elif public_key is None:
+            _fail(
+                "pass `--public-key PEM` to check the signature, or `--unsigned` to "
+                "accept a bundle that has none. There is no default key: a publisher's "
+                "key has to arrive by some route other than the bundle, or the "
+                "signature is checking the bundle against itself."
+            )
+            return
+        else:
+            verify(bundle, load_public_key(public_key))
+
+        if not allow_rollback:
+            check_not_older(bundle, directory)
+    except BundleRejected as exc:
+        _fail(str(exc))
+        return
+
+    # The session is opened *before* anything is written, and with
+    # `strict_policy=False`. Two reasons, both learned the hard way elsewhere in
+    # this file. A missing signing key must fail before the catalogues land on
+    # disk, or the import happened and nothing recorded it. And the installed
+    # rules may well cite a control that only this bundle defines -- refusing to
+    # open because the bundle is not installed yet would make the import
+    # impossible, which is the wrong way round.
+    try:
+        session = open_session(directory=directory, config_path=config, strict_policy=False)
+    except MissingSigningKey as exc:
+        _fail(f"{exc}. An import has to be recordable before it is allowed to happen.")
+        return
+
+    # Before writing: an imported catalogue replaces the shipped one, so a
+    # bundle that omits a control an installed rule cites leaves that rule
+    # citing nothing -- which is a lint error, and the engine refuses to decide
+    # against a bundle with errors. An import that stops the kernel deciding is
+    # not an import, so it is refused while the instance is still untouched.
+    orphans = would_break(bundle, session.bundle.rules)
+    if orphans and not allow_orphans:
+        session.close()
+        for rule_id, framework, control_id in orphans:
+            typer.secho(
+                f"  {rule_id} cites {framework} {control_id}, which this bundle does not define",
+                fg=typer.colors.RED,
+                err=True,
+            )
+        _fail(
+            f"refusing to import: {len(orphans)} rule mapping(s) would be left citing a "
+            "control no catalogue defines, which is a lint error -- the engine would "
+            "then refuse to decide anything at all. Fix the rules first, or pass "
+            "`--allow-orphaned-rules` if you intend to fix them next and accept that "
+            "this instance decides nothing until you do. Nothing was written."
+        )
+        return
+
+    try:
+        written = write_installed(bundle, directory)
+        use_imported(installed_dir(directory))
+        # The catalogues behind the rules changed, so the next session must
+        # append a fresh `policy_loaded` even though the policy hash did not
+        # move. Otherwise the only trace of an unsigned catalogue is this
+        # `admin_action`, while every later `policy_loaded` -- the record each
+        # verdict points at -- keeps saying the labels were vouched for.
+        session.store.forget_bundles()
+        appended = session.writer.append(
+            type_=EvidenceType.admin_action,
+            assurance=Assurance.kernel,
+            payload={
+                "action": "packs_imported",
+                **bundle.describe(),
+                "source": path.name,
+                "unsigned": not bundle.signed,
+                "rollback_allowed": allow_rollback,
+            },
+        )
+    finally:
+        session.close()
+
+    # `ref` rather than `record.seq`: on a Postgres HA deployment the record is
+    # in the outbox until the chain leader drains it, and `Appended.record.seq`
+    # is None exactly then. `ref` is the sequence number once chained and the
+    # outbox id before that, which is the thing somebody can look up either way.
+    for item in written:
+        typer.echo(f"wrote {item}")
+    typer.secho(
+        f"imported {len(bundle.packs)} catalogue(s) from {bundle.issuer}"
+        f"{'' if bundle.signed else ' -- UNSIGNED'}; recorded as {appended.ref}",
+        fg=typer.colors.GREEN if bundle.signed else typer.colors.YELLOW,
     )
 
 

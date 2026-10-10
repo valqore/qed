@@ -164,10 +164,89 @@ behind it is a test failure.
 
 ## Importing someone else's catalogue
 
-`qed packs import` is week 9, together with the signature verification it needs.
-Importing an unsigned catalogue would put control titles in front of an auditor
-with nobody vouching for where they came from, so it refuses rather than
-accepting one in the meantime.
+A catalogue decides what the coverage report says and what an OSCAL finding's
+`control-label` says. So the question the import is built around is **who
+vouches for these control titles**.
+
+```bash
+qed packs verify bundle.qedpack.json                        # what is in it
+qed packs verify bundle.qedpack.json --public-key pack.pem  # ...and does it verify
+qed packs import  bundle.qedpack.json --public-key pack.pem
+```
+
+A bundle is one JSON envelope: the catalogues in the same shape as the YAML
+files that ship with qed, plus `issuer`, `issued_at`, `key_id`, `alg` and a
+`signature`. The signature covers **everything except itself**, `key_id`
+included — a signature over the catalogues alone would let anyone restate which
+key signed a bundle, or move `issued_at` to defeat the rollback check.
+
+The key is a **pack key**, not the evidence key. The evidence key says what this
+instance did; a pack key says what a publisher published. One key doing both
+would mean an instance could sign its own catalogue, and the signature would
+prove nothing about where the titles came from. There is no default and no key
+inside the bundle: `--public-key` has to arrive by some route other than the
+bundle, or the signature is checking the bundle against itself.
+
+`verify` is separate from `import` because whether to trust a catalogue is a
+decision somebody should make with the contents in front of them, and a command
+that showed you the contents by installing them would not be giving you the
+choice.
+
+### What an import refuses
+
+**A bundle that would stop the kernel deciding.** An imported catalogue
+*replaces* the shipped one for its framework, so a bundle that does not list a
+control an installed rule cites leaves that rule citing nothing — which is a
+lint error, and the engine refuses to decide against a bundle with errors. The
+import is checked against the loaded rules **before anything is written**:
+
+```
+  AG-BUD-003 cites dora Art. 8, which this bundle does not define
+qed: refusing to import: 1 rule mapping(s) would be left citing a control no
+catalogue defines ... Nothing was written.
+```
+
+This is not hypothetical. A three-article DORA bundle replaced the shipped
+catalogue's one article, and the next `qed check` answered *"the policy bundle
+has errors; refusing to decide against a broken bundle"*. The import had
+succeeded; the instance governed nothing. `--allow-orphaned-rules` is there for
+somebody who intends to fix the rules next and accepts what happens until they
+do.
+
+**A rollback.** A bundle issued before the installed one is refused, because
+replaying an old bundle is how a control mapping is taken away without anybody
+noticing: the import succeeds, the coverage report drops a framework, and
+nothing says why. `--allow-rollback` if you mean it.
+
+**A tampered or wrongly-keyed bundle**, obviously — and that check happens
+before any file is touched.
+
+### Unsigned is possible and loud
+
+`--unsigned` imports a bundle with no signature. It is allowed because refusing
+outright would push people to edit the installed files by hand, where nothing
+would record it at all. What it costs: the `admin_action` record says
+`unsigned: true`, the command prints `UNSIGNED`, and `policy_loaded` carries
+`unsigned: true` from then on (SPEC §11).
+
+### Every import is in the chain
+
+An import appends an `admin_action` record — bundle hash, issuer, `issued_at`,
+key id, frameworks, control count, and whether it was signed. A control title
+an auditor reads has to be traceable to a moment and a key, and "the catalogue
+said so" is not traceable on its own.
+
+The catalogues land in `<state dir>/packs/`, next to a `bundle.json` manifest.
+Not beside the ones in the package: a wheel is replaced on upgrade, and an
+import that wrote into `site-packages` would vanish with it.
+
+### What is not built
+
+The `remote.packs` **feed** — fetching a bundle from a URL — is the same
+verification with a download in front of it, and is not built. So there is no
+`remote.packs.public_key` config key either; the key is a command-line
+argument. `qed packs import FILE` is the air-gap case, and it reaches no
+network at all.
 
 ## See also
 

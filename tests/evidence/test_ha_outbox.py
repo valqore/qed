@@ -28,6 +28,7 @@ from qed.infra.chain_drain import BATCH_LIMIT, drain_once, drain_until_empty
 from qed.infra.chain_writer import ChainWriter
 from qed.infra.keys.file import init_keys, load_signer
 from qed.infra.storage.postgres import PostgresStore
+from tests.evidence.helpers import take_over
 
 DSN = os.environ.get("QED_TEST_POSTGRES_DSN", "")
 
@@ -212,7 +213,9 @@ class TestWhenTheLeaderDies:
             # As a crashed pod's connection does. No resignation, no handover.
             a.store.close()
 
-            assert b.store.try_become_leader() is True
+            # Not the immediate retry: the lock frees when PostgreSQL reaps the
+            # backend, which is shortly after `close()` and not during it.
+            take_over(b.store)
             assert drain_until_empty(b).chained == 1
             after = seqs(b)
             assert after == list(range(len(after)))
@@ -230,7 +233,7 @@ class TestWhenTheLeaderDies:
             refs = [enqueue(b, f"orphan {index}") for index in range(4)]
             assert b.store.outbox_depth() == 4
 
-            assert b.store.try_become_leader() is True
+            take_over(b.store)
             drain_until_empty(b)
             assert [b.store.resolve_outbox_ref(ref) for ref in refs] == [1, 2, 3, 4]
         finally:
@@ -275,7 +278,7 @@ class TestTheResultStillVerifies:
             for index in range(3):
                 enqueue(b, f"b{index}")
             a.store.close()
-            b.store.try_become_leader()
+            take_over(b.store)
             drain_until_empty(b)
 
             records = load_jsonl(to_jsonl(b.store.iter_evidence()))

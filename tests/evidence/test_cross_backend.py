@@ -332,20 +332,17 @@ class TestLeadership:
         crash, which is why `qed/api/leader.py` retries on an interval instead
         of once.
         """
-        import time
+        from tests.evidence.helpers import take_over
 
         leader = PostgresStore(DSN)
         assert leader.try_become_leader() is True
         assert postgres.try_become_leader() is False
         leader.close()  # as a crashed replica's connection would
 
-        deadline = time.monotonic() + 10.0
-        while not postgres.try_become_leader():
-            assert time.monotonic() < deadline, (
-                "the lock was still held 10s after the leader's connection closed; "
-                "a crashed replica would have stalled the chain for at least that long"
-            )
-            time.sleep(0.05)
+        # One implementation of the rule, shared with `test_ha_outbox.py`: the
+        # same assumption lived in two files, and fixing one left the other to
+        # fail on CI a day later.
+        take_over(postgres)
 
 
 class TestTheWholeDecisionPathRunsOnPostgres:

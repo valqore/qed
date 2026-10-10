@@ -28,6 +28,7 @@ is one somebody can close.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -109,6 +110,11 @@ class Pack(Frozen):
     #: makes a mapping unfollowable if it is not written down.
     version: str = ""
     controls: list[Control] = Field(default_factory=list)
+    #: True when this catalogue came from `qed packs import` rather than from
+    #: the package. Set by the loader, never written in a file -- a bundle that
+    #: could declare itself shipped would be a bundle that could hide where the
+    #: control titles an auditor reads actually came from.
+    imported: bool = False
 
     @property
     def complete(self) -> bool:
@@ -173,21 +179,103 @@ class Coverage:
         }
 
 
+#: An extra directory of catalogues, from `qed packs import` (SPEC §11).
+#:
+#: Module state, deliberately. Which controls exist is a process-wide fact in
+#: the same way the shipped catalogues are: `unknown_controls` is called by the
+#: policy loader, `_label` by the OSCAL export, and neither has a state
+#: directory in scope or any business taking one. Threading a path through both
+#: would mean two call sites could disagree about what a control reference
+#: resolves to, which is the one thing this module exists to prevent.
+#:
+#: Set once, by :func:`use_imported`, before a bundle or a policy is read.
+_imported_dir: Path | None = None
+
+
+def use_imported(directory: Path | None) -> None:
+    """Point the loader at an imported-catalogue directory, or at none.
+
+    Clears the cache, because a catalogue set that changed halfway through a
+    process is worse than either version: a rule linted against the old set
+    would export against the new one.
+    """
+    global _imported_dir
+    _imported_dir = directory
+    packs.cache_clear()
+
+
+def imported_dir() -> Path | None:
+    """The directory :func:`use_imported` was given, for reporting."""
+    return _imported_dir
+
+
+def unsigned_catalogues() -> tuple[str, ...]:
+    """Frameworks whose catalogue came from an **unsigned** import.
+
+    SPEC §11: a policy loaded while an unsigned catalogue is installed records
+    `unsigned: true`. The flag belongs on `policy_loaded` rather than only on
+    the import's own `admin_action` because that is the record every verdict
+    points at -- an auditor holding one verdict should be able to see that the
+    control labels behind it had nobody vouching for them, without going
+    looking for an admin record that may be a year earlier in the chain.
+
+    Read from the manifest the import wrote, not from the catalogue files: a
+    catalogue cannot be allowed to describe its own provenance.
+    """
+    directory = _imported_dir
+    if directory is None or not directory.is_dir():
+        return ()
+    manifest = directory / "bundle.json"
+    if not manifest.exists():
+        # Files with no manifest beside them. Somebody put them there by hand,
+        # which is exactly as unvouched-for as an unsigned bundle.
+        return tuple(sorted(path.stem for path in directory.glob("*.yaml")))
+    try:
+        loaded = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return tuple(sorted(path.stem for path in directory.glob("*.yaml")))
+    if not isinstance(loaded, dict) or loaded.get("signed") is True:
+        return ()
+    frameworks = loaded.get("frameworks")
+    if isinstance(frameworks, list):
+        return tuple(str(item) for item in frameworks)
+    return tuple(sorted(path.stem for path in directory.glob("*.yaml")))
+
+
+def _read(path: Path, *, imported: bool) -> Pack:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    loaded = Pack.model_validate(data)
+    if canonical_framework(loaded.framework) != loaded.framework:
+        raise ValueError(
+            f"{path.name} declares framework {loaded.framework!r}, which is not a "
+            "canonical id in frameworks.yaml. A pack for a framework the normaliser "
+            "does not know is a catalogue nothing can look up."
+        )
+    return loaded.model_copy(update={"imported": imported})
+
+
 @lru_cache(maxsize=1)
 def packs() -> tuple[Pack, ...]:
-    """Every catalogue on disk, ordered by framework id."""
-    found = []
+    """Every catalogue, ordered by framework id.
+
+    Shipped first, then imported. An imported catalogue **replaces** a shipped
+    one for the same framework, because two catalogues for one framework would
+    make a control reference ambiguous -- and the replacement is visible:
+    `Pack.imported` is True, `qed packs list` marks the row, and the import is
+    an `admin_action` in the chain.
+    """
+    by_framework: dict[str, Pack] = {}
     for path in sorted(_DIR.glob("*.yaml")):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        loaded = Pack.model_validate(data)
-        if canonical_framework(loaded.framework) != loaded.framework:
-            raise ValueError(
-                f"{path.name} declares framework {loaded.framework!r}, which is not a "
-                "canonical id in frameworks.yaml. A pack for a framework the normaliser "
-                "does not know is a catalogue nothing can look up."
-            )
-        found.append(loaded)
-    return tuple(found)
+        loaded = _read(path, imported=False)
+        by_framework[loaded.framework] = loaded
+
+    extra = _imported_dir
+    if extra is not None and extra.is_dir():
+        for path in sorted(extra.glob("*.yaml")):
+            loaded = _read(path, imported=True)
+            by_framework[loaded.framework] = loaded
+
+    return tuple(by_framework[key] for key in sorted(by_framework))
 
 
 def pack(framework: str) -> Pack | None:

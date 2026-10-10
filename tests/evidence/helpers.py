@@ -60,3 +60,32 @@ def fake_records(
     payload: dict[str, Any] | _Default | None = DEFAULT,
 ) -> list[EvidenceRecord]:
     return [fake_record(seq, type_, age=age, payload=payload) for seq, type_ in spec]
+
+
+#: How long a survivor may wait for a dead leader's advisory lock.
+#:
+#: PostgreSQL releases a session's advisory locks when it **reaps the backend**,
+#: not when `close()` returns -- `close()` sends a terminate and comes back. So
+#: the next `pg_try_advisory_lock` can arrive first, and three tests across two
+#: files asserted the *immediate* retry. They passed locally for weeks and
+#: failed on CI, once each, in different runs.
+#:
+#: The bound is the real claim, and it is a claim about the product: a crashed
+#: leader's lock frees up *shortly* after the crash, which is why
+#: `qed/api/leader.py` asks every tick rather than once. Asserting zero was
+#: asserting something PostgreSQL never promised.
+TAKEOVER_TIMEOUT_S = 10.0
+
+
+def take_over(store: object, *, timeout: float = TAKEOVER_TIMEOUT_S) -> None:
+    """Become the chain leader, waiting for a dead leader's lock to be reaped."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not store.try_become_leader():  # type: ignore[attr-defined]
+        assert time.monotonic() < deadline, (
+            f"the chain lock was still held {timeout}s after the leader's connection "
+            "closed; a crashed replica would have stalled the chain for at least that "
+            "long"
+        )
+        time.sleep(0.05)

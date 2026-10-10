@@ -21,6 +21,8 @@ several replicas starting at the same moment.
 | Masking eating a public key under `strict` | the record still verified against its own hash |
 | Ten control catalogues missing from the wheel | the test for exactly this matched them with `fnmatch`, whose `*` crosses a `/` |
 | Both arm64 tests skipping one step after the emulator was installed | a probe that could not tell "no emulator" from "the registry did not answer" |
+| An imported catalogue that stopped the kernel deciding | nothing had tested an import against the installed rules |
+| `policy_loaded` saying `unsigned: false` after an unsigned import | the policy hash does not change, so the record is never re-emitted |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
@@ -98,6 +100,30 @@ The probe pulls its image in a separate step from starting it, because one
 probe that did both returned the same `False` for "this machine has no
 emulator" and "the registry did not answer just then" -- and the second of
 those made the arm64 tests vanish from a run that had installed the emulator.
+
+### Import a catalogue, then decide something
+
+```bash
+qed packs verify bundle.qedpack.json --public-key pack.pem
+qed packs import bundle.qedpack.json --public-key pack.pem --dir .qed
+qed check examples/proposals/github-read.json --dir .qed   # must still decide
+qed export --dir .qed | qed-verify - --keys .qed/public
+```
+
+The `check` is the point, and it is the step that was missing. An imported
+catalogue *replaces* the shipped one, an uncatalogued control is a lint error,
+and the engine refuses to decide against a bundle with errors -- so a bundle
+that drops a control an installed rule cites switches the kernel off. The
+import refuses that now, before writing anything, but the sequence above is
+what proves it: verifying the bundle and reading the coverage report both
+looked perfectly healthy while `qed check` answered "refusing to decide".
+
+Then read the chain. An unsigned import must show `unsigned: true` in the
+**next** `policy_loaded`, not only in its own `admin_action`:
+
+```bash
+qed export --dir .qed | grep policy_loaded | tail -1
+```
 
 ### Start more than one replica
 

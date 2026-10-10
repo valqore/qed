@@ -6,7 +6,89 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added - signed control catalogues, and the air-gap import (week 9)
+
+`qed packs import` and `qed packs verify`, with `qed/remote/packs.py` behind
+them. A bundle is one JSON envelope carrying catalogues in the same shape as
+the YAML files that ship with qed, signed with a **pack key** -- not the
+evidence key, because the evidence key says what this instance did and a pack
+key says what a publisher published. One key doing both would let an instance
+sign its own catalogue and the signature would prove nothing about where the
+control titles came from.
+
+The signature covers everything except itself, `key_id` and `issued_at`
+included: a signature over the catalogues alone would let anyone restate which
+key signed a bundle, or move the date to defeat the rollback check. There is no
+default key and the bundle's own `key_id` is not trusted as the answer --
+`--public-key` has to arrive by some route other than the bundle, or the
+signature is checking the bundle against itself.
+
+`verify` is separate from `import`: whether to trust a catalogue is a decision
+somebody should make with the contents in front of them, and a command that
+showed you the contents by installing them would not be giving you the choice.
+
+Every import appends an `admin_action` -- bundle hash, issuer, `issued_at`, key
+id, frameworks, whether it was signed. A control title an auditor reads has to
+be traceable to a moment and a key.
+
+Unsigned import is possible, takes a flag, and is loud: the record says
+`unsigned: true` and the command prints `UNSIGNED`. Refusing outright would
+push people to edit the installed files by hand, where nothing would record it.
+
+### Fixed - an import could stop the kernel deciding
+
+Found by running it, before any of this had tests. An imported catalogue
+*replaces* the shipped one for its framework, so a bundle that does not list a
+control an installed rule cites leaves that rule citing nothing -- which week 8
+made a lint **error**, and the engine refuses to decide against a bundle with
+errors.
+
+A three-article DORA bundle replaced the shipped catalogue's one article. The
+import succeeded. The next `qed check` answered *"the policy bundle has errors;
+refusing to decide against a broken bundle"*, and the instance governed
+nothing.
+
+So the import now checks the bundle against the loaded rules **before anything
+is written**, names the rules it would orphan, and refuses. The alternative --
+downgrading an unknown control to a warning when the catalogue was imported --
+would put the untraceable OSCAL line back, which is the thing the error exists
+to prevent. `--allow-orphaned-rules` for somebody who means it.
+
+This is the supply-chain shape of the feature: a publisher who drops a control
+should not be able to switch your kernel off.
+
+### Fixed - the same leadership race, in the file I did not check
+
+0.7.0 fixed `test_a_dead_connection_releases_it`, which asserted the
+*immediate* retry after a leader's connection closed. The same assumption lived
+in three more places in `tests/evidence/test_ha_outbox.py`, and one of them
+failed on the next full run.
+
+PostgreSQL releases a session's advisory locks when it reaps the backend, not
+when `close()` returns. There is one `take_over()` helper now, in
+`tests/evidence/helpers.py`, used by both files -- fixing one site and leaving
+the duplicate is how this came back a day later.
+
+The three sites in `tests/api/test_leader_loop.py` are **not** affected and were
+left alone: they follow `resign_leadership()` or `loop.stop()`, where the same
+session issues the unlock and the release is synchronous. The race only exists
+when the connection dies.
+
+### Fixed - a failure message that promised output nobody could see
+
+The arm64 guard added in 0.7.0 failed on the release tag exactly as designed --
+and said *"the probe printed which"* with no probe output anywhere in the log.
+The probe ran at import, which is collection time, and pytest discards
+module-level stdout under `-q`.
+
+`emulation_available()` returns the reason now instead of printing it, and the
+assertion interpolates it. A new test asserts the pairing holds in both
+directions, and does not skip when emulation works -- because the `deploy` job
+fails on any skip, so a test that skipped on a healthy runner would turn it
+red.
+
+A guard that reports its symptom and not its cause is half a guard, and the
+half it keeps is the one nobody can act on.
 
 ## [0.7.0] — 2026-10-10
 

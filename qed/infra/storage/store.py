@@ -507,6 +507,26 @@ class SqlStore:
         )
         return int(cursor.rowcount) > 0
 
+    def forget_bundles(self) -> int:
+        """Drop the "already recorded" marks, so the next session re-records.
+
+        For `qed packs import`. `policy_loaded` is the record of *the rules
+        that were in force*, and every verdict points at it -- but the control
+        catalogues are part of how those rules are read, and importing one does
+        not change the policy hash. Without this, a catalogue could be replaced
+        and the only record of it would be an `admin_action` possibly a year
+        earlier in the chain, while every `policy_loaded` after it kept saying
+        `unsigned: false`.
+
+        The marks are a de-duplication table, not evidence: nothing in the
+        chain is touched, and re-recording appends a *new* `policy_loaded` with
+        the same `policy_hash` and the new catalogue state. Two records for one
+        policy hash is the honest outcome -- the bundle was loaded twice and
+        meant something different the second time.
+        """
+        cursor = self._conn.execute("DELETE FROM policy_bundles")
+        return int(cursor.rowcount)
+
     # ------------------------------------------------------------- checkpoints
 
     def record_checkpoint(

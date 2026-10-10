@@ -17,6 +17,7 @@ from typing import Final, cast
 
 from ulid import ULID
 
+from qed.compliance.packs import unsigned_catalogues, use_imported
 from qed.config import DEFAULT_DIR, LoadedConfig, QedConfig, load_config
 from qed.core import jcs
 from qed.core.approval.model import (
@@ -54,6 +55,7 @@ from qed.infra.keys.file import (
     public_key_filename,
 )
 from qed.infra.storage.store import SqliteStore, SqlStore
+from qed.remote.packs import installed_dir
 
 __all__ = [
     "EXIT_ALLOW",
@@ -187,6 +189,13 @@ def open_session(
     loaded = load_config(config_path)
     config = loaded.config
 
+    # Before the policy is read, because loading it lints every rule's control
+    # references against the catalogues (SPEC 11) -- and a rule linted against
+    # the shipped catalogues would then export against the imported ones. An
+    # import lives in the state directory, so each session points the catalogue
+    # loader at its own.
+    use_imported(installed_dir(directory))
+
     store = open_store(config, directory)
     # Everything from here on can fail — a missing signing key, a chain that
     # belongs to another instance, a policy error. The store has to be closed on
@@ -248,6 +257,11 @@ def _record_bundle_once(session: Session) -> None:
         for r in session.bundle.rules
         if r.disabled
     ]
+    # An unsigned control catalogue is a property of the *evidence* this bundle
+    # will produce, not of the rules, which is why it rides here: every verdict
+    # points at this record, and the control labels an auditor reads come from
+    # those catalogues.
+    unsigned = unsigned_catalogues()
     session.writer.append(
         type_=EvidenceType.policy_loaded,
         assurance=Assurance.kernel,
@@ -260,6 +274,11 @@ def _record_bundle_once(session: Session) -> None:
             "sources": list(session.bundle.sources),
             "disabled": disabled,
             "lint_warnings": [f.format() for f in session.findings],
+            # SPEC §11. False in the ordinary case, and present either way:
+            # a field that appears only when something is wrong is a field an
+            # auditor cannot tell from one this build never wrote.
+            "unsigned": bool(unsigned),
+            **({"unsigned_catalogues": list(unsigned)} if unsigned else {}),
         },
         ts=now,
     )

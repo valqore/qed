@@ -352,12 +352,14 @@ class TestPacksList:
             char for char in output if ord(char) >= 127
         ]
 
-    def test_import_says_it_is_week_9(self) -> None:
-        """An import that accepted an unsigned catalogue would put control
-        titles in front of an auditor with nobody vouching for them."""
-        result = runner.invoke(app, ["packs", "import", "whatever.sig"])
+    def test_import_exists_and_needs_a_key(self, tmp_path: Path) -> None:
+        """Week 9 built it. The refusal moved from "not implemented" to "say
+        which key vouches for these control titles" -- `tests/compliance/
+        test_pack_bundles.py` is where the bundle format lives."""
+        missing = tmp_path / "whatever.qedpack.json"
+        result = runner.invoke(app, ["packs", "import", str(missing)])
         assert result.exit_code == 1
-        assert "week 9" in result.output
+        assert "cannot read" in result.output
 
 
 class TestNormalizeFrameworks:
