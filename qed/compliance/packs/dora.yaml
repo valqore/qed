@@ -1,0 +1,15 @@
+# DORA control catalogue (SPEC §11).
+#
+# Regulation (EU) 2022/2554 on digital operational resilience for the financial
+# sector. Partial: the articles this rule set maps to. DORA's obligations are
+# largely organisational -- governance, testing programmes, third-party
+# registers -- and a policy kernel speaks to few of them directly.
+framework: dora
+source: https://eur-lex.europa.eu/eli/reg/2022/2554/oj
+
+catalogue: partial
+scope: The articles this rule set maps to.
+
+controls:
+  - id: "Art. 8"
+    label: Identification of ICT-supported business functions, assets and risks

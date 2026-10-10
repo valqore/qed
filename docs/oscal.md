@@ -29,14 +29,34 @@ record that justifies the claim.
 
 ## Read this part before you quote the document
 
-**The mapping is only as deep as the rules.** Week 2 exports the control
-references that the baseline rules carry in their own `compliance:` blocks, and
-nothing else. There is no control catalogue, no control titles, and no coverage
-claim. Every finding target carries `mapping-scope: rule-declared` and the
+**The mapping is only as deep as the rules.** The export carries the control
+references the rules declare in their own `compliance:` blocks, and nothing
+else. Every finding target carries `mapping-scope: rule-declared` and the
 document metadata carries
-`mapping-scope: baseline-rule-control-references-only` so this is visible in the
-file rather than only in this page. The compliance packs, and the complete EU AI
-Act and NIST AI RMF mappings, are week 8.
+`mapping-scope: baseline-rule-control-references-only`, so this is visible in
+the file rather than only on this page. What a rule declares it serves is a
+claim about that rule, not a statement that the control is covered.
+
+**Each control now arrives with its label, its source and its depth.** A
+finding's target title reads `eu_ai_act Art. 14 -- Human oversight`, and its
+props carry `control-label` (the full text, which the title truncates at 72
+characters so a report table stays readable), `catalogue-source` (the URL for
+the standard itself) and `mapping-depth`. Those come from
+`qed/compliance/packs/`, documented in [compliance.md](compliance.md). **A label
+is that catalogue's description and not a quotation** -- `catalogue-source` is
+where the standard's own words are, which is why it travels with every finding.
+
+**`mapping-depth` is worth reading before you weigh a finding.** `article`
+means the rule maps to a specific article or clause; `category` to a named
+category; `pack` only to the framework. All three produce findings that look
+alike in a table and are not equally strong evidence.
+
+**The document says nothing about coverage.** An export covers the records in
+the range you asked for, so a control that no action in that window touched is
+simply absent, and absence in an assessment result is not a claim of
+compliance. `qed packs list` is the coverage report -- including the controls
+that nothing maps to -- and it refuses to print a percentage for any framework
+whose catalogue is only partial.
 
 **A finding is about the action, not about qed.** A rule that matched means the
 action the agent proposed did not satisfy the control objective, so the status is

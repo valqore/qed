@@ -1,0 +1,32 @@
+# OWASP Top 10 for LLM Applications 2025 (SPEC §11).
+#
+# The 2025 revision renumbered the 2023/24 list: what was LLM02 "Insecure
+# Output Handling" is now LLM05 "Improper Output Handling", and LLM02 is a new
+# entry. A rule citing LLM02 means the 2025 sense.
+framework: owasp_llm
+source: https://genai.owasp.org/llm-top-10/
+
+catalogue: complete
+scope: The 2025 top ten, in full.
+
+controls:
+  - id: LLM01
+    label: Prompt Injection
+  - id: LLM02
+    label: Sensitive Information Disclosure
+  - id: LLM03
+    label: Supply Chain
+  - id: LLM04
+    label: Data and Model Poisoning
+  - id: LLM05
+    label: Improper Output Handling
+  - id: LLM06
+    label: Excessive Agency
+  - id: LLM07
+    label: System Prompt Leakage
+  - id: LLM08
+    label: Vector and Embedding Weaknesses
+  - id: LLM09
+    label: Misinformation
+  - id: LLM10
+    label: Unbounded Consumption

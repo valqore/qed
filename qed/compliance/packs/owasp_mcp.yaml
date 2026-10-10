@@ -1,0 +1,33 @@
+# OWASP Top 10 for MCP (Model Context Protocol) (SPEC §11).
+#
+# The project writes these as `MCP01:2025`. The year suffix is dropped here and
+# in the rules: there is one edition, and a rule citing `MCP04` means it. If a
+# second edition appears, this catalogue gains the suffix and the normaliser
+# gains an alias -- which is the point of having a normaliser.
+framework: owasp_mcp
+source: https://genai.owasp.org/
+
+catalogue: complete
+scope: The 2025 top ten, in full.
+
+controls:
+  - id: MCP01
+    label: Token Mismanagement and Secret Exposure
+  - id: MCP02
+    label: Privilege Escalation via Scope Creep
+  - id: MCP03
+    label: Tool Poisoning
+  - id: MCP04
+    label: Software Supply Chain Attacks and Dependency Tampering
+  - id: MCP05
+    label: Command Injection and Execution
+  - id: MCP06
+    label: Intent Flow Subversion
+  - id: MCP07
+    label: Insufficient Authentication and Authorization
+  - id: MCP08
+    label: Lack of Audit and Telemetry
+  - id: MCP09
+    label: Shadow MCP Servers
+  - id: MCP10
+    label: Context Injection and Over-Sharing

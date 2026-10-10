@@ -23,6 +23,7 @@ import yaml
 from pydantic import ValidationError
 
 from qed.compliance.loader import canonical_framework
+from qed.compliance.packs import control, pack
 from qed.core import jcs
 from qed.core.policy.model import (
     HASHED_RULE_FIELDS,
@@ -150,15 +151,35 @@ def _lint_rule(rule: Rule) -> list[LintFinding]:
                 "warning",
             )
         )
-    findings += [
-        finding(
-            "unknown_framework",
-            f"unknown compliance framework {ref.framework!r}",
-            "warning",
-        )
-        for ref in rule.compliance
-        if canonical_framework(ref.framework) is None
-    ]
+    for ref in rule.compliance:
+        if canonical_framework(ref.framework) is None:
+            findings.append(
+                finding(
+                    "unknown_framework",
+                    f"unknown compliance framework {ref.framework!r}",
+                    "warning",
+                )
+            )
+            continue
+        # An **error**, not a warning. A control id that is almost right is
+        # worse than one that is missing: it reaches the OSCAL export looking
+        # exactly like a real mapping, and the first person to find out is the
+        # auditor who goes looking for the control. A warning would let that
+        # ship.
+        if control(ref.framework, ref.control) is None:
+            catalogue = pack(ref.framework)
+            known = ", ".join(entry.id for entry in catalogue.controls) if catalogue else "none"
+            findings.append(
+                finding(
+                    "unknown_control",
+                    f"{ref.framework} has no control {ref.control!r} in its catalogue. "
+                    f"Catalogued: {known}. Add it to qed/compliance/packs/"
+                    f"{canonical_framework(ref.framework)}.yaml, or fix the mapping -- a "
+                    "control id nothing defines becomes an untraceable line in an OSCAL "
+                    "export.",
+                    "error",
+                )
+            )
     return findings
 
 

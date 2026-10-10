@@ -1,0 +1,39 @@
+# EU AI Act control catalogue (SPEC §11).
+#
+# Regulation (EU) 2024/1689. Scope of this catalogue: **Chapter III, Section 2**
+# -- the requirements for high-risk AI systems (Articles 9-15) -- plus the two
+# articles outside it that an agent-governance kernel plausibly touches.
+#
+# `label` is a short description written for this catalogue. It is **not a
+# quotation**: follow `source` for the Regulation's own words, which is what an
+# auditor will do anyway. Nothing here claims to be verbatim legal text.
+framework: eu_ai_act
+source: https://eur-lex.europa.eu/eli/reg/2024/1689/oj
+
+# The catalogue is complete for the scope named above, so coverage over it is a
+# real fraction rather than a fraction of whatever happened to be listed. The
+# Regulation has 113 articles; this is not all of them, and `scope` says so.
+catalogue: complete
+scope: >-
+  Chapter III Section 2 (Articles 9-15: requirements for high-risk AI systems),
+  plus Article 26 (deployer obligations) and Article 50 (transparency).
+
+controls:
+  - id: "Art. 9"
+    label: Risk management system
+  - id: "Art. 10"
+    label: Data and data governance
+  - id: "Art. 11"
+    label: Technical documentation
+  - id: "Art. 12"
+    label: Record-keeping (automatic logging over the system's lifetime)
+  - id: "Art. 13"
+    label: Transparency and provision of information to deployers
+  - id: "Art. 14"
+    label: Human oversight
+  - id: "Art. 15"
+    label: Accuracy, robustness and cybersecurity
+  - id: "Art. 26"
+    label: Obligations of deployers of high-risk AI systems
+  - id: "Art. 50"
+    label: Transparency obligations for certain AI systems

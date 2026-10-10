@@ -1,0 +1,42 @@
+# NIST AI Risk Management Framework control catalogue (SPEC §11).
+#
+# NIST AI 100-1, January 2023. The framework has four functions (GOVERN, MAP,
+# MEASURE, MANAGE) and roughly seventy subcategories beneath them.
+#
+# **This catalogue is partial** -- it lists the subcategories this rule set maps
+# to and nothing else. That is recorded in `catalogue:` because a coverage
+# figure over a partial catalogue is a lie by omission: "5 of 5 covered" reads
+# as complete and means "every subcategory we chose to list". `qed packs list`
+# refuses to print a percentage for a partial catalogue.
+#
+# The labels here are the subcategory text from the AI RMF Playbook, abridged
+# where a subcategory runs long. Follow `source` for the full wording.
+framework: nist_ai_rmf
+source: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook
+
+catalogue: partial
+scope: >-
+  The subcategories this rule set maps to. The framework has many more; absence
+  from this list means "not mapped", not "not applicable".
+
+controls:
+  - id: GOVERN-1.5
+    label: >-
+      Ongoing monitoring and periodic review of the risk management process and
+      its outcomes are planned, with roles and responsibilities defined
+  - id: MAP-4.1
+    label: >-
+      Approaches for mapping AI technology and legal risks of its components are
+      in place, followed and documented
+  - id: MEASURE-2.7
+    label: >-
+      AI system security and resilience, as identified in the MAP function, are
+      evaluated and documented
+  - id: MEASURE-2.8
+    label: >-
+      Risks associated with transparency and accountability, as identified in
+      the MAP function, are examined and documented
+  - id: MANAGE-2.2
+    label: >-
+      Mechanisms are in place and applied to sustain the value of deployed AI
+      systems

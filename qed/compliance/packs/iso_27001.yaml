@@ -1,0 +1,15 @@
+# ISO/IEC 27001:2022 Annex A control catalogue (SPEC §11).
+#
+# Partial, and deliberately so: Annex A has 93 controls across four themes
+# (A.5 organizational, A.6 people, A.7 physical, A.8 technological) and an
+# agent-governance kernel evidences a handful.
+framework: iso_27001
+source: https://www.iso.org/standard/27001
+version: "2022"
+
+catalogue: partial
+scope: The Annex A controls this rule set maps to.
+
+controls:
+  - id: A.5.34
+    label: Privacy and protection of personally identifiable information

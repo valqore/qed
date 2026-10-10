@@ -58,11 +58,12 @@ hardware, including air-gapped.
 | **Retention and purge**, with purge-then-verify | `qed/core/evidence/retention.py` |
 | **Checkpoint anchors**: file, S3 object-lock, git tag | `qed/infra/publishers/` |
 | **Prometheus `/metrics`** and **OCSF SIEM** events | `qed/api/routers/metrics.py`, `qed/infra/siem.py` |
-| CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint` | `qed/cli.py` |
+| **Control catalogues** for 10 frameworks, 65 controls, with coverage | `qed/compliance/packs/`, `docs/compliance.md` |
+| CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
 
 Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
-`mode: mitm` for the HTTP proxy, compliance packs beyond the baseline, and
-SPEC §19's live-stream and budget pages.
+`mode: mitm` for the HTTP proxy, signed pack import (`qed packs import`,
+SPEC §11), and SPEC §19's live-stream and budget pages.
 
 **Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
 10.6 ms on PostgreSQL, against SPEC §18's 50 ms target — though that budget is
@@ -249,7 +250,7 @@ leaves the chain behind as an artifact anyone can check with the public key.
 4. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.
 5. `docs/mcp-proxy.md`, `docs/http-proxy.md`, `docs/hooks.md`, `docs/credential-broker.md`,
    `docs/delegation.md`, `docs/approvals.md`, `docs/api.md`, `docs/oscal.md`,
-   `docs/assurance-classes.md`, `docs/policy-testing.md`.
+   `docs/assurance-classes.md`, `docs/compliance.md`, `docs/policy-testing.md`.
 6. Running it: `docs/deployment.md` (process, container, Helm, HA, releasing),
    `docs/ci.md` (`qed check` in a pipeline), `docs/checkpoints.md` (anchors),
    `docs/siem.md` (OCSF), `docs/performance.md` (what it actually costs) and

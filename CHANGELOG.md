@@ -6,7 +6,84 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added - control catalogues, so a control reference means something
+
+A rule could always say `compliance: [{framework: eu_ai_act, control: "Art.
+14"}]`, and until now nothing said what `Art. 14` *is*. The OSCAL export handed
+an auditor a list of identifiers with no titles, and no way to tell a thorough
+mapping from a decorative one.
+
+`qed/compliance/packs/<framework>.yaml` now carries 65 controls across 10
+frameworks -- the EU AI Act high-risk articles, NIST AI RMF, the OWASP Agentic,
+LLM and MCP Top 10s, SOC 2, NIST CSF, ISO 27001, ISO 42001 and DORA -- each with
+a label, the framework's `source` URL, and the edition where the identifiers
+depend on it. The labels and sources travel into every OSCAL finding, whose
+target title now reads `eu_ai_act Art. 14 -- Human oversight`, with
+`control-label`, `catalogue-source` and `mapping-depth` in its props.
+
+`qed packs list` is the coverage report, and most of the work went into what it
+refuses to say:
+
+- **A percentage needs a complete catalogue.** SOC 2 is 9 of 9 and prints
+  `partial`, because those nine are the criteria this rule set maps to and not
+  all of SOC 2. A percentage over a curated list reads as *complete* and is
+  not. Only a `catalogue: complete` file gets a number: EU AI Act 44.4%, OWASP
+  Agentic 70%, OWASP LLM 30%, OWASP MCP 10%.
+- **An unmapped framework still gets a catalogue.** ISO 42001 is 0 of 8, with
+  all eight clauses named. Omitting the file would have made it look like a
+  framework nobody had considered; a visible zero is a gap somebody can close.
+- **The unmapped controls are listed by name**, because the first question an
+  auditor asks is which controls you do *not* claim.
+- `depth` (`article` / `category` / `pack`) says how deep a mapping goes, not
+  how good it is, and rides on every finding.
+
+`docs/compliance.md` is the page for all of it. NIST CSF records `version: 1.1`
+on purpose: `PR.AC-4` is a 1.1 identifier and does not exist in 2.0, where the
+family became `PR.AA`, and a mapping to a retired identifier is one nobody can
+follow.
+
+### Added - `qed policy normalize-frameworks`
+
+`EU AI Act`, `eu-ai-act` and `AI Act` all normalise to `eu_ai_act` on read, so a
+rule decides correctly whichever it writes. What normalising on read does not do
+is *group*: two spellings are two rows in the coverage report and two control
+sets in an OSCAL export, with nothing telling the reader they are one framework.
+This rewrites them in place, or reports and exits 1 with `--check`.
+
+It is a text substitution on the `framework:` value and nothing else. A YAML
+round-trip would reformat every comment and quote style in a rule file somebody
+wrote by hand, and the diff would be unreviewable.
+
+### Changed - an uncatalogued control is now an error
+
+`qed policy lint` used to warn when a rule cited a control nothing defined.
+That is now an error, and `qed decide` refuses to run against a bundle with
+errors, because a control id that is nearly right reaches the OSCAL export
+looking exactly like a real mapping -- and the first person to notice is the
+auditor who goes looking for the control and finds nothing.
+
+### Fixed - the ten new catalogues shipped in no wheel
+
+`tests/test_packaging.py` exists because `qed/compliance/frameworks.yaml` was
+once missing from `package-data`, so the container started and died on its first
+request. It matched with `fnmatch`, whose `*` crosses a path separator -- so
+`compliance/*.yaml` looked as though it covered
+`compliance/packs/eu_ai_act.yaml`. setuptools expands these patterns with the
+`glob` module, where it does not.
+
+The result was a container that built cleanly, loaded its rules, found no
+catalogue for any control they cite, and refused to decide against a bundle it
+reported as broken. Only the container test saw it; 2,346 tests against the
+checkout were green, because the checkout has the files.
+
+The matcher is `PurePosixPath.match` now, which segments the way setuptools
+does, and removing the pattern fails ten tests by name instead of none.
+
+### Fixed - `qed packs list` printed a section sign
+
+A unicode escape for the section sign sat in a CLI string, and a Windows
+console at the default code page cannot encode it. The ASCII assertion on
+command output is a week-1 lesson that this file had not yet learned.
 
 ## [0.6.1] — 2026-10-10
 

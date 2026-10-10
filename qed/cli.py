@@ -1,11 +1,11 @@
-"""`qed` command line (SPEC §14).
+"""`qed` command line (SPEC 14).
 
-SPEC §14 forbids adding a top-level command without a spec update, so the
+SPEC 14 forbids adding a top-level command without a spec update, so the
 missing ones are absent rather than stubbed -- a command that prints "not
 implemented" is worse than one that does not exist, because it ends up in
 somebody's script.
 
-``check`` exit codes (SPEC §12.5): 0 ALLOW, 2 BLOCK, 3 REQUIRE_APPROVAL, 1
+``check`` exit codes (SPEC 12.5): 0 ALLOW, 2 BLOCK, 3 REQUIRE_APPROVAL, 1
 error. In shadow mode the decision is recorded and the exit code is 0
 (ADR-003), because a pipeline that failed in shadow mode would make shadow mode
 useless as a way to find out what a policy would do.
@@ -100,9 +100,11 @@ app = typer.Typer(
 )
 keys_app = typer.Typer(no_args_is_help=True, help="Evidence signing keys.")
 policy_app = typer.Typer(no_args_is_help=True, help="Policy bundle tools.")
+packs_app = typer.Typer(no_args_is_help=True, help="Compliance control catalogues.")
 mandate_app = typer.Typer(no_args_is_help=True, help="Mandates for unattended agents.")
 app.add_typer(keys_app, name="keys")
 app.add_typer(policy_app, name="policy")
+app.add_typer(packs_app, name="packs")
 app.add_typer(mandate_app, name="mandate")
 
 DirOption = Annotated[Path, typer.Option("--dir", help="qed state directory (keys and chain).")]
@@ -151,7 +153,7 @@ def keys_rotate(
     """Replace the signing key, keeping the chain verifiable across the change.
 
     Appends a `key_rotated` record signed by the **retiring** key, then
-    activates the new one (SPEC §10.5, ADR-0010). The old private key is
+    activates the new one (SPEC 10.5, ADR-0010). The old private key is
     destroyed: rotation exists because a key might have leaked, and leaving the
     old one on disk would reduce nothing. The old *public* key stays, and must
     -- without it the chain before this point cannot be verified at all.
@@ -287,7 +289,7 @@ def check(
     """Decide one proposal, append proposal and verdict to the chain.
 
     Exit 0 ALLOW, 2 BLOCK, 3 REQUIRE_APPROVAL, 1 if QED could not decide at
-    all (SPEC §12.5). The last one is separate on purpose: a pipeline has to
+    all (SPEC 12.5). The last one is separate on purpose: a pipeline has to
     be able to tell a refusal from a misconfigured runner, and conflating them
     would let a missing signing key read as a policy that allows everything.
     """
@@ -383,7 +385,7 @@ def _check_remote(
     adapter_secret_env: str,
     as_json: bool,
 ) -> None:
-    """``qed check --server`` (SPEC §12.5): somebody else decides and keeps the record.
+    """``qed check --server`` (SPEC 12.5): somebody else decides and keeps the record.
 
     This is the mode that makes sense in CI. The local path needs a signing key
     in the runner and leaves the chain in a workspace that is deleted with the
@@ -397,7 +399,7 @@ def _check_remote(
         _fail(
             f"--server needs an adapter identity: --adapter-id (or QED_ADAPTER_ID) and "
             f"the secret in ${adapter_secret_env}. Register it on the instance first "
-            f"with `qed adapters add` (SPEC §12.6); an unknown adapter is refused "
+            f"with `qed adapters add` (SPEC 12.6); an unknown adapter is refused "
             f"with AG-IDN-005."
         )
         return
@@ -442,7 +444,7 @@ def _check_remote(
 
 
 def _write_evidence_artifact(session: Session, path: Path, *, as_json: bool) -> None:
-    """Export the chain so the decision outlives the runner (SPEC §12.5).
+    """Export the chain so the decision outlives the runner (SPEC 12.5).
 
     The whole chain and not just this verdict: `qed-verify` walks linkage from
     genesis, so a file holding only the last two records is a file that cannot
@@ -462,6 +464,162 @@ def _write_evidence_artifact(session: Session, path: Path, *, as_json: bool) -> 
         return
     if not as_json:
         typer.echo(f"  evidence     : {path} ({session.store.count_evidence()} records)")
+
+
+# --------------------------------------------------------------------- packs
+
+
+@packs_app.command("list")
+def packs_list(
+    policy: PolicyOption = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+    include_baseline: Annotated[
+        bool, typer.Option("--baseline/--no-baseline", help="Include the shipped pack.")
+    ] = True,
+) -> None:
+    """Control catalogues, and what this rule set maps to (SPEC 11).
+
+    The question an auditor asks first is not "which controls do you claim?"
+    but "which do you *not*". So this prints the unmapped ones too, and refuses
+    to print a percentage for a catalogue that is only partial -- over a list
+    of the controls somebody chose to list, a percentage reads as complete and
+    is not.
+    """
+    from qed.compliance.packs import coverage, packs
+
+    paths = list(policy or [])
+    if include_baseline:
+        paths.insert(0, baseline_pack_dir())
+    result = load_bundle([p for p in paths if p.exists()])
+    rows = coverage(result.bundle.rules)
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "catalogues": [row.describe() for row in rows],
+                    "sources": {item.framework: item.source for item in packs()},
+                },
+                indent=2,
+            )
+        )
+        return
+
+    typer.echo(f"{'FRAMEWORK':<16} {'DEPTH':<9} {'MAPPED':>9}  {'COVERAGE':>9}  RULES")
+    for row in rows:
+        share = f"{row.percentage}%" if row.percentage is not None else "partial"
+        colour = (
+            typer.colors.YELLOW
+            if row.mapped == 0
+            else (typer.colors.GREEN if row.percentage == 100.0 else None)
+        )
+        typer.secho(
+            f"{row.framework:<16} {row.depth:<9} {row.mapped:>4}/{row.controls:<4} "
+            f"{share:>9}  {len(row.rules)}",
+            fg=colour,
+        )
+
+    typer.echo("")
+    for row in rows:
+        if row.unmapped:
+            typer.echo(f"{row.framework}: not mapped -- {', '.join(row.unmapped)}")
+    typer.echo("")
+    typer.echo(
+        "`partial` means the catalogue lists the controls this rule set maps to and not "
+        "the whole framework, so there is no honest percentage to print. `depth` is "
+        "SPEC 11's flag: how deep the mapping goes, not how good it is."
+    )
+
+
+@packs_app.command("import")
+def packs_import(
+    path: Annotated[Path, typer.Argument(help="A signed pack bundle.")],
+) -> None:
+    """Import a signed control catalogue (SPEC 11, week 9).
+
+    Not implemented. The signed-pack feed is `qed.remote.packs`, which week 9
+    builds together with the signature verification this would need -- and an
+    import that accepted an unsigned catalogue would be a way to put control
+    titles an auditor reads in front of them without anybody vouching for the
+    source.
+    """
+    _fail(
+        "signed pack import is week 9 (SPEC 11's `qed.remote.packs`). Until then the "
+        "catalogues ship with the package: `qed packs list` shows them. Importing an "
+        "unsigned catalogue would put control titles in front of an auditor with nobody "
+        "vouching for where they came from."
+    )
+
+
+@policy_app.command("normalize-frameworks")
+def policy_normalize_frameworks(
+    paths: Annotated[
+        list[Path], typer.Argument(help="Rule files or directories to rewrite in place.")
+    ],
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Report what would change and exit 1 if anything would."),
+    ] = False,
+) -> None:
+    """Rewrite `compliance.framework` values to their canonical ids (SPEC 11).
+
+    `EU AI Act`, `eu-ai-act` and `AI Act` all mean `eu_ai_act`. The engine
+    normalises on read, so a rule with an alias decides correctly either way --
+    what it does not do is *group*: two spellings are two rows in a coverage
+    report and two control sets in an OSCAL export, and the auditor reading it
+    has no way to know they are one framework.
+
+    Text substitution on the file, not a YAML round-trip: a reformat would
+    rewrite every comment and quote style in a rule file somebody wrote by
+    hand, and the diff would be unreviewable.
+    """
+    import re
+
+    from qed.compliance.loader import canonical_framework
+
+    files: list[Path] = []
+    for target in paths:
+        if target.is_dir():
+            files.extend(sorted(target.rglob("*.yaml")))
+        elif target.exists():
+            files.append(target)
+        else:
+            _fail(f"{target} does not exist")
+            return
+
+    pattern = re.compile(r"(framework:\s*)([\"']?)([^\"',}\n]+)(\2)")
+    changed_files = 0
+    changes: list[str] = []
+
+    for path in files:
+        original = path.read_text(encoding="utf-8")
+
+        def replace(match: re.Match[str], path: Path = path) -> str:
+            raw = match.group(3).strip()
+            canonical = canonical_framework(raw)
+            if canonical is None or canonical == raw:
+                return match.group(0)
+            changes.append(f"{path}: {raw} -> {canonical}")
+            return f"{match.group(1)}{match.group(2)}{canonical}{match.group(4)}"
+
+        rewritten = pattern.sub(replace, original)
+        if rewritten != original:
+            changed_files += 1
+            if not check:
+                path.write_text(rewritten, encoding="utf-8")
+
+    for line in changes:
+        typer.echo(f"  {line}")
+
+    if not changes:
+        typer.secho("every framework id is already canonical", fg=typer.colors.GREEN)
+        return
+    if check:
+        _fail(f"{len(changes)} alias(es) in {changed_files} file(s) are not canonical")
+        return
+    typer.secho(
+        f"rewrote {len(changes)} alias(es) in {changed_files} file(s)", fg=typer.colors.GREEN
+    )
 
 
 # -------------------------------------------------------------------- policy
@@ -660,7 +818,7 @@ def mandate_sign(
         Path | None, typer.Option("--out", help="Write the signed mandate here.")
     ] = None,
 ) -> None:
-    """Sign a mandate and record its issue in the chain (SPEC §6.5).
+    """Sign a mandate and record its issue in the chain (SPEC 6.5).
 
     The signature covers the whole document except its own `signature` field
     and `revoked_at`, so a mandate keeps verifying after it is revoked -- the
@@ -765,7 +923,7 @@ def mandate_revoke(
     config: ConfigOption = None,
     by: Annotated[str, typer.Option("--by", help="principal_hash of the revoker.")] = "",
 ) -> None:
-    """Revoke a mandate. Tokens that reference it fail on next use (§6.1 step 5).
+    """Revoke a mandate. Tokens that reference it fail on next use (6.1 step 5).
 
     Nothing is deleted. The signed document stays exactly as issued and the
     revocation is a separate fact, in its own column and in the chain.
@@ -809,7 +967,7 @@ def approve(
         str, typer.Option("--groups", help="Comma-separated groups you belong to.")
     ] = "",
 ) -> None:
-    """Decide a pending approval (SPEC §9.3).
+    """Decide a pending approval (SPEC 9.3).
 
     Separation of duties is enforced here, not reported: you cannot approve
     your own action, a service identity cannot approve anything, and you have
@@ -925,7 +1083,7 @@ def approvals(
 ) -> None:
     """List approval requests.
 
-    `--expire` runs the timeout sweep (SPEC §9.4) and writes one
+    `--expire` runs the timeout sweep (SPEC 9.4) and writes one
     `approval_expired` record per request. A request that simply vanished
     from the queue would not be evidence of anything.
     """
@@ -973,7 +1131,7 @@ def doctor(
     ] = False,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Report posture: what this instance can actually enforce (SPEC §7.2).
+    """Report posture: what this instance can actually enforce (SPEC 7.2).
 
     The question it answers is the uncomfortable one. For every upstream:
     does QED hold the credential, or is the agent carrying its own? An
@@ -1223,7 +1381,7 @@ def token(
     ] = "QED_ADAPTER_SECRET",
     raw: Annotated[bool, typer.Option("--raw", help="Print only the token")] = False,
 ) -> None:
-    """Exchange the stored login for a budgeted qed token (SPEC §6.2).
+    """Exchange the stored login for a budgeted qed token (SPEC 6.2).
 
     Adapters call this transparently when their cached token is close to
     expiry; a person runs it to get a token for a one-off command.
@@ -1311,7 +1469,7 @@ def checkpoint(
     """Append a Merkle checkpoint, publish its root, and apply retention.
 
     One maintenance pass, run now rather than waiting for the running
-    instance's own loop (SPEC §10.4, §10.6). The three are together because
+    instance's own loop (SPEC 10.4, 10.6). The three are together because
     they have to happen in that order: a root is fixed, it is anchored
     somewhere the instance does not control, and only then may payloads the
     retention policy has expired be dropped.

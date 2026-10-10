@@ -1,0 +1,36 @@
+# ISO/IEC 42001:2023 control catalogue (SPEC §11).
+#
+# AI management systems. **No rule in the baseline pack maps to this framework
+# yet**, which is why the catalogue is here and empty of mappings rather than
+# absent: `qed packs list` reports a framework with zero coverage, and a gap
+# that is visible is a gap somebody can close. An absent pack would have looked
+# like a framework nobody had considered.
+#
+# The clauses below are the management-system requirements (Clauses 4-10). The
+# Annex A controls are a separate catalogue and are not listed yet.
+framework: iso_42001
+source: https://www.iso.org/standard/42001
+version: "2023"
+
+catalogue: partial
+scope: >-
+  The management-system clauses (4-10). Annex A controls are not catalogued yet,
+  and no rule maps to this framework at all.
+
+controls:
+  - id: "4.1"
+    label: Understanding the organization and its context
+  - id: "5.2"
+    label: AI policy
+  - id: "6.1"
+    label: Actions to address risks and opportunities
+  - id: "8.2"
+    label: AI risk assessment
+  - id: "8.3"
+    label: AI risk treatment
+  - id: "8.4"
+    label: AI system impact assessment
+  - id: "9.1"
+    label: Monitoring, measurement, analysis and evaluation
+  - id: "10.1"
+    label: Continual improvement

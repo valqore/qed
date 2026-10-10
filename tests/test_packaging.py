@@ -9,13 +9,20 @@ site-packages. Every test passed throughout: the repo checkout has the file.
 So the list is checked against the filesystem rather than trusted. A new data
 file is a one-line change to `pyproject.toml`, and forgetting it should fail
 here instead of in somebody's cluster.
+
+Week 8 found the second half of the same bug: this file used to match with
+`fnmatch`, whose ``*`` happily crosses a path separator, so `compliance/*.yaml`
+looked as though it covered `compliance/packs/eu_ai_act.yaml`. setuptools uses
+real glob semantics, where it does not -- so ten catalogue files were absent
+from the wheel while this test stayed green, and the container started, loaded
+its rules, found no catalogue for any control they cite and refused to decide.
+The matcher segments the way setuptools does now.
 """
 
 from __future__ import annotations
 
-import fnmatch
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -31,6 +38,17 @@ def patterns() -> list[str]:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         config = tomllib.load(handle)
     return list(config["tool"]["setuptools"]["package-data"]["qed"])
+
+
+def covers(relative: str, pattern: str) -> bool:
+    """Does `pattern` in `package-data` ship `relative`?
+
+    `PurePosixPath.match`, not `fnmatch`: setuptools expands these patterns with
+    the `glob` module, where ``*`` matches within one path segment. `fnmatch`
+    has no notion of segments at all, which is how a nested directory of data
+    files passed this test and shipped in no wheel.
+    """
+    return PurePosixPath(relative).match(pattern)
 
 
 def data_files() -> list[str]:
@@ -53,7 +71,7 @@ def test_every_data_file_is_covered_by_a_package_data_pattern(relative: str) -> 
     `FileNotFoundError` on a path under site-packages, which reads like a
     corrupted install rather than a packaging list that is one line short.
     """
-    assert any(fnmatch.fnmatch(relative, pattern) for pattern in patterns()), (
+    assert any(covers(relative, pattern) for pattern in patterns()), (
         f"{relative} is not matched by any package-data pattern in pyproject.toml. "
         f"Add it, or the wheel -- and so the container -- will not contain it."
     )
@@ -66,7 +84,7 @@ def test_the_patterns_all_still_match_something() -> None:
     unused = [
         pattern
         for pattern in patterns()
-        if not any(fnmatch.fnmatch(relative, pattern) for relative in files)
+        if not any(covers(relative, pattern) for relative in files)
     ]
     assert not unused, f"package-data patterns match nothing: {unused}"
 
@@ -78,6 +96,7 @@ def test_the_known_data_files_are_still_the_ones_we_think_they_are() -> None:
     assert "compliance/frameworks.yaml" in found
     assert any(name.startswith("core/policy/packs/") for name in found)
     assert any(name.startswith("infra/storage/migrations/") for name in found)
+    assert any(name.startswith("compliance/packs/") for name in found)
     # No stray binaries, archives or credentials have crept into the package.
     assert not [
         name

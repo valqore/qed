@@ -1,0 +1,33 @@
+# SOC 2 Trust Services Criteria (SPEC §11).
+#
+# AICPA TSC 2017 (revised 2022). Partial: the criteria this rule set maps to,
+# across the Security (CC), Availability (A) and Privacy (P) categories. The
+# full TSC runs to roughly sixty criteria and most of them are about an
+# organisation rather than about an agent's actions.
+framework: soc2
+source: https://www.aicpa-cima.com/resources/landing/system-and-organization-controls-soc-suite-of-services
+
+catalogue: partial
+scope: >-
+  The criteria this rule set maps to. Absence means "not mapped" -- most of the
+  TSC concerns organisational controls a policy kernel cannot evidence.
+
+controls:
+  - id: CC6.1
+    label: Logical access security over protected information assets
+  - id: CC6.2
+    label: Registration and authorisation of new internal and external users
+  - id: CC6.3
+    label: Role-based access, least privilege and segregation of duties
+  - id: CC6.6
+    label: Protection against threats from outside the system boundary
+  - id: CC6.7
+    label: Restriction of information transmission, movement and removal
+  - id: CC7.2
+    label: Monitoring for anomalies indicative of malicious acts
+  - id: CC8.1
+    label: Change management -- authorisation, design, testing, approval
+  - id: A1.2
+    label: Recovery -- backup, restoration and environmental protection
+  - id: P4.1
+    label: Use of personal information limited to the purposes identified

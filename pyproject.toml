@@ -94,6 +94,7 @@ qed = [
     "core/policy/packs/*/*.yaml",
     "infra/storage/migrations/*.sql",
     "compliance/*.yaml",
+    "compliance/packs/*.yaml",
 ]
 
 [tool.ruff]

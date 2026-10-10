@@ -1,0 +1,21 @@
+# NIST Cybersecurity Framework control catalogue (SPEC §11).
+#
+# **Version 1.1.** The subcategory identifiers this rule set cites are 1.1's:
+# CSF 2.0 renamed the PR.AC family to PR.AA and reorganised around a new GOVERN
+# function, so `PR.AC-4` does not exist in 2.0. Recorded here rather than left
+# for an auditor to notice: a rule citing a retired identifier is a mapping
+# nobody can follow.
+framework: nist_csf
+source: https://www.nist.gov/cyberframework
+version: "1.1"
+
+catalogue: partial
+scope: The subcategories this rule set maps to.
+
+controls:
+  - id: PR.AC-4
+    label: >-
+      Access permissions and authorizations are managed, incorporating least
+      privilege and separation of duties
+  - id: PR.AC-5
+    label: Network integrity is protected (segregation, segmentation)

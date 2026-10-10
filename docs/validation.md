@@ -19,9 +19,20 @@ several replicas starting at the same moment.
 | A replica dying on startup in HA | one process in the suite, two in the stack |
 | `terraform.destroy` in prod returning ALLOW | no case asserted the tool-name spelling |
 | Masking eating a public key under `strict` | the record still verified against its own hash |
+| Ten control catalogues missing from the wheel | the test for exactly this matched them with `fnmatch`, whose `*` crosses a `/` |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
+
+The last row is worth dwelling on, because the guard was already there and
+still let it through. `tests/test_packaging.py` was written after the
+`frameworks.yaml` bug, precisely to check `package-data` against what is on
+disk -- and it used `fnmatch`, which has no notion of path segments, while
+setuptools expands those patterns with `glob`, which does. So
+`compliance/*.yaml` appeared to cover `compliance/packs/eu_ai_act.yaml` and did
+not. **A guard written in a different matcher than the thing it guards is not a
+guard**, and the only reason this surfaced is that one test starts the real
+image and drives it.
 
 ## The checks
 

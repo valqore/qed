@@ -1,0 +1,36 @@
+# OWASP Top 10 for Agentic Applications (SPEC §11).
+#
+# Published 2025-12-09 by the OWASP GenAI Security Project. The identifiers are
+# ASI01-ASI10 and the titles below are the project's own.
+#
+# Worth recording: Valqore's engine catalogues this list as AAI01-AAI10 with
+# different titles. The OWASP identifiers are ASI, so `qed`'s rules are right
+# and the engine's prefix is its own.
+framework: owasp_agentic
+source: https://genai.owasp.org/
+
+# All ten, so coverage over this framework is a real fraction.
+catalogue: complete
+scope: The published top ten, in full.
+
+controls:
+  - id: ASI01
+    label: Agent Goal Hijack
+  - id: ASI02
+    label: Tool Misuse and Exploitation
+  - id: ASI03
+    label: Identity and Privilege Abuse
+  - id: ASI04
+    label: Agentic Supply Chain Vulnerabilities
+  - id: ASI05
+    label: Unexpected Code Execution
+  - id: ASI06
+    label: Context Management and Retrieval Manipulation
+  - id: ASI07
+    label: Insecure Inter-Agent Communication
+  - id: ASI08
+    label: Cascading Failures
+  - id: ASI09
+    label: Human-Agent Trust Exploitation
+  - id: ASI10
+    label: Rogue Agents

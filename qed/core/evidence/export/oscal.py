@@ -6,8 +6,11 @@ the rule claims to serve. The public keys and the checkpoint receipts travel in
 ``back-matter``, so the document an auditor receives contains everything needed
 to verify the chain it describes.
 
-Week 2 maps only the control references that the baseline rules carry in their
-own ``compliance`` blocks. The compliance *packs* -- control titles, the full
+Week 8 added the catalogues, so a control reference now travels with its label
+and the standard's source URL (``qed/compliance/packs/``) and an auditor reading
+this document no longer has to look up what ``Art. 14`` is. What is still only
+what the rules declare is the *coverage*: qed maps what its rules say they
+serve, and the remaining
 EU AI Act and NIST AI RMF mapping -- are week 8. Until then this export says
 exactly as much as the rules do and no more, and ``mapping-depth`` on every
 finding says how deep that is (SPEC §11, honesty flags).
@@ -408,7 +411,12 @@ def _finding(
         "target": {
             "type": "objective-id",
             "target-id": target_id,
-            "title": f"{framework} {control}",
+            # The control's own label, from `qed/compliance/packs/`, so an
+            # auditor reading `eu_ai_act Art. 14` does not have to look up what
+            # Article 14 is. The label is this catalogue's description and not a
+            # quotation -- `catalogue-source` is where the standard's own words
+            # are, and it travels with every finding for that reason.
+            "title": _target_title(framework, control),
             "status": {
                 "state": "satisfied" if satisfied else "not-satisfied",
                 "reason": "pass" if satisfied else "fail",
@@ -417,6 +425,11 @@ def _finding(
                 {
                     "framework": framework,
                     "control": control,
+                    "control-label": _label(framework, control),
+                    "catalogue-source": _catalogue_source(framework),
+                    # SPEC 11's honesty flag: how deep this framework's mapping
+                    # goes, so an auditor can weigh `article` against `pack`.
+                    "mapping-depth": _depth(framework),
                     "mapping-scope": "rule-declared",
                 }
             ),
@@ -438,6 +451,48 @@ def _finding(
     }
 
 
+#: Characters of the label that go in a finding's title. The full text is in
+#: the `control-label` prop; a title is a line in a report, and a NIST AI RMF
+#: subcategory runs to 160 characters, which makes a table unreadable.
+TITLE_LABEL_CHARS: Final = 72
+
+
+def _target_title(framework: str, control: str) -> str:
+    label = _label(framework, control)
+    if not label:
+        return f"{framework} {control}"
+    if len(label) > TITLE_LABEL_CHARS:
+        label = label[:TITLE_LABEL_CHARS].rstrip(" ,;:") + "..."
+    return f"{framework} {control} -- {label}"
+
+
+def _label(framework: str, control: str) -> str | None:
+    """The catalogued description of one control, or None when uncatalogued.
+
+    None rather than a placeholder: `qed policy lint` makes an uncatalogued
+    control an error, so this should not happen -- and if it does, an absent
+    prop is honest where "unknown" in a title would read as the control's name.
+    """
+    from qed.compliance.packs import control as lookup
+
+    found = lookup(framework, control)
+    return found.label if found is not None else None
+
+
+def _catalogue_source(framework: str) -> str | None:
+    from qed.compliance.packs import pack
+
+    found = pack(framework)
+    return found.source if found is not None else None
+
+
+def _depth(framework: str) -> str | None:
+    from qed.compliance.loader import canonical_framework, frameworks
+
+    canonical = canonical_framework(framework)
+    return next((fw.depth for fw in frameworks() if fw.id == canonical), None)
+
+
 def _reviewed_controls(controls: Sequence[str]) -> dict[str, object]:
     """Which controls this result speaks to.
 
@@ -449,7 +504,9 @@ def _reviewed_controls(controls: Sequence[str]) -> dict[str, object]:
     selection: dict[str, object] = {
         "description": (
             "Controls referenced by the policy rules that matched in this range. qed maps "
-            "only what its rules declare; the full control catalogues are not imported."
+            "only what its rules declare, so absence from this list means 'not mapped' "
+            "rather than 'not applicable'; `qed packs list` reports the coverage and the "
+            "mapping depth for every catalogued framework."
         )
     }
     if controls:
