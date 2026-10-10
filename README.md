@@ -53,6 +53,7 @@ hardware, including air-gapped.
 | **HA**: evidence outbox + one chain leader on Postgres | `qed/infra/chain_drain.py`, `qed/api/leader.py` |
 | **`qed check --server`** and `--evidence-out` for CI | `docs/ci.md` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |
+| **Single-file binary** for Homebrew, no Python needed | `deploy/qed.spec` |
 | **Helm chart** and a two-replica compose stack | `deploy/helm/qed`, `deploy/docker-compose.yml` |
 | **Key rotation** (`qed keys rotate`), verifiable across the change | `qed/infra/keys/rotation.py` |
 | **Retention and purge**, with purge-then-verify | `qed/core/evidence/retention.py` |

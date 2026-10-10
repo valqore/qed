@@ -804,7 +804,7 @@ qed/
 Python 3.12+, `ruff` (lint+format) and `mypy --strict` mandatory in CI; `from __future__ import annotations`; no `Any` in `qed.core`; docstrings on public functions; 100% of `qed.core` covered by tests; conventional commits; semver; `CHANGELOG.md` in repo.
 
 ### 20.3 Dependencies (kernel wheel) — MUST NOT exceed without spec update
-`fastapi`, `uvicorn[standard]`, `pydantic>=2`, `authlib` (JWT/JWKS/OAuth), `cryptography`, `typer`, `httpx` (infra/adapters only), `pyyaml`, `mcp` (adapters only), `python-ulid`, `regex`, `keyring`. Optional extras: `[postgres] psycopg[binary]`, `[vault] hvac`, `[aws] boto3`, `[slack] slack-sdk`, `[mitm] mitmproxy`, `[ui] qed-ui` (AGPL, separate wheel). Dev/test only: `pytest`, `pytest-asyncio`, `hypothesis`, `ruff`, `mypy`, `jsonschema`.
+`fastapi`, `uvicorn[standard]`, `pydantic>=2`, `authlib` (JWT/JWKS/OAuth), `cryptography`, `typer`, `httpx` (infra/adapters only), `pyyaml`, `mcp` (adapters only), `python-ulid`, `regex`, `keyring`. Optional extras: `[postgres] psycopg[binary]`, `[vault] hvac`, `[aws] boto3`, `[slack] slack-sdk`, `[mitm] mitmproxy`, `[ui] qed-ui` (AGPL, separate wheel). Dev/test only: `pytest`, `pytest-asyncio`, `hypothesis`, `ruff`, `mypy`, `jsonschema`, `pyinstaller` (week 10 — §24.1 already names it as the mechanism for the Homebrew single-file binary; it is never imported by `qed`, and `tests/deploy/test_binary.py` builds the binary and drives it).
 `qed-verify`: `cryptography` only.
 
 **Pins and notes (added week 2, per §23 "no new dependency without a §20.3 update"):**

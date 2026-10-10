@@ -268,6 +268,80 @@ jobs:
   # ---------------------------------------------------------------------------
   # One manifest list, signed, with an SBOM attested against it. Skipped
   # entirely until PUBLISH_GHCR is on, because there is nothing pushed to sign.
+  # SPEC 24.1's Homebrew path: one file, no Python on the machine.
+  #
+  # Built per OS because PyInstaller freezes the interpreter it runs on -- there
+  # is no cross-compilation. macOS gets both architectures as separate runners
+  # rather than a universal2 binary, because a universal build needs universal
+  # wheels for `cryptography` and `pydantic-core` and those are not what pip
+  # resolves by default.
+  #
+  # The formula in `valqore/tap` points at these assets by their checksums, so
+  # the release has to carry the `.sha256` beside each one.
+  binary:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            label: macos-arm64
+          - runner: macos-13
+            label: macos-x86_64
+          - runner: ubuntu-latest
+            label: linux-x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" -e packages/qed-verify
+
+      - name: Build
+        run: pyinstaller deploy/qed.spec --noconfirm --clean --log-level WARN
+
+      # Not "it built". The commands a brew user runs, against a real chain,
+      # on the machine the binary was built for -- which is the only place the
+      # bundled data files and the frozen imports can actually be checked.
+      - name: It decides and the chain verifies
+        run: |
+          set -euo pipefail
+          ./dist/qed --help | grep -q "Policy and evidence kernel"
+          ./dist/qed policy lint | grep -q "46 rules"
+          ./dist/qed packs list --json | python -c "import json,sys; assert len(json.load(sys.stdin)['catalogues']) == 10"
+          ./dist/qed keys init --dir /tmp/qed-binary
+          set +e
+          ./dist/qed check examples/proposals/prod-db-drop.json --dir /tmp/qed-binary
+          code=$?
+          set -e
+          case "$code" in
+            0|2|3) echo "ok: the kernel decided (exit $code)" ;;
+            *) echo "::error::the binary could not decide (exit $code)"; exit 1 ;;
+          esac
+          ./dist/qed verify --dir /tmp/qed-binary | grep -q "OK"
+
+      - name: Checksum
+        run: |
+          set -euo pipefail
+          cd dist
+          mv qed "qed-${{ needs.verify.outputs.version }}-${{ matrix.label }}"
+          shasum -a 256 "qed-${{ needs.verify.outputs.version }}-${{ matrix.label }}" \
+            > "qed-${{ needs.verify.outputs.version }}-${{ matrix.label }}.sha256"
+          cat *.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.label }}
+          path: |
+            dist/qed-*
+          if-no-files-found: error
+
   sign:
     needs: [verify, image]
     if: vars.PUBLISH_GHCR == 'true'
@@ -402,7 +476,12 @@ jobs:
   # Always. A release with the artifacts attached is useful even when nothing
   # is published anywhere: it is how somebody installs this today.
   release:
-    needs: [verify, wheels, chart]
+    needs: [verify, wheels, chart, binary]
+    # The binaries are part of the release but not a condition of it: a
+    # PyInstaller failure on one runner should not withhold the wheels and the
+    # chart, and `download-artifact` with `merge-multiple` simply gets fewer
+    # files. Whether a binary is missing is visible in the asset list, which is
+    # the right place for it to be visible.
     if: always() && needs.wheels.result == 'success' && needs.chart.result == 'success'
     runs-on: ubuntu-latest
     permissions:

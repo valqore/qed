@@ -58,6 +58,52 @@ careless action, none at all to a determined operator who lies about who they
 are. ADR-0014 and `docs/approvals.md` say so rather than leaving it to be
 discovered.
 
+### Added - the single-file binary, and a Homebrew formula that is not published (week 10)
+
+SPEC §24.1's Homebrew path: one file, no Python on the machine. `deploy/qed.spec`
+builds it with PyInstaller; the release workflow builds three (macOS arm64,
+macOS x86_64, Linux x86_64) with a `.sha256` beside each, because the formula
+downloads by checksum.
+
+Per OS, because PyInstaller freezes the interpreter it runs on and there is no
+cross-compilation. macOS arm64 and x86_64 are separate builds rather than a
+universal2 binary: a universal build needs universal wheels for `cryptography`
+and `pydantic-core`, and those are not what pip resolves.
+
+**Building proves almost nothing, which the first build demonstrated.** It
+succeeded, and then `qed verify` inside the binary answered *"qed-verify is not
+installed: pip install ./packages/qed-verify"* — advice a brew user with no
+Python cannot take. `qed_verify` is an editable install in
+`packages/qed-verify/`, so `collect_submodules` resolved its names through the
+editable finder while the bundler still needed the directory on `pathex`. One
+line, and only a test that *runs* the binary would ever have found it.
+
+So the tests run it: `policy lint` (which resolves every rule's control
+references against the compliance catalogues, so a clean lint proves both sets
+of bundled YAML arrived — more than a `--help` that only proves the bootloader
+works), `packs list --json` for all ten catalogues, then `keys init`, `check`
+and `verify` against a real chain. The static half of the file checks that the
+spec's data patterns agree with the wheel's `package-data`, since two lists of
+the same files are two chances to be wrong.
+
+**The Homebrew formula is a template and deliberately not publishable.** The tap
+is `valqore/tap`, which does not exist: SPEC §24 lists reserving it among the
+names needed before the first public push, and publishing is the irreversible
+step. The template lives here so the binary and the formula that installs it
+change together, with a test asserting it names every platform the release
+matrix builds — a label added there and not here is a platform nobody can
+`brew install`.
+
+Its `test do` block runs `policy lint` and verifies a chain rather than checking
+`--version`, because a `--version` passes on a binary whose data files are
+missing. The wheel shipped exactly that bug once and the container shipped it
+again.
+
+`pyinstaller` joins the dev extras, and SPEC §20.3 is amended to list it per
+§23's "no new dependency without a spec update" — §24.1 already named it as the
+mechanism. It has to be installed in CI rather than skipped politely, because
+the `deploy` job fails on any skip.
+
 ### Added - `THREAT_MODEL.md`, and a test that keeps it true (week 10)
 
 SPEC §17 has named this file since week 1 and nothing was behind it. It is the
