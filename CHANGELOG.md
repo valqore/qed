@@ -6,6 +6,50 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — read as a buyer: three commands that cannot work, and a page that does not exist
+
+A pass through the repository as somebody evaluating it rather than building
+it, which is a different reader: they run the first command on the page and
+believe the capability table.
+
+**Install commands that fail.** `docs/index.md`'s "Thirty seconds" — the first
+thing a visitor to the documentation site runs — opened with
+`pip install valqore-qed`. The name is not registered; SPEC §24.1's
+reservations are the publication gate and `release.yml` holds both publishes
+behind `PUBLISH_PYPI` and `PUBLISH_GHCR`. So the command answers "No matching
+distribution found", and the same command appears in
+`docs/onboarding-shadow-to-enforce.md`, `docs/ci.md` and `docs/deployment.md`,
+which also offers `docker run ghcr.io/valqore/qed:1.0.0` against an image that
+has never been pushed. `docs/deployment.md` *did* explain all of this —
+140 lines below the commands, under "Releasing". That is the exit-code bug
+again: a document accurate as a whole and wrong at the only place anybody
+reads. Each command now carries the caveat and the alternative where it is
+written, and `tests/docs/test_claims.py` fails if an unavailable install
+command appears on a page that does not say so. A second test fails when
+`release.yml` stops gating a publish, because by then the caveats are the
+false statement and have to go.
+
+**A capability nobody outside this organisation can have.** The table said
+"**Web approval page** with OIDC human login" and cited `qed/api/ui.py`. That
+module contains no UI by design (SPEC §20.4 keeps the AGPL pages out of the
+Apache wheel) and the `qed-ui` repository it linked to is private, so the row
+advertised a page a reader cannot obtain through a link that answers 404. What
+exists today is better than what the row claimed and was missing from the
+table entirely: Slack Block Kit approvals where the click is resolved through
+`users.info` to an identified person rather than a workspace member, `qed
+approve` on the CLI, and `POST /v1/approvals` with a verified OIDC bearer. The
+row now names those, and a second row says plainly that the web pages are in a
+package that is not published.
+
+**Three places still named a defect in the commercial engine.**
+`qed/core/approval/model.py`, `docs/approvals.md` and ADR-0014 each explained
+this control by pointing at a finding about the shipping commercial engine.
+The lesson is the right one and it is why the function refuses three times
+instead of warning; naming a paying product as the example in an Apache-2.0
+repository is not. Reworded in all
+three, lesson kept, attribution gone — the same correction made last commit
+for `human_auth.py` and ADR-0008, which this pass found had missed three.
+
 ### Added — the rules that protect `main` are files, not a settings page
 
 `GOVERNANCE.md` has told a reader since week 11 that maintainers' changes go

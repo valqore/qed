@@ -65,6 +65,12 @@ protecting you, which is the only useful direction for a posture command.
 Before anything is in front of anything, confirm the kernel works and the chain
 verifies. Five minutes, no integration.
 
+!!! warning "`valqore-qed` is not on PyPI yet"
+    The name reservations in SPEC §24.1 are the publication gate, and
+    publishing is the irreversible step. Until that is done, install from
+    the repository: `git clone https://github.com/valqore/qed && cd qed &&
+    pip install -e .`
+
 ```bash
 pip install valqore-qed
 qed keys init --dir ./state

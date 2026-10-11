@@ -142,3 +142,83 @@ def test_the_invariant_tables_name_a_test_each() -> None:
         for row in rows:
             cells = [cell.strip() for cell in row.strip("|").split("|")]
             assert CITED.fullmatch(cells[-1]), f"{name}: row does not end in a test path: {row}"
+
+
+# --------------------------------------------------------------------------
+# Commands a reader is told to run
+# --------------------------------------------------------------------------
+
+#: What a reader meets first on each page that tells them to install from a
+#: registry. `release.yml` holds both names behind `PUBLISH_PYPI` and
+#: `PUBLISH_GHCR` until SPEC §24.1's reservations are done, so every one of
+#: these commands fails today with "No matching distribution found".
+RELEASE = ROOT / ".github" / "workflows" / "release.yml"
+
+# Markers are matched case-insensitively: one of these pages carries the
+# caveat as a YAML comment inside a workflow sample, where a sentence starts
+# with a capital.
+INSTALL_COMMANDS = {
+    "pip install valqore-qed": ("not on pypi yet", "PUBLISH_PYPI"),
+    "docker run ghcr.io/valqore/qed": ("not on ghcr yet", "PUBLISH_GHCR"),
+}
+
+
+def pages_telling_a_reader_to_install() -> list[tuple[Path, str, str]]:
+    """Every page where an unavailable install command is a line to be run.
+
+    A line inside a fenced block, or a step's `run:` in a workflow sample --
+    something a reader copies. An inline mention in prose is excluded:
+    `docs/credential-broker.md` naming the `[vault]` extra is describing a
+    package, not asking anybody to fetch one.
+    """
+    found: list[tuple[Path, str, str]] = []
+    for page in [*sorted((ROOT / "docs").rglob("*.md")), ROOT / "README.md"]:
+        text = page.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip().removeprefix("run: ").removeprefix("$ ")
+            for command, (marker, _) in INSTALL_COMMANDS.items():
+                if stripped.startswith(command):
+                    found.append((page, command, marker))
+    return found
+
+
+def test_the_pages_that_say_to_install_are_found() -> None:
+    """If this ever returns nothing, the test below passes by vacancy."""
+    assert pages_telling_a_reader_to_install(), "no install commands found at all"
+
+
+@pytest.mark.parametrize(("command", "gate"), [(c, g) for c, (_, g) in INSTALL_COMMANDS.items()])
+def test_the_publication_gate_is_still_closed(command: str, gate: str) -> None:
+    """The condition the test below depends on.
+
+    When the name is reserved and `release.yml` stops gating that publish, this
+    fails -- and the warnings the other test demands become false statements to
+    delete. That is the point: a caveat nobody removes is the next overclaim,
+    just pointing the other way.
+    """
+    workflow = RELEASE.read_text(encoding="utf-8")
+    assert f"vars.{gate}" in workflow or f"{gate}=true" in workflow, (
+        f"release.yml no longer gates {gate}, so `{command}` may now work: "
+        "delete the 'not yet published' warnings the docs carry and this test"
+    )
+
+
+def test_an_install_command_that_cannot_work_says_so_where_it_is_written() -> None:
+    """Not 140 lines further down, which is where it said so before.
+
+    `docs/deployment.md` explained the publication gate under "Releasing", at
+    the bottom of the page, while the two commands at the top told a reader to
+    `pip install valqore-qed` and `docker run ghcr.io/valqore/qed:1.0.0`. Both
+    fail. The same shape as the exit-code table in `README.md` that was correct
+    140 lines below the quick start that got it wrong: a document can be
+    accurate as a whole and wrong at the only place anybody reads.
+    """
+    offenders: list[str] = []
+    for page, command, marker in pages_telling_a_reader_to_install():
+        text = page.read_text(encoding="utf-8").lower()
+        if marker not in text and "not on pypi yet" not in text:
+            offenders.append(f"{page.relative_to(ROOT).as_posix()} says `{command}`")
+    assert not offenders, (
+        "these pages tell a reader to run a command that cannot work and do not "
+        "say so on the page: " + "; ".join(offenders)
+    )

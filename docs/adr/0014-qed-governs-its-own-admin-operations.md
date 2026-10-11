@@ -109,9 +109,9 @@ is asking.
 
 Claiming cryptographic separation of duties here would be the same kind of
 overclaim as a compliance mapping nobody checked — a "separation of duties"
-control reported in an export while nothing enforces it, and
-`check_separation_of_duties`' docstring already says that reporting a control
-that does not exist is worse than not having it. `THREAT_MODEL.md` carries this
+control reported in an export while nothing enforces it, which
+`check_separation_of_duties`' docstring names as worse than not having the
+control at all. `THREAT_MODEL.md` carries this
 where an auditor will read it.
 
 ## Consequences

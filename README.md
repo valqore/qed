@@ -54,7 +54,8 @@ What works today:
 | **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
 | **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
 | **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
-| **Web approval page** with OIDC human login | `qed/api/ui.py`, [`valqore/qed-ui`](https://github.com/valqore/qed-ui) |
+| **Approvals**: Slack Block Kit (a click resolved to an identified person, not a workspace member), CLI `qed approve`, `POST /v1/approvals` with an OIDC bearer | `qed/infra/channels/slack.py`, `qed/api/human_auth.py` |
+| Web approval **pages** — in the separate AGPL `qed-ui` package, which is **not published**. This wheel contains no UI and `qed serve --ui` mounts what it cannot supply | `qed/api/ui.py` (the mount point, SPEC §19) |
 | **HA**: evidence outbox + one chain leader on Postgres | `qed/infra/chain_drain.py`, `qed/api/leader.py` |
 | **`qed check --server`** and `--evidence-out` for CI | `docs/ci.md` |
 | **Container**, distroless and non-root | `deploy/Dockerfile` |

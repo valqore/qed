@@ -37,6 +37,12 @@ can drain.
 
 ## A process
 
+!!! warning "`valqore-qed` is not on PyPI yet"
+    The name reservations in SPEC §24.1 are the publication gate, and
+    publishing is the irreversible step. Until that is done, install from
+    the repository: `git clone https://github.com/valqore/qed && cd qed &&
+    pip install -e .`
+
 ```bash
 pip install valqore-qed
 qed keys init --dir /var/lib/qed
@@ -47,6 +53,12 @@ qed serve --dir /var/lib/qed --host 0.0.0.0
 adapters (SPEC §17). Read the `blockers` field; it says which.
 
 ## The container
+
+!!! warning "The image is not on GHCR yet"
+    `release.yml` builds it, starts it on both architectures and attaches it to
+    the GitHub Release, but pushing is behind `PUBLISH_GHCR` until SPEC §24.1's
+    reservations are done. Until then, build it: `docker build -t qed -f
+    deploy/Dockerfile .`
 
 ```bash
 docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.0.0 \

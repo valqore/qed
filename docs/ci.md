@@ -112,6 +112,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Not on PyPI yet -- SPEC §24.1's reservations are the publication
+      # gate. Until then this step is `pip install git+https://github.com/valqore/qed`.
       - name: Install qed
         run: pip install valqore-qed
 

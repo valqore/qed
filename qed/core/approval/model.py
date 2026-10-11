@@ -188,9 +188,10 @@ def check_separation_of_duties(
     * the approver is a person, not a service identity (AG-SOD-002), and
     * the approver is in the group the rule named (AG-SOD-002).
 
-    A compliance report listing a "separation of duties" control while nothing
-    enforces it is worse than one that omits it, because the evidence says
-    somebody checked.
+    A compliance report listing a "separation of duties" control while
+    nothing enforces it is worse than one that omits it, because the evidence
+    says somebody checked. That is the failure this function exists to not be,
+    which is why all three conditions refuse rather than warn.
     """
     if request.principal_hash is not None and approver_hash == request.principal_hash:
         raise SoDViolation(

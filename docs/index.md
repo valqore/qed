@@ -13,6 +13,12 @@ between the two means something.
 
 ## Thirty seconds
 
+!!! warning "`valqore-qed` is not on PyPI yet"
+    The name reservations in SPEC §24.1 are the publication gate, and
+    publishing is the irreversible step. Until that is done, install from
+    the repository: `git clone https://github.com/valqore/qed && cd qed &&
+    pip install -e .`
+
 ```bash
 pip install valqore-qed
 qed keys init --dir ./state

@@ -41,9 +41,11 @@ trying to approve their own production delete is exactly what an auditor
 wants to find later, and a refusal that leaves no trace is indistinguishable
 from an attempt that never happened.
 
-> This is the control most often *reported* in a compliance export while
-> nothing enforces it. Reporting a control that does not exist is worse than
-> not having it, because the evidence says somebody checked.
+> Separation of duties is the control most often *reported* in a compliance
+> export while nothing enforces it. Reporting a control that does not exist is
+> worse than not having it, because the evidence says somebody checked — so
+> here it is three refusals in `check_separation_of_duties`, and a refused
+> attempt is a record.
 
 ## Deduplication
 
