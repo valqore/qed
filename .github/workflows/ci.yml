@@ -662,7 +662,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]" -e packages/qed-verify
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           # Pinned: `helm template` output is what the chart tests parse, and
           # an unpinned release changes the renderer under them.
