@@ -675,7 +675,7 @@ jobs:
       # noticed because the tests only ever built for the host. The emulated
       # build costs a few minutes; a release that builds two architectures
       # should test two.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
