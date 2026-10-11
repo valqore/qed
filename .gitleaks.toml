@@ -18,7 +18,7 @@ useDefault = true
 
 [allowlist]
 description = """
-Four literals in this repository are secret-shaped and are not secrets.
+Five literals in this repository are secret-shaped and are not secrets.
 
 Note what is deliberately NOT here: no blanket exception for tests/, and no
 allowlisted file paths other than build output. Fixture directories are exactly
@@ -41,6 +41,24 @@ regexes = [
   # the word "abc".
   '''MIIBOgIBAAJB''',
   '''PRIVATE KEY-----abc-----END''',
+
+  # The `dedupe_key` in the frozen conformance fixture's `approval_requested`
+  # record (seq 5). 64 hex characters at entropy 3.88, so `generic-api-key`
+  # fires on it.
+  #
+  # It is `sha256("approval-dedupe/1" + human_hash|name|target|params_hash)`
+  # -- SPEC §9.2, so that a retrying agent lands on the request a human is
+  # already looking at. Every input to it is already in the same chain, in the
+  # clear or as its own hash, so the value discloses nothing that is not two
+  # records away. It is allowed by value rather than by path on purpose: the
+  # whole point of this file is that a fixture directory is exactly where a
+  # real credential gets parked "just for a minute", and the fixture is frozen,
+  # so this literal will never change.
+  #
+  # The fixture's public keys are NOT listed, and do not need to be: the
+  # default rules look for private key headers, and there is deliberately no
+  # private key in that directory.
+  '''a3d918de7e8e4ec2b96c3c553bc0c1d8240ddafb8c71f9185efc9c61c3d74a92''',
 ]
 
 # Only for a local `--no-git` working-tree scan, which does not honour
