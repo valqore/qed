@@ -641,7 +641,7 @@ jobs:
           grep -q "Policy language" site/spec/index.html
           grep -q "STRIDE" site/threat-model/index.html
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docs-site
           path: site/

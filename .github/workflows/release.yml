@@ -142,13 +142,13 @@ jobs:
 
       # Two artifacts, because PyPI's trusted publishing is scoped per project
       # and an upload carrying the other project's files is rejected.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-qed
           path: dist/valqore_qed-*
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-qed-verify
           path: dist/qed_verify-*
@@ -257,7 +257,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: vars.PUBLISH_GHCR == 'true'
         with:
           name: digests-${{ matrix.arch }}
@@ -335,7 +335,7 @@ jobs:
             > "qed-${{ needs.verify.outputs.version }}-${{ matrix.label }}.sha256"
           cat *.sha256
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.label }}
           path: |
@@ -402,7 +402,7 @@ jobs:
       - name: Attest the SBOM
         run: cosign attest --yes --predicate sbom.spdx.json --type spdxjson "${IMAGE}@${{ steps.digest.outputs.digest }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.spdx.json
@@ -434,7 +434,7 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm push chart/qed-${{ needs.verify.outputs.version }}.tgz oci://ghcr.io/valqore/charts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: chart
           path: chart/*.tgz
