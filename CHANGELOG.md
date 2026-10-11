@@ -6,6 +6,51 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — the rules that protect `main` are files, not a settings page
+
+`GOVERNANCE.md` has told a reader since week 11 that maintainers' changes go
+through the same CI as anybody else's, with "no bypass and no admin merge".
+Nothing enforced it. Every commit in this repository went to `main` directly,
+and the reason is not negligence: protected branches and rulesets are refused
+on a private repository on this plan — `GET /repos/valqore/qed/rulesets`
+answers `403 Upgrade to GitHub Pro or make this repository public` — so there
+has been no setting to switch on. A promise in a document with nothing behind
+it is the exact failure this product exists to remove, which made it worth
+fixing before publication rather than after.
+
+`.github/rulesets/main.json` and `tags.json` now hold the rules as the JSON the
+REST API takes: a pull request is required, all ten checks `ci.yml` runs on one
+are required, a stale branch must rebase before merging, `main` cannot be
+force-pushed or deleted, a `v*` tag cannot be moved or deleted, merges are
+squash-only with linear history enforced, and `bypass_actors` is empty — which
+is the single line that makes "no admin merge" true. `.github/rulesets/apply.sh`
+installs them and the repository settings that cannot be expressed as a ruleset
+(squash-only, branch deletion on merge, Discussions on, private vulnerability
+reporting, Dependabot alerts, secret scanning with push protection). It prints a
+plan and changes nothing without `--apply`, reports each refusal by name instead
+of abandoning the rest, and is idempotent, because two rulesets named `main`
+both apply and neither is the one you edited.
+
+`required_approving_review_count` is `0`, and the reason is in
+`.github/rulesets/README.md`: with one maintainer and no bypass actor,
+requiring an approval nobody can give is not strictness, it is a repository
+nobody can merge into — and the usual repair, adding the maintainer as a bypass
+actor, is precisely the admin merge this project says does not happen here.
+
+`tests/docs/test_repo_protection.py` derives the required-check list from
+`ci.yml`, including the four `check` matrix cells, and fails in both directions:
+a job that is not required is a check that can fail with the merge button
+green, and a required context no job reports is a pull request that waits
+forever. It also ties the approval count to the sentence in `GOVERNANCE.md`
+saying nobody has reviewed this repository, so the day a second maintainer
+arrives the ruleset has to change with it. `GOVERNANCE.md` now states both
+halves plainly: nothing protects `main` today, and here is the file that will.
+
+Also: `.hypothesis/` is ignored explicitly. Hypothesis writes its own
+`.hypothesis/.gitignore` containing `*`, so 814 cache files have been staying
+out of the repository by a library's courtesy rather than by this repository's
+decision. The merged `week-2` branch is deleted.
+
 ### Fixed — the verifier reported a pass over a check it had skipped
 
 `qed-verify` printed `result : OK -- chain is contiguous, unmodified and

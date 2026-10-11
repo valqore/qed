@@ -8,6 +8,11 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Hypothesis writes its own `.hypothesis/.gitignore` containing `*`, so this
+# line is redundant until the day it is not. 814 files in there right now, and
+# relying on a library to keep ignoring its own cache is a dependency nobody
+# would accept if it were written down.
+.hypothesis/
 .coverage
 htmlcov/
 

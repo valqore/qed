@@ -139,6 +139,38 @@ parts:
 - **Maintainers' changes go through the same CI** as anybody else's. There is
   no bypass and no admin merge.
 
+### What enforces that
+
+The sentence above is the kind of claim this product exists to be suspicious
+of: a control described in a document while nothing checks it. Two honest
+statements, in order.
+
+**Today, nothing enforces it.** Every commit in this repository went straight
+to `main`. Protected branches and rulesets require a public repository or a
+paid plan, and this one is private on a free one, so there is no setting to
+turn on yet -- `GET /repos/valqore/qed/rulesets` answers `403 Upgrade to GitHub
+Pro or make this repository public`. The paragraph above said what the rules
+will be; this one says what they are.
+
+**From publication, the rules are files.** `.github/rulesets/main.json` and
+`tags.json` hold the ruleset that requires a pull request, requires every one
+of the ten checks `ci.yml` runs, requires a stale branch to rebase first,
+forbids force-pushing or deleting `main`, forbids moving a `v*` tag, and leaves
+`bypass_actors` empty -- which is the one line that makes "no admin merge"
+true. `.github/rulesets/apply.sh` installs them, and
+`tests/docs/test_repo_protection.py` derives the required check list from
+`ci.yml` and fails when a job is added without being required, because that is
+how a merge button goes green over a check that can fail.
+
+Approvals are set to zero while there is one maintainer, for the reason above:
+requiring an approval nobody can give, with no bypass, is a repository nobody
+can merge into, and the usual repair is the admin merge this section says does
+not happen. A test ties that zero to the sentence saying nobody has reviewed
+this code, so the day that stops being true, the ruleset has to change too.
+
+Anybody can read the JSON. Anybody with the repository open can compare it to
+what is installed: `gh api repos/valqore/qed/rulesets`.
+
 ## Support and response
 
 One commitment, because it is the only one worth making at this size: **every
