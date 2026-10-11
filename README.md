@@ -95,10 +95,23 @@ pip install -e ".[dev]" -e packages/qed-verify
 qed keys init --dir .qed                         # Ed25519 evidence key, 0600
 qed check examples/proposals/prod-db-drop.json --dir .qed
 qed export --dir .qed --out chain.jsonl
-qed-verify chain.jsonl --keys .qed/public
+qed-verify chain.jsonl --keys .qed/public --instance-id qed-local
 ```
 
-`qed check` exit codes: `0` ALLOW, `2` REQUIRE_APPROVAL, `3` BLOCK, `1` error.
+`qed check` exit codes: `0` ALLOW, `2` BLOCK, `3` REQUIRE_APPROVAL, `1` error —
+**but the default mode is shadow, and shadow always exits 0.** The first run
+above prints `REQUIRE_APPROVAL` and exits 0, which is deliberate: a pipeline
+that failed in shadow mode would make shadow mode useless as a way to find out
+what a policy would do. `docs/onboarding-shadow-to-enforce.md` covers the three
+separate dials that all have to point at "enforce" before a `BLOCK` stops
+anything.
+
+`--instance-id` is not decoration. It is the only check that ties an export to a
+particular instance; everything else the verifier does is self-referential, so a
+chain generated on a laptop with a fresh key passes without it. Omit it and the
+verifier now says `bound to : NOTHING` and names the check that did not run.
+The id must come from outside the file — and if you are the auditor rather than
+the operator, so must the public keys.
 
 ### Put it in front of an MCP server
 
@@ -275,7 +288,7 @@ step — and it explains the three separate dials that all have to point at
    the planning phase and superseded by the spec; kept because the public ADR
    index cites it as the record of what was decided before any code existed.
 3. `docs/adr/` — decisions made while implementing, where the spec was silent.
-4. **`THREAT_MODEL.md`** — STRIDE, and eleven things qed does not protect
+4. **`THREAT_MODEL.md`** — STRIDE, and twelve things qed does not protect
    against. Read that section first.
 5. `docs/onboarding-shadow-to-enforce.md` — getting from shadow to enforce.
 6. `docs/evidence-format.md`, `docs/policy-language.md`, `docs/blast-radius.md`.

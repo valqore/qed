@@ -13,6 +13,21 @@ Checks, in order:
 2. ``prev_hash`` of record *n* equals ``hash`` of record *n-1*; record 0's
    ``prev_hash`` matches ``sha256(GENESIS_DOMAIN + instance_id)`` when the
    instance id is known.
+
+   Check 2 is the only one that ties these records to a *particular* instance,
+   and it is the only one that can be skipped. Everything else here is
+   self-referential: a chain generated on a laptop five minutes ago, signed
+   with a key generated at the same time, satisfies checks 1 and 3 through 7
+   exactly as well as a real one. So when no instance id is supplied the report
+   says which check did not run rather than reporting an unqualified pass --
+   ``Report.genesis_bound_to`` and ``Report.unchecked`` carry it, and
+   ``summary()`` prints it on the result line.
+
+   The instance id must reach the verifier **from outside the file under
+   review**. It is also in the genesis payload, so reading it out of the export
+   and passing it back proves nothing: the forger chose both. The same applies
+   to the public keys. A contract, an engagement letter, or the operator's
+   published instance identity is the source; the export never is.
 3. ``hash`` recomputes from the record's own fields. Uses ``payload_hash``, not
    the payload, so a record whose payload was purged under retention still
    verifies.
@@ -70,35 +85,61 @@ class Report:
     purged: int = 0
     keys_used: list[str] = field(default_factory=list)
     problems: list[Problem] = field(default_factory=list)
+    #: The instance id record 0 was successfully bound to, or ``None`` when the
+    #: binding was not checked. Never populated from the export itself.
+    genesis_bound_to: str | None = None
+    #: Checks that did not run, in words an auditor can put in a working paper.
+    #: A non-empty list does not make ``ok`` false -- nothing failed -- but it
+    #: does mean the pass is narrower than it reads.
+    unchecked: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not self.problems
 
+    @property
+    def complete(self) -> bool:
+        """Every check ran *and* passed. Weaker than ``ok`` is not enough."""
+        return self.ok and not self.unchecked
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
+            "complete": self.complete,
             "records": self.records,
             "first_seq": self.first_seq,
             "last_seq": self.last_seq,
             "checkpoints": self.checkpoints,
             "purged_payloads": self.purged,
             "keys_used": sorted(self.keys_used),
+            "genesis_bound_to": self.genesis_bound_to,
+            "unchecked": list(self.unchecked),
             "problems": [{"seq": p.seq, "code": p.code, "detail": p.detail} for p in self.problems],
         }
 
     def summary(self) -> str:
+        bound = f"instance {self.genesis_bound_to!r}" if self.genesis_bound_to else "NOTHING"
         lines = [
             f"records   : {self.records} (seq {self.first_seq}..{self.last_seq})",
             f"keys      : {', '.join(sorted(self.keys_used)) or 'none'}",
             f"checkpoint: {self.checkpoints}",
             f"purged    : {self.purged} payload(s) removed under retention",
+            f"bound to  : {bound}",
         ]
-        if self.ok:
-            lines.append("result    : OK -- chain is contiguous, unmodified and signed")
-        else:
+        if not self.ok:
             lines.append(f"result    : FAILED -- {len(self.problems)} problem(s)")
             lines += [f"  - {p}" for p in self.problems]
+        elif self.complete:
+            lines.append(
+                "result    : OK -- chain is contiguous, unmodified, signed, and bound "
+                "to the instance id supplied"
+            )
+        else:
+            lines.append(
+                f"result    : OK SO FAR -- chain is contiguous, unmodified and signed, "
+                f"but {len(self.unchecked)} check(s) did not run"
+            )
+            lines += [f"  ! {note}" for note in self.unchecked]
         return "\n".join(lines)
 
 
@@ -172,6 +213,16 @@ def verify_records(
                             f"prev_hash does not match instance id {instance_id!r}",
                         )
                     )
+                else:
+                    report.genesis_bound_to = instance_id
+            else:
+                report.unchecked.append(
+                    "genesis binding: no instance id was supplied, so nothing ties these "
+                    "records to a particular instance -- a chain generated anywhere, with "
+                    "any key, verifies exactly like this one. Re-run with --instance-id, "
+                    "taking the id from the engagement letter or the operator's published "
+                    "identity, never from this file"
+                )
         else:
             if seq != previous["seq"] + 1:
                 report.problems.append(

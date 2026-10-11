@@ -207,8 +207,15 @@ that has been down for a month must not be a surprise.
 
 ```bash
 qed export --dir /var/lib/qed > chain.jsonl
-qed-verify chain.jsonl --keys /var/lib/qed/public
+qed-verify chain.jsonl --keys /var/lib/qed/public --instance-id <id> --require-complete
 ```
+
+The instance id and the public keys both have to reach you from outside the
+export — the engagement letter, the contract, the operator's published identity.
+Both are *in* the material you were given, which is exactly why neither can be
+taken from it: a chain forged wholesale carries whatever id and key the forger
+chose, and verifies perfectly against them. `--require-complete` makes the
+verifier exit non-zero rather than report a pass with the binding skipped.
 
 `qed-verify` checks the roots against the records in the export. That catches
 tampering *within* what it was given. The anchor catches the other case:

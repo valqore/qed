@@ -1,6 +1,6 @@
 # Validating a release
 
-The test suite is 2,639 fast tests and green. This page is about the things it
+The test suite is 2,705 fast tests and green. This page is about the things it
 cannot see, because every one of them has shipped at least once.
 
 The pattern is consistent enough to name: **a test that imports the source tree
@@ -33,6 +33,8 @@ several replicas starting at the same moment.
 | Eleven weeks of "cross-version fixtures in CI" with no fixtures | the test that looked like one regenerates its own input |
 | A frozen fixture's public keys, matched by `.gitignore`'s `*.pem` | the files were on disk, so everything passed locally |
 | A byte-pinned fixture written with CRLF on Windows | the pin matched on the machine that made it |
+| **`qed-verify` printing `OK` over a check it had skipped** | every test supplied `--instance-id`, so no test ever saw the output an auditor following the README would get |
+| A repository about to publish a defect list for the commercial product | no test reads a document the way an outsider would |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
@@ -128,7 +130,7 @@ that actually decides.
 
 **The fixture was written with CRLF.** The generator used
 `Path.write_text`, which on Windows translates every `
-` to `
+` to `
 `. The test
 pins a sha256 over the fixture's bytes, and `.gitattributes` checks the
 repository out as LF everywhere -- so the pin matched on the machine that made
@@ -156,6 +158,26 @@ setuptools expands those patterns with `glob`, which does. So
 not. **A guard written in a different matcher than the thing it guards is not a
 guard**, and the only reason this surfaced is that one test starts the real
 image and drives it.
+
+## Read the product as somebody who has not seen it
+
+Two of the rows above came from one exercise that is not a test and cannot be:
+installing the package into an empty virtualenv and following the documentation
+literally, as a first-time user, a security reviewer and an auditor in turn.
+
+The suite could not have found either. `qed-verify`'s tests all passed
+`--instance-id`, because the person writing them knew it mattered; the
+documented quick start omitted it, so the output an auditor would actually see
+was output no test had ever rendered. A test asserts what its author already
+knows. It cannot notice that the one command in the README produces a weaker
+result than the README implies, and it cannot notice that a planning document
+left in the repository would, on publication, hand the world a list of named
+defects in the product that funds this one.
+
+The practice that follows: before anything irreversible — a release, a
+publication — read the repository as an outsider, run the commands exactly as
+written, and treat the gap between what a command prints and what a reader
+concludes from it as a defect in the product rather than in the reader.
 
 ## The checks
 

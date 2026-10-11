@@ -97,6 +97,31 @@ def keys(private: Ed25519PrivateKey) -> dict[str, Any]:
 def test_a_handwritten_chain_verifies(private, keys) -> None:
     report = verify_records(make_chain(private), keys, instance_id=INSTANCE)
     assert report.ok, report.summary()
+    assert report.complete, report.summary()
+    assert report.genesis_bound_to == INSTANCE
+
+
+def test_a_forgery_with_its_own_key_and_id_passes_every_other_check(private, keys) -> None:
+    """The reason the genesis binding has to arrive from outside the file.
+
+    This chain is fabricated here, in this test, with a key generated in this
+    test, and labelled with whatever instance id the forger liked. Linkage,
+    hashes, canonicalisation, signatures: all correct, because the forger
+    computed them. The verifier is right to report no problems -- there are
+    none *in the file*. What it must not do is let that read as provenance.
+    """
+    forged = make_chain(private)
+    report = verify_records(forged, keys)
+
+    assert report.ok
+    assert not report.complete
+    assert report.genesis_bound_to is None
+    assert "no instance id was supplied" in report.unchecked[0]
+
+    # And the id is sitting in the export, so taking it from there is circular:
+    # bound against the id the forger chose, this same forgery is "complete".
+    circular = verify_records(forged, keys, instance_id=INSTANCE)
+    assert circular.complete, "the tautology verifies, which is exactly the point"
     assert report.records == 3
     assert report.first_seq == 0 and report.last_seq == 2
 
@@ -201,6 +226,63 @@ class TestCommandLine:
         chain, keys_dir = self._write(tmp_path, private)
         assert cli_main([str(chain), "--keys", str(keys_dir), "--instance-id", INSTANCE]) == 0
         assert cli_main([str(chain), "--keys", str(keys_dir), "--instance-id", "other"]) == 1
+
+    def test_an_unbound_pass_says_so_on_the_result_line(
+        self, tmp_path: Path, private, capsys
+    ) -> None:
+        """The bug this replaces: `OK` printed over a check that never ran.
+
+        Without `--instance-id` the genesis binding is skipped, and for eleven
+        weeks the summary said `OK -- chain is contiguous, unmodified and
+        signed` anyway while `to_dict()` carried no field recording the
+        omission. An auditor reading that line was told more than the verifier
+        had checked, by the one tool in this product whose entire job is not
+        overstating what it knows.
+        """
+        chain, keys_dir = self._write(tmp_path, private)
+        assert cli_main([str(chain), "--keys", str(keys_dir)]) == 0
+        out = capsys.readouterr()
+        assert "bound to  : NOTHING" in out.out
+        assert "OK SO FAR" in out.out
+        assert "did not run" in out.out
+        assert "not checked" in out.err
+
+    def test_a_bound_pass_names_the_instance(self, tmp_path: Path, private, capsys) -> None:
+        chain, keys_dir = self._write(tmp_path, private)
+        assert cli_main([str(chain), "--keys", str(keys_dir), "--instance-id", INSTANCE]) == 0
+        out = capsys.readouterr()
+        assert f"bound to  : instance {INSTANCE!r}" in out.out
+        assert "bound to the instance id supplied" in out.out
+        assert out.err == ""
+
+    def test_require_complete_turns_a_skipped_check_into_a_failure(
+        self, tmp_path: Path, private
+    ) -> None:
+        """What a pipeline needs, because a pipeline reads the exit code only."""
+        chain, keys_dir = self._write(tmp_path, private)
+        assert cli_main([str(chain), "--keys", str(keys_dir), "--require-complete"]) == 1
+        assert (
+            cli_main(
+                [
+                    str(chain),
+                    "--keys",
+                    str(keys_dir),
+                    "--instance-id",
+                    INSTANCE,
+                    "--require-complete",
+                ]
+            )
+            == 0
+        )
+
+    def test_the_json_report_records_the_omission(self, tmp_path: Path, private, capsys) -> None:
+        chain, keys_dir = self._write(tmp_path, private)
+        cli_main([str(chain), "--keys", str(keys_dir), "--json"])
+        report = json.loads(capsys.readouterr().out)
+        assert report["ok"] is True
+        assert report["complete"] is False
+        assert report["genesis_bound_to"] is None
+        assert len(report["unchecked"]) == 1
 
     def test_exit_two_when_the_file_is_missing(self, tmp_path: Path) -> None:
         assert cli_main([str(tmp_path / "nope.jsonl"), "--keys", str(tmp_path)]) == 2

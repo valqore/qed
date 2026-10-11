@@ -1,0 +1,17 @@
+# Security reports must not arrive as issues. `blank_issues_enabled: false`
+# removes the "open a blank issue" escape hatch that bypasses the templates --
+# including the one that tells a reporter where a vulnerability goes instead.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/valqore/qed/security/advisories/new
+    about: >-
+      Report privately, never as an issue. A vulnerability in a public issue is
+      a disclosure. SECURITY.md has the alternative channel if this one is
+      unavailable to you.
+  - name: Question about using qed
+    url: https://github.com/valqore/qed/discussions
+    about: >-
+      Discussions, not issues. If the answer turns out to be "the documentation
+      does not say", that becomes a documentation issue and we will open it.

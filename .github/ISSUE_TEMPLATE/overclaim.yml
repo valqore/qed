@@ -1,0 +1,52 @@
+name: A claim this project makes is not true
+description: Documentation, output, or a threat-model row that says more than the code does.
+labels: [overclaim]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This template exists because this is the most valuable report we can
+        receive, and because every instance found so far was found by a person
+        rather than by the test suite.
+
+
+        A test asserts what its author already knew. It cannot notice that a
+        documented command produces a weaker result than the document implies,
+        that a mitigation protects a different threat from the one in its row,
+        or that a control appears in an export while nothing enforces it. The
+        last of those is the failure this product exists to remove, so finding
+        one in *this* product is not an embarrassment to report gently — state
+        it flatly.
+
+
+        Accepted examples, all real: a verifier printing `OK` over a check it
+        had skipped; a threat-model row crediting a control that protects the
+        operator rather than the auditor; a conformance requirement written as
+        "when the id is supplied", which is the gap rather than the rule; exit
+        codes listed in the wrong order two lines above the correct ones.
+  - type: textarea
+    id: claim
+    attributes:
+      label: The claim
+      description: Quote it, and say where — file and line, a command's output, a page.
+    validations:
+      required: true
+  - type: textarea
+    id: reality
+    attributes:
+      label: What the code actually does
+      description: >-
+        A path, a function, a test that passes while the claim is false, or a
+        transcript. If the claim is merely *narrower* than it reads rather than
+        false, say that — it is still worth fixing and it is the more common
+        case.
+    validations:
+      required: true
+  - type: textarea
+    id: who
+    attributes:
+      label: Who is misled, and into doing what
+      description: >-
+        Optional, and the part that sets priority. "An auditor accepts an export
+        that proves less than they think" outranks an inaccurate sentence nobody
+        acts on.

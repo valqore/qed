@@ -6,6 +6,78 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — the verifier reported a pass over a check it had skipped
+
+`qed-verify` printed `result : OK -- chain is contiguous, unmodified and
+signed` whether or not `--instance-id` was supplied, and `--json` carried no
+field recording the difference. Without the flag the genesis binding does not
+run, and the genesis binding is the only check in the verifier that reaches
+outside the file it was given: linkage, recomputed hashes, canonicalisation,
+signatures and Merkle roots are all satisfied exactly as well by records
+fabricated this morning and signed with a key generated for the purpose. So the
+tool whose entire job is not overstating what it knows was overstating what it
+knew — and the quick start in `README.md` omitted the flag, which made the weak
+invocation the documented one.
+
+The report now carries `genesis_bound_to` and `unchecked`, plus a `complete`
+property that is true only when every check ran *and* passed. `summary()` prints
+a `bound to` line naming the instance or `NOTHING`, and an unbound pass reads
+`OK SO FAR -- ... but 1 check(s) did not run` followed by what did not run. The
+CLI repeats it on stderr, and `--require-complete` turns the omission into exit
+1, which is what a pipeline needs: a pipeline reads the exit code and nobody
+reads the summary.
+
+`qed verify <file>` had the same hole — it passed `instance_id=None` for an
+explicit file — and now takes `--instance-id`. It deliberately does *not* default
+to the local instance id when verifying a file, because binding a foreign export
+to the local identity would turn a real check into a coincidence.
+
+The second half of this is that the instance id and the public keys must reach
+an auditor **out of band**. Both are in the export — the id in the genesis
+payload, the key id on every record — so reading either out of the file and
+checking the file against it is a tautology, and a forged chain labelled with
+any instance id and signed with a laptop key passes it completely. Nothing said
+so. `docs/oscal.md` said the opposite, presenting the keys embedded in the
+OSCAL `back-matter` as "what is needed to check it". That paragraph is rewritten,
+`THREAT_MODEL.md` gains limitation 11 and splits its substitution row into the
+operator's case (covered) and the wholesale-forgery case (auditor-side, partial),
+and `docs/evidence-format.md` makes it conformance requirement 11 plus a MUST
+NOT against taking either value from the material under review.
+
+Requirement 11 is a new obligation on verifiers added after the format froze, so
+the in-freeze/out-of-freeze table now says explicitly which of the two the freeze
+is about: record bytes, not what a verifier has to tell its user. No record
+changed and no previously valid chain became invalid.
+
+### Fixed — `README.md` had the exit codes backwards
+
+It listed `2` REQUIRE_APPROVAL and `3` BLOCK; `qed/runtime.py` has
+`EXIT_BLOCK = 2` and `EXIT_APPROVAL = 3`, and `README.md` itself got it right
+140 lines further down. Neither place mentioned that **shadow mode always exits
+0** — which a newcomer meets immediately, because shadow is the default and the
+quick start's first `qed check` prints `REQUIRE_APPROVAL` and exits 0 two lines
+above the table that says 3.
+
+### Added — the repository files GitHub reads rather than a human
+
+`CODE_OF_CONDUCT.md` as a file (it existed only as a section inside
+`CONTRIBUTING.md`, which satisfies a reader and not GitHub's community profile),
+`.github/CODEOWNERS`, `.github/dependabot.yml`, `.github/PULL_REQUEST_TEMPLATE.md`
+and three issue templates with blank issues disabled, so no reporter can bypass
+the one that says a vulnerability does not belong in a public issue.
+
+One of the templates is for reporting that **a claim this project makes is not
+true**. Every overclaim found so far was found by a person reading the product
+rather than by the suite, including two this week, so there is now a front door
+for it.
+
+`tests/docs/test_community_health.py` checks all of it, because each of these
+fails silently: a template with a YAML error is ignored without a warning, and a
+`CODEOWNERS` line naming a team that does not exist is dropped — which is why
+the owner is spelled as a user. A protection that reads as present and is absent
+is the same shape as a compliance control nobody enforces, which is the failure
+this product exists to remove.
+
 ### Removed — commercial planning material, and its history
 
 A pre-publication read of this repository as an outsider rather than as its

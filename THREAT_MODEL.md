@@ -88,7 +88,8 @@ is the shape of the product.
 | A record is deleted | `seq` is contiguous; a gap is reported | `qed-verify` |
 | The whole chain is rewritten by the operator | **Only detectable with an anchor.** Checkpoint roots published outside the instance (S3 object-lock, git tag, transparency log) | `qed/infra/publishers/`, `qed/remote/anchor.py`. `qed doctor` says "anchors: none" in yellow when there are none, because without one this row is not covered |
 | A forged history signed with a leaked key | Rotation **destroys** the old private key; `key_rotated` is signed by the retiring key | ADR-0010 |
-| A chain from another instance is substituted | `genesis` binds `instance_id`; the writer refuses a mismatch | `InstanceMismatch` |
+| A chain from another instance is substituted **into a running instance** | `genesis` binds `instance_id`; the writer refuses a mismatch | `InstanceMismatch` |
+| A chain is **fabricated wholesale** and handed to an auditor | Partial, and auditor-side only. `qed-verify --instance-id` binds record 0 to an identity, which fails a forgery labelled with a different id — but the id and the public key must both reach the auditor out of band, since both appear in the export and were chosen by whoever wrote it. `InstanceMismatch` protects the operator's own chain from reuse and does nothing here. Without an out-of-band id and key, every other check in the verifier is satisfied by records made five minutes ago | `qed-verify`, `docs/evidence-format.md` conformance 11 |
 | A control catalogue is swapped to change what an export claims | Pack bundles are signed; an import is an `admin_action` carrying the bundle hash and key id | ADR-0012 |
 | An imported catalogue is rolled back to remove a mapping | A bundle older than the installed one is refused | `check_not_older` |
 
@@ -255,7 +256,36 @@ usefully, which they do not. The honest reading of an export is "these rules
 examined these actions", and the gap between that and "the agent did nothing
 bad" is exactly the size of the gap in the rules.
 
-### 11. Not yet built
+### 11. A verifier binds a chain to an identity only if that identity arrives out of band
+
+Every check `qed-verify` performs except one is internal to the file it is
+given. Linkage, recomputed hashes, canonicalisation, signatures, Merkle roots —
+all of them are satisfied exactly as well by records fabricated this morning and
+signed with a key generated for the purpose. The one check that reaches outside
+the file is the genesis binding, `prev_hash` of record 0 against
+`sha256("evidence-chain/1:genesis:" + instance_id)`.
+
+That check is only as good as the instance id, and the instance id is *in the
+export* — it is in the genesis payload, in plain text. So is the key id of every
+signing key. An auditor who reads the id out of the file and passes it back with
+`--instance-id` has checked the file against itself and learned nothing: the
+forger chose both halves.
+
+The id and the public key have to come from somewhere the operator did not
+control at the moment the evidence was produced — an engagement letter, a
+contract, a key published before the period under review, a fingerprint
+confirmed by another channel. qed cannot enforce this and does not try. What it
+does is refuse to hide it: without `--instance-id` the verifier reports
+`bound to : NOTHING` and names the check that did not run, `--require-complete`
+turns that into a non-zero exit, and `docs/evidence-format.md` makes both a
+conformance requirement for any other implementation.
+
+The failure this removes is narrow and was real: until 11 October 2026 the
+reference verifier printed `OK -- chain is contiguous, unmodified and signed`
+with the binding skipped and no field anywhere recording the omission, and the
+README's own quick start omitted the flag.
+
+### 12. Not yet built
 
 - `mode: mitm` for the HTTP proxy: a `CONNECT` tunnel is decided on the host
   name and SNI only, so the path and body are not seen.

@@ -83,8 +83,13 @@ artifact:
 ```bash
 qed keys init --dir .qed
 qed check proposal.json --dir .qed --evidence-out qed-evidence.jsonl
-qed-verify qed-evidence.jsonl --keys .qed/public
+qed-verify qed-evidence.jsonl --keys .qed/public --instance-id qed-local --require-complete
 ```
+
+`--require-complete` belongs in a pipeline specifically because a pipeline reads
+the exit code and nobody reads the summary. Without `--instance-id` the genesis
+binding does not run, and the verifier exits 0 with a pass that is narrower than
+it looks; with `--require-complete` a missing id fails the build instead.
 
 `--evidence-out` writes the **whole chain**, not just this verdict.
 `qed-verify` walks linkage from genesis, so a file holding the last two records

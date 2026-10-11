@@ -105,13 +105,28 @@ what a human reads. Single separators survive so a control stays recognisable â€
 
 ## Verifying the chain the document describes
 
-`back-matter` embeds each signing public key as a base64 resource, so the
-document contains what is needed to check it:
+`back-matter` embeds each signing public key as a base64 resource, which makes
+the document convenient to read â€” and is **not** what you check it against:
 
 ```bash
 qed export --dir .qed --out chain.jsonl
-qed-verify chain.jsonl --keys .qed/public --instance-id <id>
+qed-verify chain.jsonl --keys .qed/public --instance-id <id> --require-complete
 ```
+
+The embedded keys and the instance id in the genesis payload were both written
+by the instance under audit. Checking the document against the key the document
+carries, and against the id the document states, is checking it against itself:
+a chain fabricated from scratch, signed with a key made for the purpose, and
+labelled with any instance id you like passes that test completely. The
+embedded resources are there so a reader can follow the linkage by eye and so
+the document stands alone as a *record*; they are not an evidentiary shortcut.
+
+For the check to mean anything, the instance id and the public key have to reach
+the verifier from somewhere the operator does not control the moment the
+evidence is produced: the engagement letter, the contract, a key the operator
+published before the period under review, or a key fingerprint confirmed out of
+band. `--require-complete` makes `qed-verify` exit non-zero rather than report a
+pass with the binding skipped.
 
 The observations carry `record-hash`, `previous-hash`, `payload-hash` and
 `signature`, so the linkage is readable from the OSCAL document alone, though

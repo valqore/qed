@@ -18,11 +18,17 @@ pip install valqore-qed
 qed keys init --dir ./state
 qed check proposal.json --dir ./state     # 0 ALLOW · 2 BLOCK · 3 REQUIRE_APPROVAL
 qed export --dir ./state > chain.jsonl
-qed-verify chain.jsonl --keys ./state/public
+qed-verify chain.jsonl --keys ./state/public --instance-id qed-local
 ```
 
 The last command is the one that matters. It reads a file and a public key, and
 it never contacts the instance that wrote them.
+
+`--instance-id` is the only check in it that ties the export to a particular
+instance, and it is the only one that can be skipped. Leave it out and the
+verifier reports `bound to : NOTHING` and names the check that did not run,
+because the alternative — printing an unqualified `OK` — would be the verifier
+overstating its own result.
 
 ## Where to go next
 
@@ -35,7 +41,7 @@ it never contacts the instance that wrote them.
 
 - :material-alert-outline: **[Threat model](threat-model.md)**
 
-    STRIDE, and eleven things QED does not protect against. Read the
+    STRIDE, and twelve things QED does not protect against. Read the
     limitations before the mitigations.
 
 - :material-file-code-outline: **[Policy language](policy-language.md)**

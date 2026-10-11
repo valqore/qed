@@ -181,7 +181,7 @@ Before anything irreversible, export:
 
 ```bash
 qed export --dir /var/lib/qed > chain-$(date +%F).jsonl
-qed-verify chain-$(date +%F).jsonl --keys /var/lib/qed/public
+qed-verify chain-$(date +%F).jsonl --keys /var/lib/qed/public --instance-id <your id>
 ```
 
 ## Releasing

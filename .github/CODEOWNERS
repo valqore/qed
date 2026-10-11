@@ -1,0 +1,40 @@
+# Review is required on everything while there is one maintainer (GOVERNANCE.md),
+# so this file is less about routing than about making the high-consequence
+# paths impossible to merge past by accident. When a second maintainer arrives,
+# GOVERNANCE.md's two-maintainer rules take effect and these lines get owners
+# that are not the same person.
+#
+# Spelled as a user rather than as @valqore/qed-maintainers on purpose: GitHub
+# ignores a CODEOWNERS line naming a team that does not exist, and does it
+# quietly, so the protection would read as present and be absent. That is the
+# same failure mode as a compliance control nobody enforces.
+
+*                                       @tunc-celik-valqore
+
+# The frozen evidence format. A change here can invalidate records already in a
+# customer's database, which is the one failure this project cannot walk back
+# (ADR-0015).
+/qed/core/evidence/                     @tunc-celik-valqore
+/packages/qed-verify/                   @tunc-celik-valqore
+/tests/evidence/fixtures/               @tunc-celik-valqore
+/docs/evidence-format.md                @tunc-celik-valqore
+
+# The decision path. `qed.core` imports no HTTP client, no socket and no model
+# SDK, and tests enforce all three.
+/qed/core/                              @tunc-celik-valqore
+
+# Claims about what the product does, and the documents an auditor reads.
+/README.md                              @tunc-celik-valqore
+/THREAT_MODEL.md                        @tunc-celik-valqore
+/SECURITY.md                            @tunc-celik-valqore
+/GOVERNANCE.md                          @tunc-celik-valqore
+/QED_SPEC.md                            @tunc-celik-valqore
+/docs/adr/                              @tunc-celik-valqore
+/qed/compliance/                        @tunc-celik-valqore
+
+# Supply chain: what gets built, signed and published, and the secret scanner's
+# allowlist.
+/.github/workflows/                     @tunc-celik-valqore
+/.gitleaks.toml                         @tunc-celik-valqore
+/deploy/                                @tunc-celik-valqore
+/pyproject.toml                         @tunc-celik-valqore

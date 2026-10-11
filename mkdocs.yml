@@ -137,6 +137,7 @@ nav:
   - Project:
       - Governance: governance.md
       - Contributing: contributing.md
+      - Code of conduct: code-of-conduct.md
       - Security: security.md
       - Changelog: changelog.md
       - Specification: spec.md

@@ -136,7 +136,10 @@ bug in a public issue is a disclosure.
 
 ## Code of conduct
 
-Be civil and assume good faith. Technical disagreement is welcome and
-personal remarks are not. The maintainers will remove comments and, if
-necessary, contributors; that decision is theirs and is not up for debate in
-the thread it concerns.
+Be civil and assume good faith. Technical disagreement is welcome and personal
+remarks are not. The maintainers will remove comments and, if necessary,
+contributors; that decision is theirs and is not up for debate in the thread it
+concerns.
+
+`CODE_OF_CONDUCT.md` is the full version: what the rule means in practice, where
+to report a problem, and what happens when the report concerns a maintainer.

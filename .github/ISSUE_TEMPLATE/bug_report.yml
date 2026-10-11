@@ -1,0 +1,76 @@
+name: Bug report
+description: Something behaves differently from what is documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **Not here for a security vulnerability.** Use the private channel in
+        `SECURITY.md`; a vulnerability in a public issue is a disclosure.
+
+
+        One thing worth knowing before you write "it did not block anything":
+        the default mode is **shadow**, which decides and records and stops
+        nothing, and `qed check` exits 0 in shadow mode even on BLOCK. Three
+        separate settings have to point at enforce before a BLOCK stops an
+        action — `docs/onboarding-shadow-to-enforce.md` names all three. If that
+        was it, we would still like to know, because it means the documentation
+        buried it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+      description: >-
+        Both halves, please. "Expected" is the one that tells us whether this is
+        a bug or a documentation failure, and those get different fixes.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >-
+        The commands you ran, in order. A proposal JSON and the relevant rule
+        help enormously. Redact targets and parameters freely -- but say that
+        you did, because "the glob did not match" and "the glob did not match
+        after I replaced the hostname" are different reports.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `qed doctor`
+      description: >-
+        It reports the weaknesses of your deployment on purpose -- advisory
+        adapters, missing anchors, self-governance off -- and it usually
+        contains the answer. It does not print the database password or the
+        contents of any record.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`qed version`, and how you installed it (pip, container, Helm, binary)."
+    validations:
+      required: true
+  - type: dropdown
+    id: store
+    attributes:
+      label: Evidence store
+      options: [SQLite, PostgreSQL, not sure]
+    validations:
+      required: true
+  - type: checkboxes
+    id: evidence
+    attributes:
+      label: Before submitting
+      options:
+        - label: >-
+            This is not a security vulnerability (those go through
+            `SECURITY.md`).
+          required: true
+        - label: >-
+            I have not pasted a private key, a database DSN, or the contents of
+            a real evidence record.
+          required: true

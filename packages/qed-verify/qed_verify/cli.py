@@ -4,6 +4,12 @@ Plain `argparse`, no Typer: the fewer dependencies an auditor has to install,
 the more likely they actually run it.
 
 Exit codes: 0 verified, 1 one or more problems, 2 usage error.
+
+`--instance-id` is optional and that is a trap, so this module works to make the
+omission impossible to miss: without it the genesis binding does not run, the
+result line says so, and a note goes to stderr. `--require-complete` turns the
+omission into exit 1, which is what a pipeline should use -- a pipeline reads the
+exit code and never the summary.
 """
 
 from __future__ import annotations
@@ -54,7 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--instance-id",
-        help="if given, record 0's prev_hash is checked against this instance identity",
+        help=(
+            "the instance this chain is supposed to belong to, obtained from outside "
+            "this file (contract, engagement letter, the operator's published identity) "
+            "and never read out of the export. Without it, nothing ties these records "
+            "to any instance and a chain forged elsewhere verifies identically"
+        ),
+    )
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="exit 1 unless every check ran, not merely every check that ran passed",
     )
     parser.add_argument("--json", action="store_true", help="emit the machine-readable report")
     parser.add_argument(
@@ -90,7 +106,19 @@ def main(argv: list[str] | None = None) -> int:
 
     report = verify_records(records, keys, instance_id=args.instance_id)
     print(json.dumps(report.to_dict(), indent=2) if args.json else report.summary())
-    return 0 if report.ok else 1
+
+    for note in report.unchecked:
+        print(f"qed-verify: not checked -- {note}", file=sys.stderr)
+
+    if not report.ok:
+        return 1
+    if args.require_complete and not report.complete:
+        print(
+            "qed-verify: --require-complete was given and not every check ran",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

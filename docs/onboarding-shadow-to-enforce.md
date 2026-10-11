@@ -88,7 +88,7 @@ Then decide the example proposal and verify the chain it produced:
 ```bash
 qed check examples/proposals/prod-db-drop.json --dir ./state --config qed.yaml
 qed export --dir ./state --config qed.yaml > chain.jsonl
-qed-verify chain.jsonl --keys ./state/public
+qed-verify chain.jsonl --keys ./state/public --instance-id qed-local
 ```
 
 ```console
@@ -96,7 +96,8 @@ records   : 7 (seq 0..6)
 keys      : ed25519:ad3567ac84409264
 checkpoint: 0
 purged    : 0 payload(s) removed under retention
-result    : OK -- chain is contiguous, unmodified and signed
+bound to  : instance 'qed-local'
+result    : OK -- chain is contiguous, unmodified, signed, and bound to the instance id supplied
 ```
 
 That last command is the one that matters, and it is the one to show an
@@ -105,7 +106,15 @@ that wrote them, and it is a separate package with `cryptography` as its only
 dependency — written as an independent reimplementation so that agreement
 between producer and verifier means something.
 
-**Exit criterion:** `qed-verify` exits 0 and prints `result : OK`.
+Drop `--instance-id` and the last two lines become `bound to : NOTHING` and a
+result that names the check which did not run. That is not pedantry: the genesis
+binding is the only check here that distinguishes this chain from one generated
+on any laptop with any key, so a pass without it is a pass about internal
+consistency alone. When you are the operator the id is in your own config. When
+you are the auditor it has to arrive from outside the export, and so do the keys.
+
+**Exit criterion:** `qed-verify` exits 0 and prints `result : OK`. If it prints
+`OK SO FAR`, a check was skipped — read which one before you treat it as a pass.
 
 ---
 

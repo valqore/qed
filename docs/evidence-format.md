@@ -52,6 +52,7 @@ is written down.
 | The **baseline rule pack**, control catalogues, `policy_hash` | Policy is data the chain records, not part of how it is read. |
 | `engine_version` in a verdict | Deliberately in the record so an auditor can ask which build decided; deliberately not in the hash input. |
 | Export *containers* — CSV, OSCAL | Renderings of the same records. JSONL is the one a verifier reads. |
+| What a verifier must **report** | The freeze is a promise about bytes: a record written under 1.0 verifies under every later verifier. It is not a ceiling on what a verifier has to tell its user. Requirement 11 in the conformance list below was added on 11 October 2026, after the freeze, because the reference verifier was printing an unqualified pass over a check it had skipped. No record changed and no previously valid chain became invalid. |
 
 | Frozen | Why it is inside |
 |---|---|
@@ -218,7 +219,9 @@ It MUST, given a JSONL export and a set of Ed25519 public keys:
    repeat in `seq`.
 2. Check `prev_hash` of record *n* against `hash` of record *n−1*, and, when the
    instance id is supplied, record 0's `prev_hash` against
-   `sha256("evidence-chain/1:genesis:" + instance_id)`.
+   `sha256("evidence-chain/1:genesis:" + instance_id)`. When it is **not**
+   supplied, see 11: the check is skippable, and a skipped check may not be
+   reported as a performed one.
 3. Recompute `hash` from the six inputs above, using `payload_hash` and never
    the payload, so a purged record still verifies.
 4. Recompute `payload_hash` by RFC 8785 canonicalisation whenever the payload is
@@ -235,6 +238,14 @@ It MUST, given a JSONL export and a set of Ed25519 public keys:
 9. Report an empty input as a failure rather than a pass.
 10. Reach a verdict without contacting the instance that produced the records,
     or any other network service.
+11. State, in both its human and machine-readable output, whether the genesis
+    binding in 2 was performed — and when it was not, that no instance is bound.
+    This is the one check in the list that can be skipped, and it is the only
+    one that distinguishes this chain from a chain generated anywhere else: 1
+    and 3 through 9 are satisfied just as well by records fabricated five
+    minutes ago and signed with a key made at the same time. A verifier that
+    prints an unqualified pass without it is overstating its own result, which
+    is the failure mode this format exists to remove.
 
 It MUST NOT:
 
@@ -243,6 +254,12 @@ It MUST NOT:
   a chain written by a newer producer, and the type is only a hash input.
 - accept a record whose `payload_hash` is absent, even when the payload is.
 - round a number it cannot represent exactly. Reject it.
+- take the instance id, or a public key, out of the material under review.
+  Both are present in it — the id in the genesis payload, the key id on every
+  record — and both were chosen by whoever wrote the file. Reading either out of
+  the export and checking the export against it is a tautology, and a verifier
+  that offers it as a convenience is building the tautology for its user. They
+  arrive out of band or the binding does not happen.
 
 **The acceptance test is the fixture.** A conforming implementation verifies
 `tests/evidence/fixtures/evidence-format-1.0/chain.jsonl` against the public

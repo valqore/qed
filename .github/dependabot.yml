@@ -1,0 +1,62 @@
+# Dependency updates. SPEC §20 pins versions and `pip-audit` runs in CI; this is
+# the half that proposes the bump rather than reporting the vulnerability.
+#
+# Weekly, not daily: a trust-layer project with one maintainer gains nothing
+# from a queue of pull requests nobody can review attentively, and an
+# unreviewed dependency bump is a supply-chain change merged on trust.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: "deps"
+    groups:
+      # Tooling moves constantly and cannot affect a published record. One pull
+      # request for the lot.
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*", "types-*", "hypothesis", "coverage*"]
+        dependency-type: development
+      docs:
+        patterns: ["mkdocs*", "pymdown*"]
+    ignore:
+      # `cryptography` is the one dependency that can change what a signature
+      # means. Majors are read by hand, against the changelog, before the bump
+      # is proposed -- never merged because CI went green.
+      - dependency-name: cryptography
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: pip
+    directory: /packages/qed-verify
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, verifier]
+    commit-message:
+      prefix: "deps(qed-verify)"
+    ignore:
+      - dependency-name: cryptography
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, deploy]
+    commit-message:
+      prefix: "deploy"

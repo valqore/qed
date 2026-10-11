@@ -35,6 +35,7 @@ INCLUDED_FROM_ROOT = (
     "THREAT_MODEL.md",
     "GOVERNANCE.md",
     "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
     "SECURITY.md",
     "CHANGELOG.md",
     "QED_SPEC.md",

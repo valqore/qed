@@ -1915,8 +1915,24 @@ def verify(
     directory: DirOption = DEFAULT_DIR,
     as_json: Annotated[bool, typer.Option("--json")] = False,
     config: ConfigOption = None,
+    instance_id: Annotated[
+        str | None,
+        typer.Option(
+            "--instance-id",
+            help="Instance the export should belong to. Required to bind a chain read "
+            "from a file; taken from the local config when no file is given.",
+        ),
+    ] = None,
 ) -> None:
-    """Verify a chain. A thin wrapper; auditors should run `qed-verify` itself."""
+    """Verify a chain. A thin wrapper; auditors should run `qed-verify` itself.
+
+    With no argument this verifies the local chain and binds it to the instance
+    id in the local configuration, so every check runs. Given a *file*, there is
+    no configuration to trust: the id has to come from `--instance-id`, and
+    without it the genesis binding does not run and the report says so. Binding
+    a foreign export to the local instance id by default would turn a real check
+    into a coincidence, so this does not do that.
+    """
     try:
         from qed_verify.verify import load_jsonl, verify_records
     except ImportError:
@@ -1928,16 +1944,17 @@ def verify(
     if records is None:
         session = open_session(directory=directory, config_path=config, strict_policy=False)
         text = to_jsonl(session.store.iter_evidence())
-        instance_id = session.config.instance_id
+        instance_id = instance_id or session.config.instance_id
         session.close()
     else:
         text = records.read_text(encoding="utf-8")
-        instance_id = None
 
     report = verify_records(
         load_jsonl(text), load_public_keys(directory / PUBLIC_DIR_NAME), instance_id=instance_id
     )
     typer.echo(json.dumps(report.to_dict(), indent=2) if as_json else report.summary())
+    for note in report.unchecked:
+        typer.echo(f"not checked -- {note}", err=True)
     raise typer.Exit(0 if report.ok else 1)
 
 
