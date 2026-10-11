@@ -277,9 +277,11 @@ class _Proxy:
         """Pass the upstream list through unchanged.
 
         SPEC §12.1 also filters this list by the token's ``mcp:<server>:<tool>``
-        scopes. There are no tokens until week 3, and filtering against a scope
-        set that does not exist yet would mean inventing one here. The list is
-        forwarded whole, and every call in it is still decided.
+        scopes. That is not implemented. The list is forwarded whole and every
+        call in it is still decided, so a tool the token may not use is visible
+        and refused when called rather than hidden -- and hiding it would be
+        better, because a model that cannot see a tool does not try. An open
+        gap, listed in ``docs/mcp-proxy.md``, not a decision.
         """
         return await self.client.list_tools(params=params)
 
@@ -595,10 +597,25 @@ def _approval_message(outcome: CheckOutcome) -> str:
     text = f"[qed APPROVAL PENDING] {ids}: {first.message if first else 'approval required'}"
     if first is not None and first.fix:
         text += f" Fix: {first.fix}"
-    # SPEC §12.1 wants an approval id and an expiry in this message. The approval
-    # service is week 4; until it exists, saying "id=none expires=never" would be
-    # worse than saying plainly that there is nothing to wait for yet.
-    return text + " No approval route is configured in this build (approvals land in week 4)."
+    # SPEC §12.1 wants an approval id and an expiry in this message. The id is
+    # on the verdict, because `check_proposal` files a request and records
+    # `approval_requested` before it answers -- always, with or without a Slack
+    # channel configured. This message said the opposite for ten weeks ("no
+    # approval route is configured in this build (approvals land in week 4)"),
+    # while the HTTP proxy and the Claude Code hook were both already reporting
+    # the id: an agent was told approvals did not exist, by the one adapter the
+    # README demonstrates first, moments after a request was filed for it.
+    #
+    # The expiry is not here. It is on the stored `ApprovalRequest` and on the
+    # `approval_requested` record, and `Appended.record` is None while the HA
+    # outbox holds a record, so the proxy cannot read it without either a store
+    # lookup on the hot path or a new field on `Verdict`. `qed approvals` shows
+    # it. That half of SPEC §12.1 is still open, and saying so beats inventing
+    # an expiry the kernel did not promise.
+    approval = outcome.verdict.approval_id
+    if approval:
+        return text + f" Approval {approval} is open; `qed approvals` lists it. Retry once agreed."
+    return text + " Retry once it has been approved."
 
 
 def _intent_of(params: mcp_types.CallToolRequestParams) -> str | None:

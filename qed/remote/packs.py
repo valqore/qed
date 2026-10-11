@@ -29,8 +29,8 @@ behind them. So:
   without them noticing.
 
 Nothing here reaches the network. `qed packs import FILE` reads a file, which
-is the air-gap case and also the only case week 9 implements; the `remote.packs
-url` fetch is the same verification with a download in front of it.
+is the air-gap case and also the only case implemented; the `remote.packs url`
+fetch is the same verification with a download in front of it.
 """
 
 from __future__ import annotations

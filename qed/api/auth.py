@@ -17,18 +17,19 @@ timestamp bounds how long a captured request stays usable (``max_clock_skew_seco
 
 Why a shared-secret MAC and not OIDC: this is adapter identity, not human
 identity. An adapter is a process on a laptop or in a CI job and has no browser
-to redirect. Humans and admins arrive on an OIDC bearer in week 3, which is a
-separate dependency on the same routes.
+to redirect. Humans and admins arrive on an OIDC bearer instead
+(:mod:`qed.api.human_auth`), which is a separate dependency on the same routes.
 
-Two deliberate limits in week 2
--------------------------------
+One deliberate limit
+--------------------
 
 **No nonce replay cache.** Within the skew window the same signed request can be
 sent twice. It does not get two decisions: ``proposal.id`` is single-use, so the
-second attempt is a 409 (SPEC §17, replay). The nonce is in the MAC so that the
-store arriving in week 3 needs no protocol change.
+second attempt is a 409 (SPEC §17, replay). The nonce is in the MAC so that a
+replay store can be added later without a protocol change.
 
-**No per-adapter rate limits.** SPEC §13's 100/s is week 10 hardening.
+SPEC §13's per-adapter rate limit *is* enforced, under ``api.rate_limit`` --
+see :mod:`qed.api.app`.
 """
 
 from __future__ import annotations

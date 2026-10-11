@@ -4,7 +4,8 @@ JSONL is the format `qed-verify` consumes, so the field names and the string
 forms here *are* the on-the-wire evidence format. Keep them in step with
 ``docs/evidence-format.md``; a change to either is a ``schema_version`` change.
 
-OSCAL 1.1.2 ``assessment-results`` export is week 2.
+The OSCAL 1.1.2 ``assessment-results`` export is
+:mod:`~qed.core.evidence.export.oscal`.
 """
 
 from __future__ import annotations

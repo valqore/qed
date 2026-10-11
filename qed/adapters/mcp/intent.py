@@ -26,8 +26,8 @@ written into a repo that has no ``valqore`` package, the import raises, the bare
 ``except`` swallows it, and the function returns ``low`` for everything. Nothing
 errors. Nothing logs. Blast radius quietly degrades to matching the tool name,
 and a tool called ``execute_sql`` carrying ``DROP TABLE orders`` scores low and
-stops routing to approval. In shadow mode nobody would notice, and enforce does
-not arrive until week 10.
+stops routing to approval. In shadow mode nobody would notice, and shadow is the
+default every installation starts in.
 
 So the useful half -- the verb tables, which are good and were earned on tools
 agents really call -- is written out here, with no import that can fail and no

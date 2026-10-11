@@ -3,9 +3,10 @@
 `qed serve` runs the API from SPEC §13. Base path `/v1`. Everything is JSON;
 errors are RFC 9457 `application/problem+json`.
 
-Week 2 implements the subset SPEC §22 asks for. Routes that do not exist are
-absent rather than stubbed, for the reason SPEC §14 gives about the CLI: an
-endpoint that answers "not implemented" ends up in somebody's script.
+Routes that do not exist are absent rather than stubbed, for the reason SPEC
+§14 gives about the CLI: an endpoint that answers "not implemented" ends up in
+somebody's script. SPEC §19's live stream and budget pages are not built, so
+they are not routable.
 
 | Method & path | Purpose |
 |---|---|
@@ -64,7 +65,9 @@ The secret lives in the environment variable named here, so `qed.yaml` stays
 safe to commit and the secret stays out of the process table. It must be at
 least 32 characters: a shorter shared secret is a password somebody typed.
 
-`qed adapters add` with per-adapter rotation is week 5 (SPEC §12.6).
+SPEC §12.6 describes a `qed adapters add` command with per-adapter rotation.
+It is not built: registration is this list in `qed.yaml`, and rotation is
+editing it and restarting.
 
 ### Signing a request
 
@@ -98,9 +101,23 @@ A worked example lives in `tests/api/conftest.py`, which signs through the same
 **No nonce replay cache.** Inside the skew window the same signed request can be
 sent twice. It does not get two decisions — `proposal.id` is single-use, so the
 second attempt is a `409` (SPEC §17, replay). The nonce is already in the MAC so
-that adding the store in week 3 needs no protocol change.
+that adding the store later needs no protocol change.
 
-**No rate limits.** SPEC §13's 100 proposals/s per adapter is week 10.
+**Rate limits are on by default**, which this page said for eleven weeks that
+they were not. SPEC §13's limit is enforced per adapter *and* per principal, and
+over either one the answer is `429` with no record written -- a refused request
+never became a proposal, so there is nothing to put in the chain.
+
+```yaml
+api:
+  rate_limit:
+    per_adapter_rps: 100     # the default
+    per_principal_rps: 20    # the default, and the one an integrator meets first
+```
+
+`0` turns a limit off; a negative value is refused at load. The per-principal
+limit is the lower of the two on purpose: one runaway agent loop is the common
+case, and it arrives under a legitimately registered adapter.
 
 ### `--dev`
 
@@ -143,9 +160,11 @@ Response:
   whatever `verdict.decision` says (ADR-003). **Adapters must act on
   `effective_decision`, not on `verdict.decision`.**
 - `200` normally; `202` when REQUIRE_APPROVAL is actually being enforced;
-  `409` on a replayed `proposal.id`; `413` over 64 KB; `422` on a schema failure.
-- `approval` is `null` rather than an empty object: there is no approval, not an
-  approval with nothing in it. The approval service is week 4.
+  `409` on a replayed `proposal.id`; `413` over 64 KB; `422` on a schema failure;
+  `429` over a rate limit.
+- `approval` is `null` only when the verdict needed none. On REQUIRE_APPROVAL it
+  carries the id of the request the kernel filed before answering, which is what
+  `qed approve` resolves and what the agent is told to wait for.
 
 Error responses never echo the rejected input. A refused body can carry the very
 secret `AG-DAT-001` exists to stop, and an error response is not masked on the

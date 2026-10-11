@@ -2,18 +2,21 @@
 
 What an auditor gets: one ``result`` per export, one ``observation`` per evidence
 record, and one ``finding`` per (rule hit, control) pair, targeted at the control
-the rule claims to serve. The public keys and the checkpoint receipts travel in
-``back-matter``, so the document an auditor receives contains everything needed
-to verify the chain it describes.
+the rule claims to serve.
 
-Week 8 added the catalogues, so a control reference now travels with its label
-and the standard's source URL (``qed/compliance/packs/``) and an auditor reading
-this document no longer has to look up what ``Art. 14`` is. What is still only
-what the rules declare is the *coverage*: qed maps what its rules say they
-serve, and the remaining
-EU AI Act and NIST AI RMF mapping -- are week 8. Until then this export says
-exactly as much as the rules do and no more, and ``mapping-depth`` on every
-finding says how deep that is (SPEC §11, honesty flags).
+**The keys in ``back-matter`` do not verify this document.** They are the keys
+the exporting instance says it used, carried for convenience so a reader can see
+which key id signed what. Checking an export against the keys inside it is
+circular: whoever produced the file chose both halves. An auditor verifies with
+a public key and an instance id obtained out of band -- see conformance
+requirement 11 in ``docs/evidence-format.md`` and limitation 11 in
+``THREAT_MODEL.md``. This docstring said the opposite for eleven weeks.
+
+A control reference travels with its label and the standard's source URL
+(``qed/compliance/packs/``), so an auditor reading this document does not have
+to look up what ``Art. 14`` is. What it does *not* do is claim coverage: this
+export says exactly as much as the rules say and no more, and ``mapping-depth``
+on every finding says how deep that is (SPEC §11, honesty flags).
 
 Determinism
 -----------

@@ -6,6 +6,85 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — the build spoke in the future tense about work that had shipped
+
+Twenty-one statements across the source and the documentation promised things
+that already existed, or blamed a week of the build order for a gap that is
+simply open. Each was true when it was written in week 1 or 2 and nobody
+revisited it. A reader cannot tell a stale promise from a real limitation, so
+each one costs exactly what a real gap costs — while hiding the real gaps in
+the noise.
+
+Three were not comments.
+
+**`qed mcp` told an agent that approvals do not exist.** Every
+REQUIRE_APPROVAL through the MCP proxy — the adapter the README demonstrates
+first — ended with `No approval route is configured in this build (approvals
+land in week 4)`. The approval service shipped in week 4. `check_proposal`
+files a request and writes `approval_requested` with its id, approvers and
+expiry *before* it answers, whether or not a Slack channel is configured, and
+`POST /v1/proposals` has been returning that id in its `approval` field all
+along. The HTTP proxy and the Claude Code hook both already put the id in their
+message. Only the oldest adapter said there was nothing to wait for, moments
+after a request had been filed for it.
+
+It now reads: `Approval apr_… is open; qed approvals lists it. Retry once
+agreed.` The expiry that SPEC §12.1 also asks for is still missing and is now
+described as missing: it lives on the stored request and on the record, and
+`Appended.record` is `None` while the HA outbox holds one, so putting it in
+that string means a store lookup on the decision path or a new field on
+`Verdict` — a decision, not an oversight.
+
+The test for that message asserted the stale sentence — `assert "week 4" in
+text, "be honest that there is no approval route yet"` — and was green for ten
+weeks. A test pinning a stale claim is worse than no test: it makes the
+staleness look deliberate and fails on anybody who fixes it. It now asserts
+that the id the agent is told is the id in the chain.
+
+**`docs/api.md` said rate limits do not exist.** "**No rate limits.** SPEC
+§13's 100 proposals/s per adapter is week 10." They are enforced, on by
+default, per adapter *and* per principal — `per_adapter_rps: 100`,
+`per_principal_rps: 20` — answering `429` with `Retry-After`, and `429` was
+missing from the page's list of status codes. An integrator would have read
+"no limits", built against it, and met the lower limit of the two in
+production. The page now documents both, the default values, and why the
+per-principal limit is the smaller one: a runaway agent loop arrives under a
+legitimately registered adapter.
+
+**Two CLI strings** named week 3 as the arrival of verified identity:
+`--token-jti`'s help (`(week 3: real)`) and the `--human` warning. Both now
+describe what is true — `--human` is the adapter's assertion, `--mandate` is
+signed, and identity is proven on the API path.
+
+**The OSCAL exporter still stated the circularity** corrected in `docs/oscal.md`
+yesterday: "the document an auditor receives contains everything needed to
+verify the chain it describes". The keys in `back-matter` are the keys the
+exporter says it used; checking an export against them is circular, because
+whoever produced the file chose both halves. The docstring now says so and
+points at conformance requirement 11. Its next paragraph had also been left
+half-edited mid-sentence when the catalogues landed, which is its own small
+lesson about editing prose in a docstring nobody renders.
+
+**`qed/compliance/loader.py` described another product's internals** — a file
+path, a rule count and a mapping-line count belonging to the commercial engine
+— in a note addressed to whoever would do week 8. Reworded to the part that
+matters and is this project's own: an imported mapping is keyed to a rule this
+project does not share, so every mapping would dangle; titles transfer, links
+do not, and every link here was written by hand.
+
+The rest were docstrings and comments in `qed/api/`, `qed/config.py`,
+`qed/adapters/mcp/`, `qed/core/evidence/` and four documentation pages, each
+now describing the build as it is. Two were real gaps wearing a week number,
+and both are now stated as gaps: export streaming is not implemented on either
+store, and `qed adapters add` with per-adapter rotation (SPEC §12.6) does not
+exist — registration is a list in `qed.yaml` and rotation is editing it.
+
+`tests/test_no_stale_promises.py` keeps it from coming back: no file under
+`qed/` or `packages/` may promise a week. There is no future week left, so the
+future tense is a bug by construction, and the guard carries tests in both
+directions so it neither rots into silence nor starts flagging the honest
+history ("the week-1 bug", "moved here in week 6") that the next reader wants.
+
 ### Fixed — read as a buyer: three commands that cannot work, and a page that does not exist
 
 A pass through the repository as somebody evaluating it rather than building

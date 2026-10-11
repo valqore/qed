@@ -1,7 +1,7 @@
 """Configuration (SPEC §16).
 
-Only the week 1 subset is honoured. A ``qed.yaml`` may legitimately contain the
-later sections (``identity``, ``approvals``, ``broker``, ``remote`` …) because
+Not every section is honoured. A ``qed.yaml`` may legitimately contain sections
+this build does not act on (see ``UNIMPLEMENTED_SECTIONS``) because
 the reference file in SPEC §16 is the complete one; rather than rejecting them
 or pretending to read them, :func:`load_config` returns the list of sections it
 ignored so the CLI can say so out loud. Silently accepting a setting that has no
@@ -35,11 +35,11 @@ __all__ = [
 
 DEFAULT_DIR = Path(".qed")
 
-#: Sections of SPEC §16 that are still unimplemented after week 2.
-#: Sections a config file may carry that this build does not act on yet. A
-#: silently ignored section is a setting somebody believes is in force, so
-#: `load_config` reports them. `approvals` left this list in week 4 and
-#: `delegation` was never on it.
+#: Sections a config file may carry that this build does not act on. A silently
+#: ignored section is a setting somebody believes is in force, so `load_config`
+#: reports them. The list shrinks as sections are implemented -- `approvals`
+#: left it once there was an approval service -- and `delegation` was never on
+#: it.
 UNIMPLEMENTED_SECTIONS = (
     "identity",
     "remote",
@@ -207,7 +207,8 @@ class AdapterCredential(Frozen):
     The secret is never in ``qed.yaml``. ``secret_env`` names the environment
     variable holding it, so the config file stays safe to commit and the secret
     stays out of the process table and out of any backup of the repo. SPEC §12.6
-    moves this to ``qed adapters add`` with per-adapter rotation in week 5.
+    describes a ``qed adapters add`` command with per-adapter rotation. It is
+    not built: registration is this list, and rotation is editing it.
     """
 
     adapter_id: str
@@ -316,8 +317,10 @@ class ApprovalsConfig(Frozen):
     webhook_url: str | None = None
     #: email -> groups. Needed because a channel knows an email and a rule
     #: names a group, and nothing in between has told QED which is which.
-    #: Week 6 replaces this with the IdP's own claims; until then it is
-    #: explicit rather than assumed, so nobody is accidentally an approver.
+    #: Unioned with the IdP's own `groups`/`roles` claims rather than replaced
+    #: by them (:mod:`qed.api.human_auth`), because an installation whose IdP
+    #: has no group mapper yet is the state every installation starts in.
+    #: Explicit rather than assumed, so nobody is accidentally an approver.
     groups_by_email: dict[str, list[str]] = Field(default_factory=dict)
     require_reason_for_deny: bool = False
 

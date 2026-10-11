@@ -33,7 +33,7 @@ _FORMATS: Final[frozenset[str]] = frozenset({"jsonl", "csv", "oscal"})
 
 #: Records per request. An auditor exporting a year of chain pages through with
 #: ``from``; an unbounded export would hold the whole chain in memory to build
-#: one response body. Streaming lands with the Postgres path in week 6.
+#: one response body. Streaming is not implemented, on either store.
 MAX_RECORDS: Final = 50_000
 
 
@@ -129,8 +129,8 @@ async def get_by_ref(ref: str, request: Request) -> Response:
     SPEC §10.3 defines ``evidence_ref`` as an outbox id for the Postgres path,
     where a decision is answered before the chain row exists. The SQLite path
     appends inside the decision, so there is no outbox and the ref *is* the
-    sequence number. The endpoint exists now so that adapters are written
-    against it and need no change in week 6.
+    sequence number. One endpoint covers both, so an adapter written against it
+    needs no change when an installation moves to Postgres.
     """
     state = qed_state(request)
     authenticate(request, b"")

@@ -34,7 +34,7 @@ evidence:
     every_seconds: 3600
 ```
 
-Both are read (they were not, until week 9 -- see the changelog). `qed
+Both are read (one of them was not, once -- see the changelog). `qed
 checkpoint --force` writes one below either threshold, and the age is measured
 from the **oldest uncovered record**, not the newest: a record that has been
 sitting unanchored for an hour is what the threshold is about, whatever arrived

@@ -2,9 +2,9 @@
 
 This router is deliberately thin. It authenticates the adapter, checks the input
 limits, validates the body against :class:`~qed.core.schemas.ActionProposal`,
-and hands it to ``qed.runtime.check_proposal``. Nothing else. SPEC §22's week 2
-exit criterion is that ``POST /v1/proposals`` and ``qed check`` return the same
-verdict for the same input, and they do because they are the same call.
+and hands it to ``qed.runtime.check_proposal``. Nothing else. SPEC §22 requires
+that ``POST /v1/proposals`` and ``qed check`` return the same verdict for the
+same input, and they do because they are the same call.
 
 The body is read as raw bytes rather than through a FastAPI model parameter for
 two reasons: the adapter's HMAC is computed over the exact bytes sent, and the
@@ -17,9 +17,10 @@ Every handler here is ``async def``, so it runs on the event loop thread. The
 SQLite connection belongs to the thread that opened it, and ``check_proposal``
 contains no ``await``, so two concurrent requests cannot interleave inside it
 and ``seq`` stays contiguous. A ``def`` handler would be run in a threadpool by
-Starlette and would hit that connection from the wrong thread. Postgres with a
-pool and a chain leader is week 6; until then this constraint is load-bearing
-and ``tests/api/test_proposals.py`` has a concurrency test that would catch its
+Starlette and would hit that connection from the wrong thread. The Postgres path
+has a pool and a chain leader and does not depend on this, but the SQLite path
+is the default and does, so the constraint is load-bearing and
+``tests/api/test_proposals.py`` has a concurrency test that would catch its
 removal.
 """
 
@@ -66,8 +67,9 @@ class ProposalEnvelope(Frozen):
     SPEC §13 takes a bare ``ActionProposal``. A caller that already knows the
     token's budget or holds the signed mandate may send them in an envelope
     instead, which is the same shape ``qed check --budget --mandate`` accepts.
-    Budgets become server-side state in week 3; until then, whoever holds the
-    token is the only one who knows.
+    Budget state is kept server-side (:mod:`qed.core.budget`); an envelope that
+    carries one is the caller's assertion about a token it holds, and the
+    server's own record is what a rule is evaluated against.
     """
 
     proposal: ActionProposal

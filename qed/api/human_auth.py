@@ -136,8 +136,9 @@ def human_from_claims(claims: TokenClaims, config: QedConfig) -> Human:
     # Both sources are deliberate grants: the claim is what the IdP asserts,
     # the config map is what the operator wrote down. Union, so that an
     # installation whose IdP has no group mapper yet still works -- which is
-    # the state every installation starts in. Week 6 makes the claim the only
-    # source, once there is an IdP to require it of.
+    # the state every installation starts in. Requiring the claim alone would
+    # be stricter and would lock out exactly those installations, so it stays a
+    # union until somebody asks for the stricter mode and can switch it on.
     groups = {g for name in _GROUP_CLAIMS for g in _claim_list(extra.get(name))}
     groups.update(config.approvals.groups_for(email) if email else [])
 

@@ -33,7 +33,8 @@ blocked. That is deliberate and it is the whole onboarding story:
 4. Switch `mode: enforce` in `qed.yaml` when the answer stops surprising you.
 
 Only step 4 can break anything, and by then you have the evidence to argue
-about. Enforcement is week 10 of the build order for this reason.
+about, which is why shadow is the default and enforcing is a separate,
+deliberate change.
 
 A shadow record carries `mode: shadow`. It proves the decision *would* have been
 made; it does not prove the action was prevented. Both live in the same chain,
@@ -63,7 +64,7 @@ So identity is explicit:
 **`--human` is the adapter's own assertion.** Nothing has verified it. It is
 recorded in `principal.client_fingerprint` as `adapter-asserted:--human:<issuer>`
 — a field SPEC §3.1 documents as advisory and spoofable, and which no rule is
-allowed to enforce on. Verified identity arrives in week 3 with JWKS and the
+allowed to enforce on. Verified identity is available with JWKS and the
 token exchange. The proxy says this on stderr every time it starts.
 
 ## What the adapter derives, and what the kernel decides
@@ -124,12 +125,20 @@ Fix: Reference the secret from the credential broker instead of passing it inlin
 ```
 [qed APPROVAL PENDING] AG-BLR-003: Destructive change to a production resource.
 Fix: Run it against staging first, or request approval with an explicit intent.
-No approval route is configured in this build (approvals land in week 4).
+Approval apr_01J8… is open; `qed approvals` lists it. Retry once agreed.
 ```
 
-SPEC §12.1 wants an approval id and an expiry in the second message. The
-approval service is week 4; until it exists, saying `id=none expires=never`
-would be worse than saying plainly that there is nothing to wait for.
+The id is in the message because the kernel files the request *before* it
+answers: `check_proposal` writes an `approval_requested` record with the id, the
+approvers and the expiry, whether or not a Slack channel is configured. So
+there is always something for the agent — or the person reading its output — to
+wait for, and something for `qed approve` to resolve.
+
+SPEC §12.1 also wants the expiry in this message, and it is not here. It lives
+on the stored request and on the record, and a record held in the HA outbox has
+no chained copy to read it from, so putting it in this string means either a
+store lookup on the decision path or a new field on `Verdict`. `qed approvals`
+shows it. Until that is decided, this message names what it can prove.
 
 ## Resources and prompts
 
@@ -160,11 +169,13 @@ in the proxy neither logs, records nor refuses.
 ## What is not here yet
 
 - **Tool-list filtering by token scope.** SPEC §12.1 filters `tools/list`
-  against the token's `mcp:<server>:<tool>` scopes. There are no tokens until
-  week 3, and filtering against a scope set that does not exist would mean
-  inventing one. The list is forwarded whole; every call in it is still decided.
-- **Credential injection.** On ALLOW, SPEC §12.1 forwards with a broker
-  credential when one is configured. The broker is week 5; calls pass through
-  with whatever credential the upstream already had.
+  against the token's `mcp:<server>:<tool>` scopes. Not implemented: the list is
+  forwarded whole, so a tool the token may not use is visible and refused when
+  called rather than hidden. Hiding it would be better, because a model that
+  cannot see a tool does not try to use it.
+- ~~**Credential injection.**~~ Built. On ALLOW the proxy forwards with the
+  broker's credential when one is configured (`qed/core/broker/`), and
+  `injected_env` on the record says which name was used rather than which
+  value.
 - **`upstreams.yaml`.** Target templates come from `--target-template` for now.
   The file arrives with the broker, which is what needs the rest of it.

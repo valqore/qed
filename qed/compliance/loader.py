@@ -1,14 +1,15 @@
 """Framework id normalisation (SPEC §11).
 
-Week 1 scope is deliberately only the registry and the normaliser. Control
-*packs* are week 8.
+This module is the registry and the normaliser. The control catalogues
+themselves are :mod:`qed.compliance.packs`.
 
-A note for whoever does week 8: SPEC §4.6 says each rule's ``compliance``
-mappings are "imported from Valqore's AIG rules (mapping data only)". They
-cannot be. Valqore's ``compliance/packs.py`` keys its ~3,000 mapping lines to
-210 Valqore rule IDs, and qed ports zero rules, so every mapping dangles. What
-transfers is the 169 control titles. The rule→control links in this repository
-are written here, by hand, per rule.
+SPEC §4.6 anticipated importing each rule's ``compliance`` mappings from an
+existing rule set. That is not possible and was not done: a mapping is keyed to
+the rule it belongs to and this project shares no rules with anything, so every
+imported mapping would dangle. Control *titles* transfer; links do not. Every
+rule-to-control link in this repository was written here by hand, per rule,
+which is also why ``docs/compliance.md`` reports coverage as a fraction rather
+than as a claim.
 """
 
 from __future__ import annotations

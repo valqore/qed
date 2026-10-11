@@ -17,7 +17,8 @@ compliance:
   - { framework: eu_ai_act, control: "Art. 14" }
 ```
 
-Until week 8 that was the whole story, and the OSCAL export handed an auditor a
+Before the control catalogues existed that was the whole story, and the OSCAL
+export handed an auditor a
 list of identifiers with no titles. Two things were missing: what the control
 *is*, and whether the mapping was thorough or decorative.
 

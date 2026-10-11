@@ -85,9 +85,9 @@ def principal_hash(subject: str, *, issuer: str = "") -> str:
 
     Principals appear in the chain only as a hash, so the same person must hash
     the same way whichever component wrote the record. This is the one place it
-    is computed: the MCP proxy uses it for ``--human`` today, and week 3's token
-    verification uses it for the ``sub`` claim, so a chain written across both
-    attributes to one principal rather than two.
+    is computed: the MCP proxy uses it for ``--human`` and the token and bearer
+    paths use it for the ``sub`` claim, so a chain written across all of them
+    attributes to one principal rather than several.
 
     ``issuer`` is the identity provider. It is part of the input because ``sub``
     is only unique within an issuer: ``ali@acme.com`` at one IdP and the same

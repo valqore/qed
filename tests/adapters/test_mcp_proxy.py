@@ -247,7 +247,20 @@ async def test_the_target_template_is_filled_in_from_the_arguments(proxy_dir: Pa
 
 @pytest.mark.asyncio
 async def test_enforce_mode_blocks_and_tells_the_model_why(proxy_dir: Path, tmp_path: Path) -> None:
-    """The same proxy in enforce mode. Week 10 flips this on; it works now."""
+    """The same proxy in enforce mode, and the message names the open request.
+
+    This test used to assert the opposite -- `assert "week 4" in text, "be
+    honest that there is no approval route yet"` -- and was green for ten
+    weeks after the approval service shipped. The message it pinned told an
+    agent "No approval route is configured in this build", moments after
+    `check_proposal` had filed a request and written `approval_requested` with
+    its id, and while the HTTP proxy and the Claude Code hook were both already
+    reporting that id. A test asserting a stale sentence is worse than no test:
+    it makes the staleness look deliberate and fails if anybody fixes it.
+
+    So the assertion now crosses the two: the id the agent is told is the id in
+    the chain.
+    """
     import yaml
 
     config = tmp_path / "qed.yaml"
@@ -267,9 +280,16 @@ async def test_enforce_mode_blocks_and_tells_the_model_why(proxy_dir: Path, tmp_
         text = _text(result)
         assert text.startswith("[qed APPROVAL PENDING]")
         assert "AG-BLR-003" in text
-        assert "week 4" in text, "be honest that there is no approval route yet"
+        assert "qed approvals" in text, "nothing tells the reader how to resolve it"
 
     chain = read_chain(proxy_dir)
+    requested = records_of(chain, "approval_requested")
+    assert len(requested) == 1, "an approval verdict that filed no request is a dead end"
+    approval_id = requested[0]["payload"]["approval_id"]
+    assert approval_id in text, (
+        "the agent was told an approval is pending without the id of the one that "
+        f"was filed for it ({approval_id}); that is the message SPEC §12.1 asks for"
+    )
     assert len(records_of(chain, "proposal")) == 1
     assert len(records_of(chain, "verdict")) == 1
     assert not records_of(chain, "execution_result"), (

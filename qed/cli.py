@@ -2081,7 +2081,7 @@ def mcp(
         str, typer.Option("--adapter-id", help="Registered adapter id (SPEC 12.6).")
     ] = "adp_mcp_local",
     token_jti: Annotated[
-        str, typer.Option("--token-jti", help="Token id to attribute calls to (week 3: real).")
+        str, typer.Option("--token-jti", help="Token id to attribute calls to. See `qed token`.")
     ] = "mcp-proxy-local",
     human: Annotated[
         str | None,
@@ -2134,8 +2134,9 @@ def mcp(
         _fail(
             "give --human <who you are> or --mandate <file>. Without either, every verdict "
             "is a synthetic AG-IDN-007 identity BLOCK and no policy rule is evaluated. "
-            "Verified identity from an IdP arrives in week 3; until then --human is the "
-            "adapter's own assertion and is recorded as such."
+            "--human is this adapter's own assertion and is recorded as such; --mandate is "
+            "signed and verified. Identity is proven on the API path, where a delegation "
+            "token or an OIDC bearer says who is asking."
         )
         return
 
@@ -2193,7 +2194,8 @@ def mcp(
     if human is not None:
         typer.secho(
             f"qed: calls are attributed to {human} at issuer {issuer!r}, on this adapter's "
-            "word alone. Verified identity arrives in week 3.",
+            "word alone. Use --mandate for a signed identity, or the API path for a "
+            "verified one.",
             fg=typer.colors.YELLOW,
             err=True,
         )
