@@ -1,6 +1,6 @@
 # Validating a release
 
-The test suite is 2,705 fast tests and green. This page is about the things it
+The test suite is 2,727 fast tests and green. This page is about the things it
 cannot see, because every one of them has shipped at least once.
 
 The pattern is consistent enough to name: **a test that imports the source tree
@@ -178,6 +178,30 @@ The practice that follows: before anything irreversible — a release, a
 publication — read the repository as an outsider, run the commands exactly as
 written, and treat the gap between what a command prints and what a reader
 concludes from it as a defect in the product rather than in the reader.
+
+### Reading it a second time, as a buyer
+
+The same exercise with a different reader — somebody deciding whether to run
+this, who will type the first command on the page and believe the capability
+table — found five more, and none of them are subtle once named.
+
+| What a buyer hit | Why no test could see it |
+|---|---|
+| The first line of `docs/index.md`'s "Thirty seconds" was `pip install valqore-qed`, which fails: the name is not registered and `release.yml` holds the publish behind `PUBLISH_PYPI`. Four more pages said the same, and `docs/deployment.md` also offered `docker run ghcr.io/valqore/qed:1.0.0` against an image never pushed | The suite installs from the working tree, which is the one way of installing that always works. `docs/deployment.md` explained the gate correctly — 140 lines below the commands, under "Releasing" |
+| The capability table advertised a "**Web approval page** with OIDC human login" and linked to a private repository. `qed/api/ui.py` contains no UI by design, so the capability is unobtainable for everyone outside this organisation, through a link that answers 404. Meanwhile Slack approvals, which are built and better, were not in the table at all | No test reads a table as a promise. `tests/docs/test_claims.py` checked that every cited *path* resolves, and `qed/api/ui.py` resolves |
+| `qed mcp` ended every REQUIRE_APPROVAL with "No approval route is configured in this build (approvals land in week 4)", ten weeks after the approval service shipped, while the kernel had just filed a request and the two other adapters were already reporting its id | **A test asserted the stale sentence** — `assert "week 4" in text` — and was green. That is the worst version of this failure: the suite was not silent, it was arguing for the bug |
+| `docs/api.md` said "**No rate limits.**" Rate limits are on by default, per adapter *and* per principal, answering 429 — which was missing from the same page's list of status codes | The limiter has tests. Nothing compares the limiter's existence to the sentence denying it |
+| Twenty-one statements in source and docs promised work that had shipped, and three of them were strings a user sees | Every one was true when written. Staleness has no failing assertion unless something is written to look for it, which `tests/test_no_stale_promises.py` now does |
+
+The common shape is worth stating once, because it is the same shape as the
+product's own subject: **a claim and the thing it claims about were checked
+separately, and nothing checked them against each other.** A control in a
+report nobody enforces, a cited test path that resolves to a module containing
+nothing, a message asserting a limitation the code had removed. The fix in
+each case was not more tests of the code. It was a test that reads the
+sentence and the code together — which is what `test_claims.py`,
+`test_repo_protection.py` and `test_no_stale_promises.py` each do, and what
+`test_threat_model.py` has done since week 11.
 
 ## The checks
 
