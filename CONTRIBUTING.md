@@ -40,11 +40,12 @@ Use your real name and a real address. `git config --global user.name` and
 a pull request adds, and a missing line is fixable with
 `git rebase --signoff <base>`.
 
-The check runs on pull requests only. The requirement predates the check, and
-the 64 commits up to `d849165` carry no sign-off — rewriting that history would
-change every hash for no benefit, so the line is drawn there rather than
-pretended away. Everything before it is the maintainers' own work under the
-same licence, which is not what a DCO is for.
+The check runs on pull requests only, which is what a DCO is for:
+contributions from people who are not the maintainer. The requirement predated
+the check by sixty-four commits, none of which carried the line. There is no
+cutoff now — the pre-publication history rewrite signed off every commit,
+because a governance document that documents its own exception is the shape of
+failure this project exists to remove.
 
 (`qed-ui` is AGPL-3.0 and uses a CLA instead. Different repository, different
 rule.)

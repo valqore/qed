@@ -76,13 +76,13 @@ jobs:
   # nobody touched, which is the case that matters: a vulnerability in a pinned
   # dependency does not wait for a commit.
   # SPEC 25.1 requires a DCO sign-off on this repository. It was required and
-  # never checked: all 64 commits up to `d849165` carry none, which is why this
-  # only looks at the commits a pull request adds.
+  # unchecked for sixty-four commits, none of which carried the line. The
+  # pre-publication history rewrite added it to every commit, so there is no
+  # cutoff to carve out here any more.
   #
-  # Rewriting that history to add sign-offs would change every hash for no
-  # benefit, so the line is drawn here rather than pretended away. Everything
-  # before the cutoff is the maintainers' own work under the same licence; what
-  # the DCO exists for is contributions from people who are not them.
+  # This job still looks only at the commits a pull request adds, because that
+  # is what a DCO is for: a certification by somebody who is not the
+  # maintainer, made at the moment they offer the change.
   dco:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

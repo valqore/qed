@@ -6,6 +6,53 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Changed — the history was rewritten once, and this is the only account of it
+
+Two planning documents and one spec section came out of the tree before
+publication, and removing a file in a new commit leaves it readable in every
+earlier commit, in every clone and in every fork. The remote was private with
+zero forks and zero clones, so the whole history was rewritten instead:
+seventy-eight commits, every hash new, the old history kept locally as a
+bundle. This entry is the record, because after this the commits that would
+have shown the work do not exist.
+
+**What came out.** `ARCHITECTURE_PLAN.md` from the seventy-one commits that
+carried it, `REPO-AND-PUBLICATION-PLAN.md` from seventy, and spec §28 from
+seventy-one. Appendix B's one row that inventoried the predecessor's feature
+set got the wording the working tree already had.
+
+**What came out that was not a file.** The commit that removed those documents
+described their contents in its own message, and the changelog entry announcing
+the removal summarised the same material. Three further commit messages, and
+nine files in their earlier versions, explained a control in this product by
+pointing at a finding about the commercial engine; several named the private
+inventory document the finding came from, and one of them -- the test that
+forbids an HMAC signing path -- stated a paying product's default signing
+algorithm and cited the removed plan's section number for the rest. Each keeps the technical point -- it
+is why `check_separation_of_duties` refuses three times instead of warning once
+-- and loses the attribution.
+
+That is the shape worth keeping from this: **a purge that explains in public
+exactly what it purged has purged nothing.** The files were checked against the
+decision and the decision was checked against the files; nothing checked the
+prose that announced it. It is the same failure as a control reported in an
+export that nothing enforces, found this time in our own repository.
+
+**What went in.** Every commit now carries `Signed-off-by`, which SPEC §25.1
+has required since week 1 and which exactly one commit of the seventy-eight
+had; the cutoff documented in `CONTRIBUTING.md`, `ci.yml` and the 1.0.0 entry
+is therefore gone rather than explained. Five commits were authored by a
+placeholder identity -- `Developer-Backend <agent@valqore.local>` and
+`<noreply@anthropic.com>`, one of them the first commit in the repository and
+one of them the commit tagged `v0.1.0` -- and now carry the maintainer who owns
+the copyright. Their `Co-Authored-By` lines are unchanged, so what a model
+wrote is still on the record.
+
+Every author and committer date is byte-identical, the seventy-three commits
+that already named the maintainer are untouched in their authorship, the four
+tags still point at the same logical commits, and the tree at `main` is
+unchanged except for this file.
+
 ### Fixed — the build spoke in the future tense about work that had shipped
 
 Twenty-one statements across the source and the documentation promised things
@@ -122,12 +169,16 @@ package that is not published.
 
 **Three places still named a defect in the commercial engine.**
 `qed/core/approval/model.py`, `docs/approvals.md` and ADR-0014 each explained
-this control by pointing at a finding about the shipping commercial engine.
-The lesson is the right one and it is why the function refuses three times
-instead of warning; naming a paying product as the example in an Apache-2.0
-repository is not. Reworded in all
-three, lesson kept, attribution gone — the same correction made last commit
-for `human_auth.py` and ADR-0008, which this pass found had missed three.
+this control by pointing at a finding about the shipping commercial engine. The
+lesson is the right one and it is why the function refuses three times instead
+of warning; naming a paying product as the example in an Apache-2.0 repository
+is not, and restating the finding in order to announce its removal is the same
+disclosure in a different file, which is what the first draft of this entry
+did. Reworded in all three, lesson kept, attribution gone — the same
+correction made last commit for `human_auth.py` and ADR-0008, which this pass
+found had missed three. A fourth place, `tests/approval/test_model.py`,
+mirrored the docstring and was missed again, because both passes went looking
+for the file rather than for the sentence.
 
 ### Added — the rules that protect `main` are files, not a settings page
 
@@ -497,11 +548,11 @@ path, an HMAC signing path, a development fallback key. Better to know in
 advance than in review.
 
 **The DCO is now actually checked.** SPEC §25.1 has required a `Signed-off-by`
-line since week 1 and nothing enforced it; all 64 commits up to `d849165` carry
-none. The new `dco` job checks the commits a pull request adds, and the cutoff
-is stated rather than papered over -- rewriting that history would change every
-hash for no benefit, and what a DCO is for is contributions from people who are
-not the maintainer.
+line since week 1 and nothing enforced it; at this release no commit carried
+one. The new `dco` job checks the commits a pull request adds, which is what a
+DCO is for: contributions from people who are not the maintainer. The cutoff
+this entry originally documented is gone -- the pre-publication history rewrite
+signed off every commit instead. See the entry under Unreleased.
 
 `GOVERNANCE.md` gained "who decides", and the first draft of that section said
 "two maintainers, named in the repository's metadata". Both halves were false:
