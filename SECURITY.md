@@ -12,9 +12,9 @@ as a critical bug here:
 ## Reporting a vulnerability
 
 > **This repository is not public yet.** The licence is applied (Apache-2.0) and
-> the remote stays private until the name reservations in
-> `REPO-AND-PUBLICATION-PLAN.md` §5 are done. Until then, report directly to the
-> maintainer. The process below is what takes effect on publication.
+> the remote stays private until the name reservations in SPEC §24.1 are done.
+> Until then, report directly to the maintainer. The process below is what takes
+> effect on publication.
 
 **Do not open a public issue for a security bug.** Use either:
 

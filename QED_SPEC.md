@@ -2,7 +2,8 @@
 
 **Status:** Ready for implementation · 4 Oct 2026 (consistency review applied)
 **Name:** product **Valqore QED**; `qed` is the command, the import package and the repository (§24.1, closed 2026-10-08 — no longer a placeholder)
-**Supersedes:** ARCHITECTURE_PLAN.md v0.2 (plan), incorporates DESIGN_DECISIONS.md ADR-001…008 (all ACCEPTED)
+**Supersedes:** the planning-phase architecture draft (v0.2, kept privately); incorporates DESIGN_DECISIONS.md ADR-001…008 (all ACCEPTED)
+**Scope:** this document specifies the product. Commercial planning — pricing, funding, positioning against named competitors — is deliberately not here; it lives in a private planning repository and is not part of the Apache-2.0 distribution.
 **Language:** Python 3.12+ · **License:** Apache-2.0 (kernel), AGPL-3.0 (UI), proprietary (cloud)
 
 ---

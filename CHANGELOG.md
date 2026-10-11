@@ -6,7 +6,46 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
-Nothing yet.
+### Removed — commercial planning material, and its history
+
+A pre-publication read of this repository as an outsider rather than as its
+author found four documents that would have become public on the first push,
+and one of them was a liability rather than an embarrassment.
+
+`ARCHITECTURE_PLAN.md`, the planning-phase draft the spec superseded, carried a
+section assessing the shipping commercial engine against this design, row by
+row, and several of those rows are unfixed. Under a public Apache-2.0 licence,
+in a repository carrying the same brand, that section is an unpatched-defect
+list for a product customers pay for — so this entry does not summarise it.
+Naming the rows in a public changelog publishes them exactly as surely as
+publishing the file would, which is what the first draft of this entry did.
+The rows are kept privately, against the product that has to fix them.
+`REPO-AND-PUBLICATION-PLAN.md` held internal publication sequencing. Spec
+§28 held the funding application: targeting, revenue model, moat sequencing
+and prepared answers about named competitors, none of which is a specification
+of this product.
+
+All three are now kept privately and are **purged from every commit in this
+repository's history**, not deleted in a new one. Deleting a file in a later
+commit leaves it readable in all 71 earlier ones and in every clone, which is
+the mistake `.gitleaks.toml` was written to prevent and the reason this
+happened before the remote went public rather than after. The repository had
+zero forks and zero clones at the time of the rewrite. The same pass rewrote
+the removal commit's own message and this entry, because a purge that explains
+in public precisely what it purged has purged nothing.
+
+Two source comments and one ADR attributed a compliance finding to the
+planning-phase review of the predecessor; each keeps the technical point, which
+is why the human-authentication work in this product exists, and drops the
+attribution. Spec Appendix B stays — every row names a module path or a
+capability already published on the product's own site, and four places in the
+code and the ADRs cite it. The spec gains a scope line saying that commercial
+planning is deliberately not in it.
+
+`DESIGN_DECISIONS.md` also stays. It is the design rationale for this product,
+written in Turkish during the planning phase, superseded by the spec, and cited
+by the public ADR index as the record of what was decided before any code
+existed. Nothing in it concerns the other product.
 
 ## [1.0.0] — 2026-10-10
 
@@ -2125,7 +2164,7 @@ shipped realm should not produce one.
 ### Still not public
 
 The remote stays private until the PyPI, npm, GHCR, Homebrew-tap, domain and
-EUIPO/USPTO reservations are in place (`REPO-AND-PUBLICATION-PLAN.md` §5).
+EUIPO/USPTO reservations are in place (SPEC §24.1).
 Applying a licence is reversible for as long as nobody has received the code;
 publishing is not.
 
@@ -2154,7 +2193,7 @@ Weeks 1 and 2 of the SPEC §22 build order.
 > public as `v0.1.0`. At this tag that step was waiting on the three pre-repo
 > decisions — patent scope, product name, licence timing. All three closed on
 > 2026-10-08; see [Unreleased]. The public push now waits only on the name
-> reservations in `REPO-AND-PUBLICATION-PLAN.md` §5.
+> reservations in SPEC §24.1.
 
 ### Added — week 2 (SPEC §22)
 

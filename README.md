@@ -25,8 +25,9 @@ hardware, including air-gapped.
 > literals, and nowhere else.
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
 > **Still not public:** the remote stays private until the name reservations in
-> `REPO-AND-PUBLICATION-PLAN.md` §5 are in place. Publishing is distribution,
-> and that is the step that cannot be undone.
+> SPEC §24.1 are in place — PyPI, npm, GHCR, the Homebrew tap, the domain, and
+> the EUIPO/USPTO filings. Publishing is distribution, and that is the step that
+> cannot be undone.
 
 ## Status
 
@@ -267,9 +268,12 @@ step — and it explains the three separate dials that all have to point at
 ## Reading order
 
 1. `QED_SPEC.md` — the implementation specification (v0.3.1). Normative.
-   (SPEC §20.1 calls this file `SPEC.md`; it is left under its original name so
-   that links from the planning folder keep working.)
-2. `DESIGN_DECISIONS.md` — ADR-001…008, accepted.
+   (SPEC §20.1 calls this file `SPEC.md`; it is left under its original name
+   because every inbound reference in this repository already spells it that
+   way.)
+2. `DESIGN_DECISIONS.md` — ADR-001…008, accepted. Written in Turkish during
+   the planning phase and superseded by the spec; kept because the public ADR
+   index cites it as the record of what was decided before any code existed.
 3. `docs/adr/` — decisions made while implementing, where the spec was silent.
 4. **`THREAT_MODEL.md`** — STRIDE, and eleven things qed does not protect
    against. Read that section first.
@@ -283,8 +287,8 @@ step — and it explains the three separate dials that all have to point at
    `docs/siem.md` (OCSF), `docs/performance.md` (what it actually costs) and
    `docs/validation.md` (what a green test suite cannot see).
 
-`ARCHITECTURE_PLAN.md` is **superseded**; only its §16 (Valqore site/README
-fixes) is still live, and that work belongs to the Valqore repos, not here.
+The planning-phase architecture draft that preceded the spec is **superseded**
+and is not distributed; `QED_SPEC.md` is the only normative document.
 
 ## Invariants (enforced by tests, not by convention)
 

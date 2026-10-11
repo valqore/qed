@@ -54,7 +54,7 @@ tool call proceeds and the transcript shows a small notice. The hook
 documentation says a mistyped script path *"silently disables the gate"*.
 
 So an unhandled exception in the adapter does not fail closed. It fails
-silently open, which is the precise failure this product exists to prevent and
+silently open, which is the precise failure this product exists to prevent, and
 the commonest way a gate stops being one.
 
 Three consequences, all tested:
