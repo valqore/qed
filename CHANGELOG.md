@@ -6,7 +6,7 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
-## [1.0.0] — 2026-10-11
+## [1.0.0] — 2026-10-12
 
 **The evidence format is frozen.** That is what the major version means here,
 and it is the only promise in this release that cannot be walked back: a record
@@ -22,6 +22,55 @@ this repository's history sits above the format freeze it shipped with. Both
 are this release. The freeze is what the major version means; the pass is what
 made the repository publishable, and it is recorded here because the commits
 that would have shown the work no longer exist.
+
+### Changed — three documents that one click would have made false
+
+`README.md`, `SECURITY.md` and `CONTRIBUTING.md` each opened with a note saying
+the remote stays private until SPEC §24.1's name reservations are done.
+Publication is one click in a settings page, and the click does not edit any of
+them, so the first thing a reader met in all three would have been a sentence
+about a state that had just ended.
+
+The worst of the three was `SECURITY.md`'s, because it did not merely go stale.
+It told a reporter that the process below it was not in effect yet and to
+"report directly to the maintainer" — on a page whose whole purpose is to be
+believed by somebody holding a working exploit. It now says the thing that is
+true in every state: the email path always works, GitHub's private
+vulnerability reporting is a per-repository setting (`.github/rulesets/apply.sh`
+turns it on), and a missing "Report a vulnerability" button is a missing setting
+rather than a missing channel.
+
+What is still gated is *publishing*, which is a different fact with its own
+switch, and that is what `README.md` now says: nothing is on PyPI, npm, GHCR or
+the Homebrew tap; `release.yml` holds both publish steps behind `PUBLISH_PYPI`
+and `PUBLISH_GHCR`; the reservations are what turn them on. `landing/index.html`
+had already been written this way — its pre-launch notice is tied to the
+workflow variable and not to the repository's visibility, with a test holding
+the pair together — so this is the README catching up with the landing page.
+
+Two smaller ones, both of which gave repository visibility as half of a reason
+that outlives it: `mkdocs.yml`'s explanation of why versioning is deferred (the
+site is published nowhere; that, not privacy, is why `mike` cannot be tested),
+and `.github/rulesets/README.md`'s "nothing protects `main` today", which is
+true until `apply.sh --apply` runs rather than until publication, and which now
+names the one command that answers it without a claim.
+
+### Fixed — a quote was enough to hide an install command from its own guard
+
+`README.md`'s Postgres section said `pip install 'valqore-qed[postgres]'`. The
+package does not exist, and `tests/docs/test_claims.py` exists precisely to
+catch a page that tells a reader to install it without saying so on that page
+— it found five such pages and passed, because it matched
+`pip install valqore-qed` at the start of a line and this line has a quote
+after `pip install`.
+
+The guard now strips quotes before matching, and the command is the one that
+works from a clone (`pip install -e '.[postgres]'`) with the released form in a
+comment beside it. Five spellings and four non-instructions are parametrised
+tests, and the pair was verified by reintroducing the exact line: the guard
+fails on it now. A guard tested only against the form its author had in mind is
+tested against nothing, which is the third time in two days that sentence has
+been the finding.
 
 ### Fixed — two green tests asserting the two halves of a contradiction
 

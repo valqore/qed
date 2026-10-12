@@ -24,10 +24,15 @@ hardware, including air-gapped.
 > still appears in `docs/adr/`, `CHANGELOG.md` and two superseded spec
 > literals, and nowhere else.
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
-> **Still not public:** the remote stays private until the name reservations in
-> SPEC §24.1 are in place — PyPI, npm, GHCR, the Homebrew tap, the domain, and
-> the EUIPO/USPTO filings. Publishing is distribution, and that is the step that
-> cannot be undone.
+> **Nothing is released yet:** `valqore-qed` is on no index — no PyPI
+> package, no npm package, no GHCR image, no Homebrew tap. Install from a
+> clone, as the quick start below does. `.github/workflows/release.yml` holds
+> both publishing steps behind the `PUBLISH_PYPI` and `PUBLISH_GHCR` repository
+> variables, and what turns them on is SPEC §24.1's reservations: those names,
+> the domain, the EUIPO/USPTO filings. Distribution is the step that cannot be
+> undone, which is why the gate sits in front of the publish and not in front
+> of the build — and why the honest answer to "is it on PyPI?" comes from the
+> index rather than from this file.
 
 ## Status
 
@@ -196,7 +201,7 @@ evidence:
 ```
 
 ```bash
-pip install 'valqore-qed[postgres]'
+pip install -e '.[postgres]'          # 'valqore-qed[postgres]' once it is on PyPI
 export QED_DATABASE_URL=postgresql://user:pass@host/qed
 qed keys init && qed serve
 ```

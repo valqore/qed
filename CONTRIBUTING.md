@@ -4,9 +4,13 @@ Thank you for considering it. This page is about what a change has to satisfy
 before it can be merged, and most of it is unusual only because of what this
 software is for.
 
-> **The repository is not public yet** (see `SECURITY.md`). Until
-> it is, this describes the process the maintainers already follow, so that it
-> is not invented under pressure later.
+> **Written down before anybody needed it.** What follows is the process the
+> maintainers already hold themselves to, so that it is not invented under
+> pressure later — and it applies to their own commits: `main.json` in
+> `.github/rulesets/` grants no bypass actors, so once those rules are
+> installed a maintainer's change reaches `main` through a pull request like
+> anybody else's. That directory's `README.md` says what is and is not in force
+> today.
 
 ## Before a large change
 

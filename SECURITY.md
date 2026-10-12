@@ -11,10 +11,12 @@ as a critical bug here:
 
 ## Reporting a vulnerability
 
-> **This repository is not public yet.** The licence is applied (Apache-2.0) and
-> the remote stays private until the name reservations in SPEC §24.1 are done.
-> Until then, report directly to the maintainer. The process below is what takes
-> effect on publication.
+> **The email path is the one that always works.** GitHub's private
+> vulnerability reporting is a per-repository setting that has to be switched
+> on (`.github/rulesets/apply.sh` does it), and the "Report a vulnerability"
+> button is simply absent until it is. If the Security tab does not offer it,
+> that is a missing setting and not a missing channel: use the email below. The
+> timescales further down apply either way.
 
 **Do not open a public issue for a security bug.** Use either:
 

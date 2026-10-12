@@ -12,13 +12,16 @@ from outside. So the rules live here as the JSON that produces them, and
 
 ## Two things to know before reading the JSON
 
-**Nothing protects `main` today.** Protected branches and rulesets require a
-public repository or a paid plan, and this one is private on neither
-(`GET /repos/valqore/qed/rulesets` answers `403 Upgrade to GitHub Pro or make
-this repository public`). Every commit so far went straight to `main`, which
-`GOVERNANCE.md` also says. The rules below therefore take effect in the same
-minute the repository becomes public — not later, and not when somebody
-remembers, which is why they are a script and not a paragraph in a runbook.
+**Nothing protects `main` until `apply.sh --apply` has run.** Protected
+branches and rulesets need a public repository or a paid plan, and a private
+repository on the free plan is neither: `GET /repos/valqore/qed/rulesets`
+answers `403 Upgrade to GitHub Pro or make this repository public`. So every
+commit up to publication went straight to `main`, which `GOVERNANCE.md` also
+says. The rules below take effect in the same minute the repository becomes
+public — not later, and not when somebody remembers, which is why they are a
+script and not a paragraph in a runbook. One command separates the two states,
+and it is not a claim: `gh api repos/valqore/qed/rulesets --jq '.[].name'`
+prints nothing while nothing is installed.
 
 **`required_approving_review_count` is `0`, on purpose.** There is one
 maintainer. Requiring one approval with no second human and an empty

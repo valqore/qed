@@ -163,6 +163,25 @@ INSTALL_COMMANDS = {
 }
 
 
+def install_command_on(line: str) -> str | None:
+    """The unavailable install command this line tells a reader to run, if any.
+
+    Quotes come out before matching, which is the fix for the line that got
+    past this guard: `README.md`'s Postgres section said
+    `pip install 'valqore-qed[postgres]'`, and the quote after `pip install`
+    was enough for `startswith` to see a different string. So the guard read
+    five other pages, found each one's caveat, and passed while the README told
+    a reader to fetch a package that does not exist -- a quoting detail
+    deciding whether a page is checked at all.
+    """
+    stripped = line.strip().removeprefix("run: ").removeprefix("$ ")
+    stripped = stripped.replace("'", "").replace('"', "")
+    for command in INSTALL_COMMANDS:
+        if stripped.startswith(command):
+            return command
+    return None
+
+
 def pages_telling_a_reader_to_install() -> list[tuple[Path, str, str]]:
     """Every page where an unavailable install command is a line to be run.
 
@@ -175,11 +194,45 @@ def pages_telling_a_reader_to_install() -> list[tuple[Path, str, str]]:
     for page in [*sorted((ROOT / "docs").rglob("*.md")), ROOT / "README.md"]:
         text = page.read_text(encoding="utf-8")
         for line in text.splitlines():
-            stripped = line.strip().removeprefix("run: ").removeprefix("$ ")
-            for command, (marker, _) in INSTALL_COMMANDS.items():
-                if stripped.startswith(command):
-                    found.append((page, command, marker))
+            command = install_command_on(line)
+            if command is not None:
+                found.append((page, command, INSTALL_COMMANDS[command][0]))
     return found
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "pip install valqore-qed",
+        "pip install valqore-qed[postgres]",
+        "pip install 'valqore-qed[postgres]'",
+        '        run: pip install "valqore-qed[vault]"',
+        "$ pip install valqore-qed",
+    ],
+)
+def test_every_spelling_of_the_install_command_is_recognised(line: str) -> None:
+    """Including the quoted one, which is how the README evaded the check.
+
+    A guard tested only against the form the author had in mind is a guard
+    tested against nothing: the forms it misses are exactly the ones that reach
+    a reader.
+    """
+    assert install_command_on(line) == "pip install valqore-qed"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Vault is an optional extra (`pip install valqore-qed[vault]`). Asking for a",
+        "pip install -e '.[postgres]'",
+        'pip install -e ".[dev]" -e packages/qed-verify',
+        "# pip install valqore-qed is not how this repository is installed",
+    ],
+)
+def test_prose_and_working_commands_are_not_flagged(line: str) -> None:
+    """The other half: stripping quotes must not turn a sentence, a comment or
+    the install that actually works into an instruction to fetch a package."""
+    assert install_command_on(line) is None
 
 
 def test_the_pages_that_say_to_install_are_found() -> None:

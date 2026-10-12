@@ -27,9 +27,9 @@
 #
 # SPEC §26 says "mkdocs-material, **versioned**", which means `mike` and a
 # `gh-pages` branch holding one subdirectory per release. That is not set up,
-# because it cannot be meaningfully tested while the repository is private and
-# the site is published nowhere: `mike deploy` against a branch no reader can
-# reach proves only that the command runs.
+# because it cannot be meaningfully tested while the site is published nowhere:
+# `mike deploy` against a branch no reader can reach proves only that the
+# command runs.
 #
 # What versioning is *for* is a reader on v0.7.0 not being shown v1.0.0's
 # instructions, and that matters from the first public release. So it lands with
