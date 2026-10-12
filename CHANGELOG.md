@@ -67,6 +67,25 @@ each installed script -- that the help text calls the command by the name that
 was typed. An alias whose help tells the reader to run something else would be
 worse than no alias.
 
+That test then failed in all four `check` cells and in `postgres`, twice over,
+on two assumptions a Windows developer machine cannot see:
+
+- **The help text is styled.** `rich` counts a GitHub Actions runner as a
+  terminal, so the usage line arrives as `Usage: ` in bold yellow followed by
+  `qed [OPTIONS]...` in bold, and the literal `"Usage: qed "` the test looked
+  for occurs nowhere in it. The real bytes are now a fixture in the test file,
+  with an assertion that they still *fail* the plain check -- a sample that
+  stopped reproducing the problem would quietly stop guarding anything.
+- **Console scripts are not beside the interpreter.** The test resolved them
+  next to `sys.executable`, which is true of a virtualenv on Windows and false
+  of the CI runner, where Python is `.../x64/python.exe` and its scripts are in
+  `.../x64/Scripts/`. It now asks `sysconfig.get_path("scripts")`, which is the
+  question it meant to ask, and falls back to `PATH` only last.
+
+Both are the same mistake in different clothes: a test that reads its
+environment through one machine's layout. The alias itself was correct
+throughout -- what the red build caught was the proof, not the thing proved.
+
 ### Changed — three documents that one click would have made false
 
 `README.md`, `SECURITY.md` and `CONTRIBUTING.md` each opened with a note saying

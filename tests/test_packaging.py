@@ -21,8 +21,12 @@ The matcher segments the way setuptools does now.
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
 import subprocess
 import sys
+import sysconfig
 import tomllib
 from pathlib import Path, PurePosixPath
 
@@ -111,6 +115,28 @@ def test_the_known_data_files_are_still_the_ones_we_think_they_are() -> None:
 # The commands the wheel installs
 # --------------------------------------------------------------------------
 
+#: A CSI escape sequence, which is all `rich` emits here.
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+#: The usage line of a real `qed --help`, exactly as a GitHub Actions runner
+#: produced it. `rich` counts the runner as a terminal, so the line arrives in
+#: two styled spans -- `Usage: ` bold yellow, the rest bold -- and the literal
+#: string `"Usage: qed "` does not occur in it anywhere.
+#:
+#: The first version of the test below looked for that literal. It passed on a
+#: Windows developer machine, where nothing was styled, and failed in all four
+#: `check` cells and in `postgres`. The bytes are kept as a fixture because an
+#: invented escape sequence would prove only that the regex matches what its
+#: author imagined.
+CI_HELP_LINE = (
+    "\x1b[1m \x1b[0m\x1b[1;33mUsage: \x1b[0m\x1b[1mqed [OPTIONS] COMMAND [ARGS]...\x1b[0m"
+)
+
+
+def plain(text: str) -> str:
+    """`text` with terminal styling removed."""
+    return ANSI.sub("", text)
+
 
 def declared_scripts() -> dict[str, str]:
     with (ROOT / "pyproject.toml").open("rb") as handle:
@@ -118,23 +144,47 @@ def declared_scripts() -> dict[str, str]:
 
 
 def installed_script(name: str) -> Path:
-    """The console script as installed, found beside the running interpreter.
+    """The console script as installed in this environment.
 
-    Not through `PATH`: a developer's shell may not have the virtualenv's
-    script directory on it, and a test that silently skips because of that
-    proves nothing. `sys.executable`'s directory is where `pip` writes console
-    scripts for this environment, on Windows (`Scripts/name.exe`) and on POSIX
-    (`bin/name`) alike.
+    `sysconfig.get_path("scripts")` is where `pip` writes console scripts for
+    the interpreter running the test: a virtualenv's `Scripts` or `bin`, and
+    for a Windows installation that is not a virtualenv, `Scripts` beside the
+    interpreter's own directory rather than inside it. That last case is why
+    this does not simply look next to `sys.executable`. In a virtualenv on
+    Windows the interpreter and the scripts share one directory, so "beside the
+    interpreter" passed locally and failed on the CI runner, where the
+    interpreter is `.../x64/python.exe` and its scripts are in
+    `.../x64/Scripts/`.
+
+    `PATH` is the last resort rather than the first: a developer's shell may
+    not carry the environment's script directory, and a test that skips for
+    that reason proves nothing.
     """
-    directory = Path(sys.executable).parent
-    for candidate in (directory / f"{name}.exe", directory / name):
-        if candidate.exists():
-            return candidate
+    directories = [Path(sysconfig.get_path("scripts")), Path(sys.executable).parent]
+    for directory in directories:
+        for candidate in (directory / f"{name}.exe", directory / name):
+            if candidate.exists():
+                return candidate
+    on_path = shutil.which(name)
+    if on_path:
+        return Path(on_path)
     raise AssertionError(
-        f"`{name}` is declared in pyproject.toml but not installed in {directory}. "
+        f"`{name}` is declared in pyproject.toml but is not installed in any of "
+        f"{[str(directory) for directory in directories]} and is not on PATH. "
         "Console scripts are generated at install time, so an editable install "
         "made before this entry was added will not have it: `pip install -e .`"
     )
+
+
+def test_the_normaliser_handles_the_output_ci_actually_produced() -> None:
+    """The guard for the guard below.
+
+    Both halves are asserted: that the styled line really does not contain the
+    plain string, so the fixture still reproduces the failure, and that it does
+    once the styling is stripped.
+    """
+    assert "Usage: qed [OPTIONS]" not in CI_HELP_LINE
+    assert "Usage: qed [OPTIONS]" in plain(CI_HELP_LINE)
 
 
 class TestTheInstalledCommands:
@@ -155,7 +205,7 @@ class TestTheInstalledCommands:
         runs."""
         scripts = declared_scripts()
         assert scripts["qed"] == "qed.cli:main"
-        assert scripts["vqed"] == scripts["qed"]
+        assert scripts.get("vqed") == scripts["qed"]
 
     def test_there_are_no_other_commands(self) -> None:
         """`qed-verify` is installed by its own project, in `packages/`, and
@@ -171,13 +221,26 @@ class TestTheInstalledCommands:
         whichever name was typed with no code change -- and this is the test
         that says so, because an alias whose help told the reader to run a
         different command would be a worse answer than no alias.
+
+        The environment is set rather than inherited. `rich` counts a GitHub
+        Actions runner as a terminal, which means it both styles the output and
+        folds it at the terminal width, so the width is pinned wide enough that
+        the usage line is not wrapped and whatever styling survives `NO_COLOR`
+        is stripped before the text is read.
         """
+        environment = {
+            **os.environ,
+            "NO_COLOR": "1",
+            "TERM": "dumb",
+            "COLUMNS": "200",
+        }
         result = subprocess.run(
             [str(installed_script(name)), "--help"],
             capture_output=True,
             text=True,
             timeout=120,
             check=False,
+            env=environment,
         )
         assert result.returncode == 0, result.stderr
-        assert f"Usage: {name} " in result.stdout, result.stdout
+        assert f"Usage: {name} " in plain(result.stdout), result.stdout
