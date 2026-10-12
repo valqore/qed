@@ -7,7 +7,7 @@ qed attaches the credential on the way out.
 
 An agent that cannot read a token cannot leak one, cannot be talked into
 pasting one into a chat window, and cannot keep using one after its mandate
-is revoked. This is also the difference between a qed and a linter: a linter
+is revoked. This is also the difference between a gate and a linter: a linter
 tells you the action was unwise, a broker means the action was not possible.
 
 ## Posture first

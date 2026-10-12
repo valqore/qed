@@ -864,7 +864,7 @@ Two engineers. Repo public from day 1. Weekly tagged release from week 2.
 | **3** | Delegation: JWKS verify, `/token` exchange, chain narrowing, Keycloak compose, `qed login` device flow, budgets ledger, remaining baseline rules (~50), `policy test/explain` | Okta/Keycloak user → budgeted token → MCP call → verdict; `v0.2.0` |
 | **4** | Approval service: state machine, SoD, dedupe, windows, timeouts; CLI + web approval page; Slack channel; `/events` SSE; live UI (3 pages) | Demo: prod-delete → Slack → deny by different human → chain; `v0.3.0`; design partner #1 installed (shadow) |
 | **5** | Credential broker (env/file/Vault), enforcing MCP; HTTP forward proxy (host_path); mandates (`sign/list/revoke`, unattended flow); `qed doctor` posture | Unattended SRE-agent demo with mandate + budget exhaustion; `v0.4.0`; brew tap (python-dependent formula) |
-| **6** | Claude Code hook + `install`; Codex hook/wrapper; Python SDK + LangGraph/CrewAI examples; `qed check` CI mode; Postgres + chain leader/outbox; Helm | Four adapters e2e; HA test; **Show HN** + blog #2 ("Replit/Supabase/AgentCore: what a qed would have done"); `v0.5.0`; design partner #2 |
+| **6** | Claude Code hook + `install`; Codex hook/wrapper; Python SDK + LangGraph/CrewAI examples; `qed check` CI mode; Postgres + chain leader/outbox; Helm | Four adapters e2e; HA test; **Show HN** + blog #2 ("Replit/Supabase/AgentCore: what a gate would have done"); `v0.5.0`; design partner #2 |
 | **7** | Checkpoints + publishers (file, S3 object-lock, git); key rotation; retention/purge; masking strict; OCSF SIEM webhook; perf suite | p95 < 50 ms verified; purge-then-verify passes; `v0.6.0` |
 | **8** | Compliance packs import + normalization; OSCAL control mapping complete for EU AI Act/NIST AI RMF; assurance classes doc; **auditor session #1** | Written auditor feedback; fixes scheduled; `v0.7.0` |
 | **9** | Auditor fixes; ISO 42001/DORA deepening; `qed.remote.packs` (signed) + air-gap import; `qed.remote.anchor` client (server stub) | Auditor "acceptable (with changes)" → changes merged; `v0.8.0` |
@@ -886,7 +886,7 @@ Parallel every week: 2 customer/auditor conversations; weekly changelog; **no co
 ---
 
 ## 24. Open items waiting on business input (do not block weeks 1–3)
-1. ~~Final product name and domain~~ → **closed 2026-10-08. The product is "Valqore QED"; `qed` stays the command, the import package and the repository name.** No refactor needed: ADR-0006 already removed the product name from the evidence format. Domain and the PyPI/npm/GHCR/Homebrew/EUIPO/USPTO reservations are a separate, still-open task and qed the first *public* push, not the build.
+1. ~~Final product name and domain~~ → **closed 2026-10-08. The product is "Valqore QED"; `qed` stays the command, the import package and the repository name.** No refactor needed: ADR-0006 already removed the product name from the evidence format. Domain and the PyPI/npm/GHCR/Homebrew/EUIPO/USPTO reservations are a separate, still-open task and they gate the first *public* push, not the build.
 2. ~~Valqore patent scope (I5)~~ → **closed 2026-10-08: no filings, nothing pending.** The broker+mandate+chain composition practises no claim Valqore holds, so the irrevocable Apache-2.0 §3 grant transfers nothing. Apache-2.0 is now applied (`LICENSE`, `NOTICE`, SPDX `license` in both `pyproject.toml` files).
 3. Existing Valqore agent-qed users (I1/B9) → migration note or none.
 4. KMS choice for design partner #2 (AWS KMS forces ECDSA P-256 variant).
@@ -922,7 +922,7 @@ PyPI (`valqore-qed`, `qed-verify`); GHCR container (distroless, non-root, cosign
 | Day 1 | Repo public (skeleton + SPEC + GOVERNANCE) — "quiet open" | GitHub only |
 | Week 2 | `v0.1.0` MCP proxy in shadow + blog #1 "Static skill scanning is not enough — why runtime policy + signed evidence" | MCP Discord/GitHub discussions, Claude Code community, r/mcp, LinkedIn |
 | Week 4 | `v0.3.0` approvals + live UI; 90-second demo video (prod-db-drop) | Same + Twitter/X thread |
-| Week 6 | `v0.5.0` four adapters + HA; **Show HN**; blog #2 "Replit, Supabase MCP, AgentCore: what a qed would have done" | Hacker News, Lobsters, newsletters (TLDR Sec, Last Week in AI) |
+| Week 6 | `v0.5.0` four adapters + HA; **Show HN**; blog #2 "Replit, Supabase MCP, AgentCore: what a gate would have done" | Hacker News, Lobsters, newsletters (TLDR Sec, Last Week in AI) |
 | Week 8 | Blog #3 "Evidence auditors can verify without trusting us" after auditor session | LinkedIn (CISO/GRC audience), ISACA/IIA groups |
 | Week 12 | `v1.0.0` + evidence-format 1.0 spec + landing page + design-partner quotes | All channels; Product Hunt optional |
 Weekly: changelog post in GitHub Discussions; respond to every issue within 24 h (this is the moat in months 0–6). No conference travel; no paid ads.
@@ -949,7 +949,7 @@ Semver. `schema_version` of `ActionProposal`/`EvidenceRecord` is independent of 
 | UI | **Preact + htm** (no build step, ~10 KB) or plain HTML + SSE; shipped as the separate `qed-ui` wheel (AGPL), served by the kernel when installed | Two-person team: no frontend toolchain to maintain; license kept out of the Apache wheel |
 | CLI | **Typer + Rich** | Same as Valqore |
 | Packaging | PyPI wheels; **PyInstaller/Nuitka** single binary for brew (decide week 5); distroless container; Helm | Brew-first install for Mac users |
-| CI/CD | **GitHub Actions**: ruff, mypy --strict, pytest (+coverage qed on `qed.core`), no-network/no-LLM AST tests, OSCAL schema validation, gitleaks, pip-audit, Syft SBOM, cosign keyless, SLSA provenance, multi-arch build | Ported from Valqore CI plus lint/type steps it lacked |
+| CI/CD | **GitHub Actions**: ruff, mypy --strict, pytest (+coverage gate on `qed.core`), no-network/no-LLM AST tests, OSCAL schema validation, gitleaks, pip-audit, Syft SBOM, cosign keyless, SLSA provenance, multi-arch build | Ported from Valqore CI plus lint/type steps it lacked |
 | Docs | **mkdocs-material**, versioned; ADRs in `docs/adr/` | |
 | Observability | Prometheus client; SSE; OCSF JSON | Customers keep their Grafana/Splunk |
 | Testing | pytest, pytest-asyncio, hypothesis (predicates/hashing), docker-compose e2e (Keycloak, Postgres, httpbin, sample MCP server) | |
