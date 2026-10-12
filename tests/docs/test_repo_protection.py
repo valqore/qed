@@ -150,11 +150,58 @@ class TestMainRequiresTheWholeSuite:
         assert has_rule(data, "required_linear_history")
         assert rule(data, "pull_request")["parameters"]["allowed_merge_methods"] == ["squash"]
 
-    def test_the_owners_file_is_consulted(self) -> None:
+    def test_code_owner_review_is_requested_and_not_required(self) -> None:
+        """`require_code_owner_review` is `false` for the same reason
+        `required_approving_review_count` is `0`, and it was `true`.
+
+        `.github/CODEOWNERS` gives one person every path. GitHub does not let
+        anybody approve their own pull request, so requiring a code owner's
+        approval requires an approval that cannot be given -- and with
+        `bypass_actors` empty there is no override. That is the repository
+        nobody can merge into that the test below spends a docstring avoiding,
+        reached by a different parameter.
+
+        Two tests asserted the two halves of that: one pinned the count at zero
+        and explained why, the other demanded the flag that makes the zero
+        irrelevant. Both passed. Neither knew about the other, which is the
+        shape of a compliance control reported in an export while nothing
+        enforces it -- found here in the file written to prevent it.
+
+        Nothing is lost by turning it off. GitHub still requests review from
+        the owners named in `CODEOWNERS` on every pull request, which is what
+        `.github/rulesets/README.md` already described ("CODEOWNERS review is
+        requested"); only the blocking requirement goes. When a second
+        maintainer arrives this becomes safe to turn on, and the count below
+        stops being zero in the same change.
+        """
         parameters = rule(ruleset("main.json"), "pull_request")["parameters"]
-        assert parameters["require_code_owner_review"] is True
+        assert parameters["require_code_owner_review"] is False
         assert parameters["dismiss_stale_reviews_on_push"] is True
         assert parameters["required_review_thread_resolution"] is True
+
+    def test_nothing_requires_an_approval_that_cannot_be_given(self) -> None:
+        """The invariant the two tests above were each half of.
+
+        While `bypass_actors` is empty and the approval count is zero, no
+        parameter may require a human approval, by any route. This is the test
+        that would have failed when `require_code_owner_review` was `true`,
+        and it is written against the property rather than against one flag so
+        that the next parameter with the same effect also trips it.
+        """
+        data = ruleset("main.json")
+        parameters = rule(data, "pull_request")["parameters"]
+        if data["bypass_actors"] or parameters["required_approving_review_count"]:
+            pytest.skip("there is a second maintainer or a bypass; the trap does not apply")
+        requires_a_human = {
+            name: value
+            for name, value in parameters.items()
+            if name in {"require_code_owner_review", "require_last_push_approval"} and value is True
+        }
+        assert not requires_a_human, (
+            f"{sorted(requires_a_human)} require an approving review, while the approval "
+            "count is 0 and bypass_actors is empty. One maintainer cannot approve their "
+            "own pull request, so main would be unmergeable."
+        )
 
 
 def test_the_approval_count_matches_the_number_of_maintainers() -> None:

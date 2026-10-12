@@ -31,6 +31,28 @@ count stays at `0` until there is somebody to do the approving. A test ties
 that number to the sentence in `GOVERNANCE.md` that says nobody has reviewed
 this repository, so the two cannot drift apart silently.
 
+**`require_code_owner_review` is `false` for exactly the same reason, and was
+`true`.** `CODEOWNERS` gives one person every path, GitHub does not let anybody
+approve their own pull request, and `bypass_actors` is empty — so requiring a
+code owner's approval required an approval that could not be given. It is the
+unmergeable repository the paragraph above avoids, reached by a different
+parameter, and it was caught before publication only because the rulesets had
+never been applied: they are refused on a private repository, so the trap could
+not spring.
+
+Two tests asserted the two halves of it. One pinned the count at zero and
+explained why; the other demanded the flag that makes the zero irrelevant. Both
+passed, because neither knew the other existed — a control reported as present
+while something else makes it inert, which is the failure this product exists
+to remove, found in the file written to prevent it. There is now a test on the
+*property*: while `bypass_actors` is empty and the count is zero, no parameter
+may require a human approving review, by any route. Turn the flag back on
+together with a second maintainer, or that test fails and names it.
+
+Nothing is lost meanwhile. GitHub still requests review from the owners in
+`CODEOWNERS` on every pull request; only the blocking requirement is off, which
+is what the sentence above already described.
+
 ## The rest of the choices
 
 - **Ten required checks, not one.** `required_status_checks` names every job

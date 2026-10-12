@@ -6,6 +6,37 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — two green tests asserting the two halves of a contradiction
+
+`.github/rulesets/main.json` set `require_code_owner_review: true` while
+`.github/CODEOWNERS` gives one person every path, `required_approving_review_count`
+is `0` and `bypass_actors` is empty. GitHub does not let anybody approve their
+own pull request, so every pull request would have needed an approval that
+could not be given, with no override — `main` would have been a branch nobody
+could merge into.
+
+`tests/docs/test_repo_protection.py` had a test pinning the count at zero whose
+docstring spells out that exact danger, and, eleven lines above it, a second
+test *requiring* the flag that makes the zero irrelevant. Both passed. Neither
+knew the other existed. A control that reads as present while something else
+makes it inert is the failure this product exists to remove, and here it was in
+the file written to prevent it.
+
+It survived only because it had never run: rulesets are refused on a private
+repository, so `apply.sh` could not install the trap. It would have sprung in
+the minute after the repository went public.
+
+`require_code_owner_review` is now `false`, for the same reason the approval
+count is zero, and `.github/rulesets/README.md` says so where it already
+explained the count. Nothing is lost: GitHub still requests review from the
+owners in `CODEOWNERS`; only the blocking requirement goes, and it becomes safe
+to turn on in the same change that gives the repository a second maintainer.
+
+The replacement test is written against the property rather than the flag:
+while `bypass_actors` is empty and the approval count is zero, no parameter may
+require a human approving review by any route. Verified by putting the old
+value back — it fails and names the parameter.
+
 ## [1.0.0] — 2026-10-11
 
 **The evidence format is frozen.** That is what the major version means here,
