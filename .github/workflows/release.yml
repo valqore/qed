@@ -286,7 +286,17 @@ jobs:
         include:
           - runner: macos-14
             label: macos-arm64
-          - runner: macos-13
+          # `macos-15-intel`, not `macos-13`: GitHub retired the macOS 13
+          # image on 2025-12-04. A retired label is not rejected when the job
+          # is created, it is queued -- so both of v1.0.0's first two tags
+          # built every artifact, went green everywhere else, and then waited
+          # on a runner that was never coming. `release` lists `binary` in
+          # `needs`, and `if: always()` only survives a job that *fails*; a job
+          # that never starts holds the release until GitHub cancels it at the
+          # 24-hour queue limit. So a runner label is a dependency like any
+          # other, and changing one is a thing to prove on a branch rather than
+          # on a tag. This one was: `uname -m` = x86_64 on macOS 15.
+          - runner: macos-15-intel
             label: macos-x86_64
           - runner: ubuntu-latest
             label: linux-x86_64

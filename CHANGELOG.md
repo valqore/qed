@@ -44,6 +44,38 @@ depends on it. A test that mutates an input has to establish that it mutated
 it; otherwise its failure message describes a defect in the product when the
 defect is in the test.
 
+### Fixed — the release waited on a runner that was retired ten months ago
+
+With the pipe race fixed, every job in the release went green except one, and
+the release still did not appear. The Intel macOS binary was built on
+`macos-13`, a runner image GitHub retired on 2025-12-04. A job that asks for a
+retired label is not rejected when it is created: it is **queued**, and it
+stays queued until GitHub cancels it at the 24-hour limit. Both of v1.0.0's
+first two tags sat for hours with `verify`, `wheels`, `chart`, both `image`
+jobs and the other two binaries all successful, waiting on a machine that no
+longer exists.
+
+The `release` job anticipated a broken binary and says so in a comment: the
+binaries "are part of the release but not a condition of it", guarded with
+`if: always() && wheels == 'success' && chart == 'success'`. That is the right
+intent and it does not help here, because `always()` releases a job whose
+dependency *failed*, and this dependency never finished. The distinction
+between "failed" and "has not started" is invisible when you write the guard
+and total when it runs.
+
+Two consequences, and the second is the general one:
+
+- The label is now `macos-15-intel`, GitHub's replacement, and that was
+  **proven on a throwaway branch before the tag** -- one job printing
+  `uname -m`, which answered `x86_64` on macOS 15.7.9 in a second. The two
+  dead tags are what it costs to learn this from a tag instead.
+- A runner label is a dependency on something outside the repository, like a
+  base image or an action version, and nothing in the pipeline pins or checks
+  it. `macos-13` was added in week 11 and the Intel binary had never once been
+  built before the 1.0.0 tag, because the `binary` job did not exist when
+  v0.7.0 was released -- so this was not a regression, it was a step that had
+  never run. A release step that has never run is not a release step.
+
 ### Fixed — the release pipeline failed a check that had succeeded
 
 Tagging `v1.0.0` ran the release workflow, and the `binary` job failed on
