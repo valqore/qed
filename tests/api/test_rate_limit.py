@@ -24,6 +24,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from qed.api import app_state
 from qed.api.app import create_app
 from qed.core.ratelimit import BURST_SECONDS
 from qed.infra.keys.file import init_keys
@@ -35,6 +36,43 @@ def proposal(index: int) -> dict[str, Any]:
     """One envelope with a fresh id. Ids are single use, so every request in a
     burst needs its own or the second one is a 409 rather than a 429."""
     return {"proposal": deep_merge(BASE_PROPOSAL, {"id": f"01JBRATELIMIT{index:012d}"})}
+
+
+class Clock:
+    """The limiter's clock, frozen and advanced on purpose.
+
+    These tests spend a bucket and assert that the next request is refused.
+    The bucket also *refills*, at `rps` per second, so the assertion holds
+    only while the burst takes less than `1 / rps` seconds -- half a second at
+    `TIGHT_RPS`. Six signed proposals, each an fsync to SQLite, fit in that on
+    a developer's machine and did not on a Windows CI runner, where the burst
+    refilled a token and the next request came back `200`.
+
+    That is not flakiness to paper over with a wider margin: the margin is a
+    wall-clock race in a test whose subject is arithmetic. `enforce_rate_limit`
+    has taken a `now` argument since it was written and nothing ever passed
+    one, so the HTTP path fell through to `time.monotonic()` and the suite
+    inherited the race. This supplies it.
+
+    `qed/api/app_state.py` reads `time` exactly once, for the limiter, so
+    replacing the module reference there affects nothing else.
+    """
+
+    def __init__(self, now: float = 1_000.0) -> None:
+        self._now = now
+
+    def monotonic(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
+def install_clock(monkeypatch: pytest.MonkeyPatch, *, at: float = 1_000.0) -> Clock:
+    monkeypatch.setattr(app_state, "time", Clock(at))
+    clock = app_state.time
+    assert isinstance(clock, Clock)
+    return clock
 
 
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **limits: float) -> FastAPI:
@@ -85,7 +123,11 @@ TIGHT_BURST = int(TIGHT_RPS * BURST_SECONDS)
 
 class TestWhenTheLimitIsSpent:
     @pytest.fixture
-    def tight(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    def clock(self, monkeypatch: pytest.MonkeyPatch) -> Clock:
+        return install_clock(monkeypatch)
+
+    @pytest.fixture
+    def tight(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: Clock) -> Any:
         app = configured(tmp_path, monkeypatch, per_adapter_rps=TIGHT_RPS, per_principal_rps=0)
         with TestClient(app) as client:
             yield Signer(client)
@@ -136,15 +178,21 @@ class TestWhenTheLimitIsSpent:
         tight.post("/v1/proposals", proposal(98))
         assert tight.get("/v1/evidence?from=0&to=999").text == before
 
-    def test_a_throttled_proposal_id_can_be_submitted_later(self, tight: Signer) -> None:
+    def test_a_throttled_proposal_id_can_be_submitted_later(
+        self, tight: Signer, clock: Clock
+    ) -> None:
         """A 429 must not burn the proposal id. Ids are single use, and a
         caller whose request was refused for load has not spent theirs --
-        otherwise backing off and retrying would get a 409."""
+        otherwise backing off and retrying would get a 409.
+
+        The wait is a clock advance and not a `sleep`: the point is that the
+        bucket refilled, not that six tenths of a second of wall time passed,
+        and a suite that sleeps to wait for arithmetic pays for it on every
+        run.
+        """
         self.spend(tight)
         assert tight.post("/v1/proposals", proposal(50)).status_code == 429
-        import time
-
-        time.sleep(0.6)
+        clock.advance(1.0 / TIGHT_RPS)
         assert tight.post("/v1/proposals", proposal(50)).status_code == 200
 
 
@@ -174,6 +222,10 @@ class TestItIsReported:
     def test_the_refusals_are_counted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Frozen for the same reason as the class above: at 1/s the bucket
+        holds three and this sends four, so one second anywhere in those four
+        requests refills the token that makes the count zero."""
+        install_clock(monkeypatch)
         app = configured(tmp_path, monkeypatch, per_adapter_rps=1, per_principal_rps=0)
         with TestClient(app) as client:
             caller = Signer(client)

@@ -28,6 +28,7 @@ import os
 import platform
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -337,9 +338,56 @@ class TestTheImageActuallyRuns:
         assert report.ok, report.summary()
 
 
-#: A tiny image the probe starts under emulation. Pulled in its own step so a
-#: registry failure is not mistaken for a missing emulator.
-PROBE_IMAGE = "public.ecr.aws/docker/library/busybox:latest"
+#: Tiny images the probe starts under emulation, tried in order. Pulled in
+#: their own step so a registry failure is not mistaken for a missing emulator.
+#:
+#: Three registries rather than one, because the failure this list exists for
+#: has happened: ECR Public answered `toomanyrequests: Rate exceeded` to an
+#: anonymous pull and failed the `deploy` job, which is a required status check.
+#: The rate limit is per source address and CI runners share addresses, so
+#: retrying the same host is the weakest possible answer -- `mirror.gcr.io` is a
+#: pull-through cache of Docker Hub with its own budget, and Docker Hub is a
+#: third party again. All three being throttled in the same minute is not a
+#: thing to design around.
+#:
+#: Deliberately still not a skip. See `test_the_emulator_is_actually_here`: a
+#: skip here would be a green run with the test that caught the last arm64 bug
+#: not having run.
+PROBE_IMAGES = (
+    "public.ecr.aws/docker/library/busybox:latest",
+    "mirror.gcr.io/library/busybox:latest",
+    "busybox:latest",
+)
+
+#: One more round after the first, because a throttle is often over in seconds.
+PULL_ROUNDS = 2
+PULL_BACKOFF_S = 5.0
+
+#: Shorter than `PULL_TIMEOUT_S`, which sized a single attempt. Six attempts at
+#: that timeout is an eighteen-minute stall at collection time if the network
+#: blackholes rather than refuses, and collection is where nothing is reported
+#: yet. A busybox manifest and one layer is seconds; a minute is already
+#: generous, and the budget for the whole probe is now bounded by it.
+PROBE_PULL_TIMEOUT_S = 60
+
+
+def _pull_probe_image() -> tuple[str | None, str]:
+    """The first probe image that pulls, or why none of them did."""
+    attempts: list[str] = []
+    for round_number in range(PULL_ROUNDS):
+        if round_number:
+            time.sleep(PULL_BACKOFF_S)
+        for image in PROBE_IMAGES:
+            pull = _probe(
+                ["docker", "pull", "--platform", FOREIGN_PLATFORM, image], PROBE_PULL_TIMEOUT_S
+            )
+            if pull is None:
+                attempts.append(f"{image}: timed out after {PROBE_PULL_TIMEOUT_S}s")
+                continue
+            if pull.returncode == 0:
+                return image, ""
+            attempts.append(f"{image}: {pull.stderr.strip()[-200:]}")
+    return None, "no probe image could be pulled -- " + "; ".join(attempts)
 
 
 def emulation_available() -> tuple[bool, str]:
@@ -367,15 +415,13 @@ def emulation_available() -> tuple[bool, str]:
     if not docker_available():
         return False, "no Docker daemon answered `docker info`"
 
-    pull = _probe(["docker", "pull", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE], PULL_TIMEOUT_S)
-    if pull is None:
-        return False, f"`docker pull {PROBE_IMAGE}` timed out after {PULL_TIMEOUT_S}s"
-    if pull.returncode != 0:
-        # Not an answer about emulation at all: the registry did not cooperate.
-        return False, f"could not pull {PROBE_IMAGE}: {pull.stderr.strip()[-400:]}"
+    image, why_not = _pull_probe_image()
+    if image is None:
+        # Not an answer about emulation at all: no registry cooperated.
+        return False, why_not
 
     probe = _probe(
-        ["docker", "run", "--rm", "--platform", FOREIGN_PLATFORM, PROBE_IMAGE, "true"],
+        ["docker", "run", "--rm", "--platform", FOREIGN_PLATFORM, image, "true"],
         PROBE_TIMEOUT_S,
     )
     if probe is None:
