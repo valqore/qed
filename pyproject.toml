@@ -105,6 +105,16 @@ s3 = [
 
 [project.scripts]
 qed = "qed.cli:main"
+# `vqed` is the same entry point under a second name, for a machine where `qed`
+# is taken or ambiguous -- `qed` is also a Unix text editor, the ancestor of
+# `ed`, which no current distribution ships but which a reader may know. It is
+# an alias and not a rename: `qed` stays the documented command, the package
+# name and the repository, and the three published constants that carry the
+# product name (`qed-pack-bundle/1`, the RFC 9457 type base and the OSCAL
+# property namespace) are frozen in evidence format 1.0 and cannot follow a
+# rename anyway (ADR-0015). Typer takes the program name from `argv[0]`, so
+# `vqed --help` describes itself as `vqed` with no code change.
+vqed = "qed.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["qed*"]

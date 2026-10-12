@@ -21,6 +21,8 @@ The matcher segments the way setuptools does now.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tomllib
 from pathlib import Path, PurePosixPath
 
@@ -103,3 +105,79 @@ def test_the_known_data_files_are_still_the_ones_we_think_they_are() -> None:
         for name in found
         if Path(name).suffix not in {".yaml", ".yml", ".sql", ".json", ".txt", ".md"}
     ], found
+
+
+# --------------------------------------------------------------------------
+# The commands the wheel installs
+# --------------------------------------------------------------------------
+
+
+def declared_scripts() -> dict[str, str]:
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        return dict(tomllib.load(handle)["project"]["scripts"])
+
+
+def installed_script(name: str) -> Path:
+    """The console script as installed, found beside the running interpreter.
+
+    Not through `PATH`: a developer's shell may not have the virtualenv's
+    script directory on it, and a test that silently skips because of that
+    proves nothing. `sys.executable`'s directory is where `pip` writes console
+    scripts for this environment, on Windows (`Scripts/name.exe`) and on POSIX
+    (`bin/name`) alike.
+    """
+    directory = Path(sys.executable).parent
+    for candidate in (directory / f"{name}.exe", directory / name):
+        if candidate.exists():
+            return candidate
+    raise AssertionError(
+        f"`{name}` is declared in pyproject.toml but not installed in {directory}. "
+        "Console scripts are generated at install time, so an editable install "
+        "made before this entry was added will not have it: `pip install -e .`"
+    )
+
+
+class TestTheInstalledCommands:
+    """`qed`, and `vqed` as an alias for it.
+
+    The alias exists for a machine where `qed` is taken or ambiguous -- it is
+    also the name of a Unix text editor, the ancestor of `ed`, which nothing
+    current ships but which a reader may know. It is deliberately not a
+    rename: `qed` remains the documented command, the import package and the
+    repository, and the product name is frozen into `qed-pack-bundle/1`, the
+    RFC 9457 type base and the OSCAL property namespace, none of which can
+    follow a rename now that evidence format 1.0 is fixed (ADR-0015).
+    """
+
+    def test_both_names_point_at_one_entry_point(self) -> None:
+        """An alias, not a second implementation. Two targets would be two
+        code paths to keep in step, and the second would be the one nobody
+        runs."""
+        scripts = declared_scripts()
+        assert scripts["qed"] == "qed.cli:main"
+        assert scripts["vqed"] == scripts["qed"]
+
+    def test_there_are_no_other_commands(self) -> None:
+        """`qed-verify` is installed by its own project, in `packages/`, and
+        must stay there: an auditor installs the verifier without installing
+        the thing it verifies."""
+        assert set(declared_scripts()) == {"qed", "vqed"}
+
+    @pytest.mark.parametrize("name", ["qed", "vqed"])
+    def test_each_name_runs_and_calls_itself_by_the_name_invoked(self, name: str) -> None:
+        """Executed, not inferred from metadata.
+
+        Typer takes the program name from `argv[0]`, so the help text follows
+        whichever name was typed with no code change -- and this is the test
+        that says so, because an alias whose help told the reader to run a
+        different command would be a worse answer than no alias.
+        """
+        result = subprocess.run(
+            [str(installed_script(name)), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"Usage: {name} " in result.stdout, result.stdout

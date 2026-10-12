@@ -44,6 +44,29 @@ depends on it. A test that mutates an input has to establish that it mutated
 it; otherwise its failure message describes a defect in the product when the
 defect is in the test.
 
+### Added — `vqed`, the same command under a second name
+
+The wheel installs `vqed` alongside `qed`, pointing at the same entry point.
+`qed` is also a Unix text editor -- the ancestor of `ed` -- which nothing
+current ships but which a reader may know, and a second name costs one line
+where a collision on somebody's `PATH` costs them an afternoon.
+
+It is an alias and deliberately not a rename. `qed` stays the documented
+command, the import package and the repository, and three published constants
+carry the product name and **cannot** follow a rename now that evidence format
+1.0 is frozen: `qed-pack-bundle/1` in `qed/remote/packs.py`, the RFC 9457 type
+base in `qed/api/problems.py`, and the OSCAL property namespace in
+`qed/core/evidence/export/oscal.py`. ADR-0006 kept the product name out of the
+hash domain separators, so a rename would not invalidate a chain -- it would
+leave a differently named product writing records that still say `qed`.
+
+Typer takes the program name from `argv[0]`, so `vqed --help` describes itself
+as `vqed` with no code change. `tests/test_packaging.py` asserts that both
+names resolve to one entry point, that there are no others, and -- by running
+each installed script -- that the help text calls the command by the name that
+was typed. An alias whose help tells the reader to run something else would be
+worse than no alias.
+
 ### Changed — three documents that one click would have made false
 
 `README.md`, `SECURITY.md` and `CONTRIBUTING.md` each opened with a note saying

@@ -104,6 +104,11 @@ qed export --dir .qed --out chain.jsonl
 qed-verify chain.jsonl --keys .qed/public --instance-id qed-local
 ```
 
+The wheel also installs **`vqed`** as an alias for the same entry point, for a
+machine where `qed` is taken or ambiguous — it is also the name of a Unix text
+editor, the ancestor of `ed`. `qed` is the documented command and the import
+package; everything below is written with it.
+
 `qed check` exit codes: `0` ALLOW, `2` BLOCK, `3` REQUIRE_APPROVAL, `1` error —
 **but the default mode is shadow, and shadow always exits 0.** The first run
 above prints `REQUIRE_APPROVAL` and exits 0, which is deliberate: a pipeline
