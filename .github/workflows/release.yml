@@ -313,6 +313,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]" -e packages/qed-verify
 
+      # macOS only, for a specific reason. `cryptography` no longer ships an
+      # x86_64 macOS wheel, so on the Intel runner pip builds it from source
+      # against Homebrew's OpenSSL -- and PyInstaller then collects a
+      # *mismatched pair*: `libssl` from the python.org framework and
+      # `libcrypto` from Homebrew's Cellar. v1.0.0's third tag shipped exactly
+      # that and the binary died on startup with
+      # `Symbol not found: _SSL_get0_group_name`, an OpenSSL 3.2 symbol that
+      # the framework's copy does not have.
+      #
+      # A wheel has OpenSSL linked statically, so there is no pair to get
+      # wrong. On arm64 this reinstalls the version it already had; on Intel it
+      # pins back to the newest release that still publishes a universal2
+      # wheel, which is a genuine difference between the two macOS binaries and
+      # is printed here so the build log says which is which.
+      - name: Take `cryptography` from a wheel, never a local build
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          pip install --force-reinstall --no-deps --only-binary :all: cryptography
+          version=$(pip show cryptography | awk '/^Version:/{print $2}')
+          so=$(python -c "import cryptography.hazmat.bindings._rust as m; print(m.__file__)")
+          echo "cryptography ${version}"
+          # Saying this now is worth more than a dlopen traceback out of the
+          # frozen binary later: a dynamic OpenSSL link here *is* the defect.
+          if otool -L "$so" | grep -E "libssl|libcrypto"; then
+            echo "::error::this cryptography links OpenSSL dynamically, so PyInstaller will bundle whichever copy it finds first -- the frozen binary will not start"
+            exit 1
+          fi
+          echo "ok: OpenSSL is static inside the extension"
+
       - name: Build
         run: pyinstaller deploy/qed.spec --noconfirm --clean --log-level WARN
 
@@ -522,9 +552,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Named, not everything. `docker/build-push-action` uploads a
+      # `*.dockerbuild` build record per image job, and an unfiltered download
+      # takes those too: on v1.0.0's third tag the five real artifacts
+      # downloaded and the two build records failed, so the release died on
+      # files that were never going to be attached to it. The pattern also
+      # means a new artifact somewhere else in the pipeline cannot silently
+      # become a release asset.
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: "{dist-*,chart,binary-*}"
           merge-multiple: true
 
       # The changelog section for this version, which says *why* rather than

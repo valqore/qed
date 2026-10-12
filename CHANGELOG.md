@@ -44,6 +44,68 @@ depends on it. A test that mutates an input has to establish that it mutated
 it; otherwise its failure message describes a defect in the product when the
 defect is in the test.
 
+### Fixed — the Intel macOS binary was assembled from two different OpenSSLs
+
+The runner fix got the Intel job a machine in three seconds, and the binary it
+built could not start:
+
+```
+ImportError: dlopen(.../cryptography/hazmat/bindings/_rust.abi3.so):
+  Symbol not found: _SSL_get0_group_name
+  Expected in: .../libssl.3.dylib
+```
+
+Measured on a real `macos-15-intel` runner rather than guessed at.
+`cryptography` no longer publishes an x86_64 macOS wheel, so pip **built it
+from source** against Homebrew's OpenSSL 3.6.3. PyInstaller then collected a
+mismatched pair:
+
+| | |
+|---|---|
+| `libssl.3.dylib` | `/Library/Frameworks/Python.framework/Versions/3.12` |
+| `libcrypto.3.dylib` | `/usr/local/Cellar/openssl@3/3.6.3` |
+
+Two different OpenSSL installations, one library taken from each.
+`_SSL_get0_group_name` is an OpenSSL 3.2 symbol: the Cellar copy has it, the
+framework copy does not, and the extension was linked against the Cellar one.
+
+The `binary` job now reinstalls `cryptography` from a wheel on macOS before
+building. A wheel has OpenSSL linked statically -- the extension links only
+`libiconv` and `libSystem` -- so there is no pair to get wrong. The step then
+**checks that**, with `otool -L`, and fails there with a sentence rather than
+letting the frozen binary die on `dlopen` five steps later.
+
+One consequence stated rather than hidden: on Intel this pins back to the
+newest `cryptography` that still publishes a universal2 wheel, so that one
+binary carries an older version than the wheels do. The step prints the version
+into the build log. The honest reading is that Intel macOS is a platform the
+Python ecosystem is leaving, and a frozen binary for it now depends on a
+hand-checked OpenSSL linkage every release.
+
+### Fixed — the release job downloaded artifacts it had no use for, and died on them
+
+With the binary job red, `release` ran for the first time -- `if: always()`
+working as intended -- and failed in `download-artifact`:
+
+```
+Found 7 artifact(s) … downloading all artifacts
+  ok   dist-qed · dist-qed-verify · chart · binary-linux-x86_64 · binary-macos-arm64
+  fail valqore~qed~TL3OI6.dockerbuild
+  fail valqore~qed~QPN6PZ.dockerbuild
+##[error]Unable to download artifact(s): failed after 5 retries
+```
+
+The five real artifacts arrived and verified their digests. The two that failed
+are build records `docker/build-push-action` uploads, which were never going to
+be release assets -- the step simply had no `pattern`, so it took everything
+the run produced. The release died on files it did not want.
+
+It now asks for `{dist-*,chart,binary-*}`, which was checked against the real
+artifact names with the same matcher `@actions/artifact` uses rather than read
+and assumed: all six real names match, both build records do not. The pattern
+also means a new artifact added elsewhere in the pipeline cannot quietly become
+a release asset.
+
 ### Fixed — the release waited on a runner that was retired ten months ago
 
 With the pipe race fixed, every job in the release went green except one, and
