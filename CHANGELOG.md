@@ -6,6 +6,23 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-11
+
+**The evidence format is frozen.** That is what the major version means here,
+and it is the only promise in this release that cannot be walked back: a record
+written under `schema_version: "1.0"` verifies under every later verifier,
+forever, and the repository now contains the records that prove it rather than a
+sentence saying so.
+
+Weeks 11 and 12 of the twelve-week plan (SPEC §22). Week 11's security fix is
+below, under its own heading, because it is the more serious entry.
+
+The sections below run newest first, so the pre-publication pass that rewrote
+this repository's history sits above the format freeze it shipped with. Both
+are this release. The freeze is what the major version means; the pass is what
+made the repository publishable, and it is recorded here because the commits
+that would have shown the work no longer exist.
+
 ### Changed — the history was rewritten once, and this is the only account of it
 
 Two planning documents and one spec section came out of the tree before
@@ -338,17 +355,6 @@ written in Turkish during the planning phase, superseded by the spec, and cited
 by the public ADR index as the record of what was decided before any code
 existed. Nothing in it concerns the other product.
 
-## [1.0.0] — 2026-10-10
-
-**The evidence format is frozen.** That is what the major version means here,
-and it is the only promise in this release that cannot be walked back: a record
-written under `schema_version: "1.0"` verifies under every later verifier,
-forever, and the repository now contains the records that prove it rather than a
-sentence saying so.
-
-Weeks 11 and 12 of the twelve-week plan (SPEC §22). Week 11's security fix is
-below, under its own heading, because it is the more serious entry.
-
 ### Added - evidence format 1.0, frozen against a committed fixture (ADR-0015)
 
 SPEC §25.6 has promised "cross-version fixtures in CI" since week 1. There were
@@ -552,7 +558,7 @@ line since week 1 and nothing enforced it; at this release no commit carried
 one. The new `dco` job checks the commits a pull request adds, which is what a
 DCO is for: contributions from people who are not the maintainer. The cutoff
 this entry originally documented is gone -- the pre-publication history rewrite
-signed off every commit instead. See the entry under Unreleased.
+signed off every commit instead. See the entry above.
 
 `GOVERNANCE.md` gained "who decides", and the first draft of that section said
 "two maintainers, named in the repository's metadata". Both halves were false:
@@ -2483,7 +2489,7 @@ Weeks 1 and 2 of the SPEC §22 build order.
 > **Tagged locally, not published.** SPEC §22 week 2 also makes the repository
 > public as `v0.1.0`. At this tag that step was waiting on the three pre-repo
 > decisions — patent scope, product name, licence timing. All three closed on
-> 2026-10-08; see [Unreleased]. The public push now waits only on the name
+> 2026-10-08; see [0.6.0]. The public push now waits only on the name
 > reservations in SPEC §24.1.
 
 ### Added — week 2 (SPEC §22)
@@ -2627,7 +2633,7 @@ Weeks 1 and 2 of the SPEC §22 build order.
 
 - No `LICENSE` file and no `license` metadata, because SPEC §24.2 (patent
   scope) had to close first — the Apache-2.0 patent grant is irrevocable once
-  distributed. Lifted in [Unreleased] on 2026-10-08, when §24.2 came back
+  distributed. Lifted in [0.6.0] on 2026-10-08, when §24.2 came back
   clean.
 
 ### Changed from the spec
