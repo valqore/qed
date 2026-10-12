@@ -6,6 +6,23 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-11
+
+**The evidence format is frozen.** That is what the major version means here,
+and it is the only promise in this release that cannot be walked back: a record
+written under `schema_version: "1.0"` verifies under every later verifier,
+forever, and the repository now contains the records that prove it rather than a
+sentence saying so.
+
+Weeks 11 and 12 of the twelve-week plan (SPEC §22). Week 11's security fix is
+below, under its own heading, because it is the more serious entry.
+
+The sections below run newest first, so the pre-publication pass that rewrote
+this repository's history sits above the format freeze it shipped with. Both
+are this release. The freeze is what the major version means; the pass is what
+made the repository publishable, and it is recorded here because the commits
+that would have shown the work no longer exist.
+
 ### Fixed — two green tests asserting the two halves of a contradiction
 
 `.github/rulesets/main.json` set `require_code_owner_review: true` while
@@ -36,23 +53,6 @@ The replacement test is written against the property rather than the flag:
 while `bypass_actors` is empty and the approval count is zero, no parameter may
 require a human approving review by any route. Verified by putting the old
 value back — it fails and names the parameter.
-
-## [1.0.0] — 2026-10-11
-
-**The evidence format is frozen.** That is what the major version means here,
-and it is the only promise in this release that cannot be walked back: a record
-written under `schema_version: "1.0"` verifies under every later verifier,
-forever, and the repository now contains the records that prove it rather than a
-sentence saying so.
-
-Weeks 11 and 12 of the twelve-week plan (SPEC §22). Week 11's security fix is
-below, under its own heading, because it is the more serious entry.
-
-The sections below run newest first, so the pre-publication pass that rewrote
-this repository's history sits above the format freeze it shipped with. Both
-are this release. The freeze is what the major version means; the pass is what
-made the repository publishable, and it is recorded here because the commits
-that would have shown the work no longer exist.
 
 ### Changed — the history was rewritten once, and this is the only account of it
 
