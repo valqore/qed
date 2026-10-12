@@ -236,10 +236,28 @@ class TestTheEnvelope:
 
     def test_the_bundle_hash_covers_the_signature(self, tmp_path: Path, publisher: Any) -> None:
         """Two bundles with the same catalogues and different signatures are
-        different things to an auditor asking which one was installed."""
+        different things to an auditor asking which one was installed.
+
+        The altered signature is derived from the original rather than written
+        over it with a constant. This test used to replace the first character
+        with `"x"`, and the `publisher` fixture generates a fresh Ed25519 key
+        per run, so one run in sixty-four produced a signature that already
+        began with `"x"`: the "second" bundle was byte-identical to the first,
+        the two hashes matched, and the test failed with the same string on
+        both sides of a `!=`. It did that in CI on 2026-10-12, having passed
+        for eleven weeks.
+
+        A test that mutates an input has to be sure it mutated it, so the
+        change is asserted before the property that depends on it -- otherwise
+        the failure says the hash does not cover the signature, which is the
+        opposite of what happened.
+        """
         first = load_bundle_file(write(tmp_path, envelope(publisher), "a.json"))
         second_data = envelope(publisher)
-        second_data["signature"] = "x" + (second_data["signature"] or "")[1:]
+        original = second_data["signature"] or ""
+        assert original, "the fixture is meant to produce a signed bundle"
+        second_data["signature"] = ("y" if original[0] == "x" else "x") + original[1:]
+        assert second_data["signature"] != original, "the mutation did not change anything"
         second = load_bundle_file(write(tmp_path, second_data, "b.json"))
         assert first.bundle_hash != second.bundle_hash
 

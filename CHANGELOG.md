@@ -23,6 +23,27 @@ are this release. The freeze is what the major version means; the pass is what
 made the repository publishable, and it is recorded here because the commits
 that would have shown the work no longer exist.
 
+### Fixed — a test that mutated an input without checking that it had
+
+`tests/compliance/test_pack_bundles.py::test_the_bundle_hash_covers_the_signature`
+altered a bundle's signature and asserted the bundle hash changed with it. It
+altered it by replacing the first character with `"x"`. The signing key is
+generated per test, so the signature is random base64url, and one run in
+sixty-four produced a signature that already began with `"x"`: the mutation
+copied the string, the two bundles were byte-identical, and the test failed
+reporting that the hash does not cover the signature -- the opposite of what
+had happened, with the same 64 characters on both sides of a `!=`.
+
+It failed in CI on 2026-10-12 after passing for eleven weeks. Measured over
+4,000 fresh keys the rate is 1.8%, which matches one base64url character in
+sixty-four.
+
+The replacement derives the altered signature from the original, so it cannot
+coincide with it, and asserts the change before asserting the property that
+depends on it. A test that mutates an input has to establish that it mutated
+it; otherwise its failure message describes a defect in the product when the
+defect is in the test.
+
 ### Changed — three documents that one click would have made false
 
 `README.md`, `SECURITY.md` and `CONTRIBUTING.md` each opened with a note saying
