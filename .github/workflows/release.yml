@@ -310,10 +310,33 @@ jobs:
       # on the machine the binary was built for -- which is the only place the
       # bundled data files and the frozen imports can actually be checked.
       - name: It decides and the chain verifies
+        env:
+          # `rich` styles its output and folds it at the terminal width. A fold
+          # inside one of the phrases below would fail a check that is actually
+          # satisfied, so the width is pinned wide and the colour switched off.
+          NO_COLOR: "1"
+          COLUMNS: "200"
         run: |
           set -euo pipefail
-          ./dist/qed --help | grep -q "Policy and evidence kernel"
-          ./dist/qed policy lint | grep -q "46 rules"
+
+          # Command substitution rather than `| grep -q`, for the reason the
+          # image job above already gives: `grep -q` exits on its first match
+          # and closes the pipe, the producer dies on EPIPE, and `pipefail`
+          # fails the step although the match succeeded. Two runs in twenty
+          # locally -- which is how v1.0.0's first tag died here, on
+          # linux-x86_64 and macos-arm64, with a binary that was fine. The fix
+          # was written seventy lines above in week 10 and never applied here.
+          expect() {
+            case "$2" in
+              *"$1"*) echo "ok: $1" ;;
+              *) echo "::error::expected \"$1\" in the output below"; printf '%s\n' "$2"; exit 1 ;;
+            esac
+          }
+
+          expect "Policy and evidence kernel" "$(./dist/qed --help)"
+          expect "46 rules" "$(./dist/qed policy lint)"
+          # Safe as a pipe: `python` reads stdin to the end, so nothing closes
+          # it early.
           ./dist/qed packs list --json | python -c "import json,sys; assert len(json.load(sys.stdin)['catalogues']) == 10"
           ./dist/qed keys init --dir /tmp/qed-binary
           set +e
@@ -324,7 +347,7 @@ jobs:
             0|2|3) echo "ok: the kernel decided (exit $code)" ;;
             *) echo "::error::the binary could not decide (exit $code)"; exit 1 ;;
           esac
-          ./dist/qed verify --dir /tmp/qed-binary | grep -q "OK"
+          expect "OK" "$(./dist/qed verify --dir /tmp/qed-binary)"
 
       - name: Checksum
         run: |

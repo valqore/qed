@@ -44,6 +44,34 @@ depends on it. A test that mutates an input has to establish that it mutated
 it; otherwise its failure message describes a defect in the product when the
 defect is in the test.
 
+### Fixed — the release pipeline failed a check that had succeeded
+
+Tagging `v1.0.0` ran the release workflow, and the `binary` job failed on
+`linux-x86_64` and `macos-arm64` in the step that proves the frozen
+single-file binary can decide. The binary was fine. The step read
+
+```bash
+./dist/qed --help | grep -q "Policy and evidence kernel"
+```
+
+under `set -o pipefail`. `grep -q` exits as soon as it matches, which closes
+the pipe; the producer is then killed writing to it; and `pipefail` reports the
+pipeline as failed *because* the match was found early. Three such lines per
+job, three jobs per release, and the failure is a race -- measured locally at
+two runs in twenty for the first line alone, which is why five earlier releases
+got through.
+
+The `image` job thirty lines above had hit this in week 10 and carries the
+comment that explains it: "Command substitution reads to the end, so there is
+no pipe to break." The `binary` job was never changed to match. So this is not
+a new fix but the existing one applied where it was missed, and the fixed step
+was rehearsed twenty times before re-tagging.
+
+The step also pins `NO_COLOR` and a wide `COLUMNS` now. `rich` styles its
+output and folds it at the terminal width, and a fold inside one of the phrases
+these checks look for would fail a check that is satisfied -- the same defect
+as the one above, arriving from the other direction.
+
 ### Added — `vqed`, the same command under a second name
 
 The wheel installs `vqed` alongside `qed`, pointing at the same entry point.
