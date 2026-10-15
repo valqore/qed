@@ -107,6 +107,40 @@ Three things worth knowing before you rely on it:
 Credentials come from the environment, the way every AWS tool takes them, and
 never from `qed.yaml`.
 
+#### Somewhere other than AWS
+
+```yaml
+- { type: s3-object-lock, bucket: qed-anchors, endpoint_url: "https://minio.internal:9000", region: us-east-1 }
+```
+
+`endpoint_url` points this at an S3-compatible store you run — MinIO, Ceph, a
+gateway — which for a self-hosted kernel is usually the right deployment: the
+anchor has to be outside **this instance's** control, not outside the building.
+The store has to support object-lock for the lock to mean anything; the receipt
+says which you got.
+
+Setting an endpoint switches the client to **path-style addressing**, and that
+is not a preference: boto3's default builds a virtual-host URL (`bucket.host`)
+which resolves for `s3.amazonaws.com` and for nothing else without a wildcard
+DNS record, and the failure reads like the bucket being down.
+
+#### What is actually tested
+
+`tests/evidence/test_s3_object_lock_live.py` runs this publisher over HTTP
+against a server that enforces retention — LocalStack in CI, and anything else
+you point `QED_TEST_S3_ENDPOINT` at — and asserts the refusals rather than the
+requests: that the locked version cannot be deleted, that it cannot be deleted
+with `BypassGovernanceRetention` either, that a plain delete only hides it
+behind a delete marker, that an overwrite adds a version beside it, and that
+`governance` mode really is bypassable where `COMPLIANCE` is not. Before that
+file the only test used a fake client, which could show that the publisher
+*asks* for a lock and nothing about whether a lock resulted.
+
+One assertion is AWS-only and marked as such (`QED_TEST_S3_AWS=1`): real S3
+refuses `ObjectLockMode` on a bucket that has no object-lock configuration,
+where LocalStack accepts it and stores no lock. Those two divergent behaviours
+are the same argument — ask the bucket, do not infer a lock from a success.
+
 ### `git-tag`
 
 ```yaml

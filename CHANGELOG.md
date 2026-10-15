@@ -6,6 +6,55 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — the only control against a rewritten chain was tested against a fake
+
+`THREAT_MODEL.md` has one control for "the whole chain is rewritten by the
+operator": a checkpoint root published where the instance cannot afterwards
+revise it. Every other check the verifier makes is self-referential — a chain
+rewritten wholesale and re-signed passes all of them — so that row carries more
+weight than any other in the document.
+
+Its only test was a hand-written `FakeS3` that recorded the keyword arguments
+it was given. That shows the publisher *asks* for an object-lock. It cannot
+show that any server accepts the request as written, and it cannot show the one
+thing the control claims: **that the object then cannot be deleted.** A fake
+that answers `{"ETag": ...}` to anything agrees just as readily with a publisher
+sending nonsense.
+
+`tests/evidence/test_s3_object_lock_live.py` now runs the publisher over HTTP
+against a server that enforces retention and asserts the refusals: the locked
+version cannot be deleted, cannot be deleted with `BypassGovernanceRetention`
+set from the store's root credentials, survives a plain delete (which only
+writes a delete marker and hides it) and survives an overwrite (which adds a
+version beside it). It also pins the thing no API reference states plainly —
+that `ChecksumAlgorithm`, `ObjectLockMode` and `ObjectLockRetainUntilDate` are
+accepted together on one `put_object`, which an object-lock bucket requires —
+and demonstrates that `governance` mode really is bypassable where `COMPLIANCE`
+is not, which is the whole argument for the default. A new `anchors` CI job
+runs it against LocalStack and fails if the tests skipped.
+
+One assertion is marked AWS-only (`QED_TEST_S3_AWS=1`) because measuring it
+found a divergence worth writing down: real S3 refuses `ObjectLockMode` on a
+bucket with no object-lock configuration, and LocalStack accepts it and stores
+no lock. Those are opposite failures with the same moral — the publisher must
+ask the bucket rather than infer a lock from a success — and the module's
+docstring now says which of its claims this environment can and cannot prove.
+
+### Added — `endpoint_url` for the S3 checkpoint publisher
+
+The publisher called `boto3.client("s3")` with no endpoint, so the only anchor
+that actually anchors could only talk to AWS. For a kernel whose premise is
+self-hosting, that is the wrong default shape: the anchor has to be outside
+*this instance's* control, not outside the building. `endpoint_url` and
+`region` now point it at MinIO, Ceph or an S3 gateway, and `qed doctor` names
+the endpoint in its publisher line.
+
+Setting an endpoint forces **path-style addressing**, which is not a
+preference: boto3's default builds a virtual-host URL (`bucket.host`) that
+resolves for `s3.amazonaws.com` and for nothing else without a wildcard DNS
+record, and the failure reads like the bucket being down. SPEC §16's reference
+config and `docs/checkpoints.md` carry both keys.
+
 ### Added — `qed demo`, one command from nothing to a verified chain
 
 Before this, the shortest honest path from "cloned the repository" to "saw a

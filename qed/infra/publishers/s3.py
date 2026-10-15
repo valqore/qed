@@ -10,9 +10,14 @@ Three things that are easy to get wrong and that this module refuses rather
 than assumes.
 
 **Object-lock has to be enabled on the bucket at creation.** It cannot be
-turned on later. A bucket without it accepts every upload here and silently
-provides no lock at all, so the publisher asks and reports the answer in its
-receipt rather than implying a protection that is not there.
+turned on later, and a bucket without it provides no lock at all, so the
+publisher asks and reports the answer in its receipt rather than implying a
+protection that is not there. Asking is worth it twice over: real S3 answers
+`InvalidRequest` to a lock it cannot honour -- which, sent blindly, would make
+every checkpoint look like a network problem -- while other S3
+implementations accept the lock and store nothing, which would make every
+checkpoint look like a success. Only the question tells those apart, and both
+were measured (`tests/evidence/test_s3_object_lock_live.py`).
 
 **Compliance mode is the default, and `governance` is a conscious downgrade.**
 In governance mode a principal with `s3:BypassGovernanceRetention` can delete
@@ -23,8 +28,22 @@ the anchor adds nothing against the threat it exists for.
 retention would produce anchors that quietly expire before anybody asks about
 them.
 
+`endpoint_url` points this at an S3-compatible store inside the organisation --
+MinIO, Ceph, an S3 gateway -- which for a self-hosted kernel is the deployment
+that makes sense: the anchor has to be outside *this instance's* control, not
+outside the building. That path forces path-style addressing, for the reason
+written next to it.
+
 `boto3` is an optional extra: an instance with no S3 publisher never imports
 it.
+
+What proves any of this is `tests/evidence/test_s3_object_lock_live.py`, which
+runs this publisher over HTTP against a server that enforces retention and
+checks the thing the threat model relies on: that a published anchor cannot be
+deleted while its retention holds -- not with the uploader's credentials, and
+not with `BypassGovernanceRetention` set from the store's root. The unit tests
+beside it use a fake client and can only check the call this module makes,
+which is the shape of a claim rather than the claim.
 """
 
 from __future__ import annotations
@@ -64,12 +83,16 @@ class S3ObjectLockPublisher:
         prefix: str = "checkpoints/",
         mode: str = "COMPLIANCE",
         retain_days: int = DEFAULT_RETAIN_DAYS,
+        endpoint_url: str = "",
+        region: str = "",
         client: Any | None = None,
     ) -> None:
         self.bucket = bucket
         self.prefix = prefix if prefix.endswith("/") or not prefix else prefix + "/"
         self.mode = mode
         self.retain_days = retain_days
+        self.endpoint_url = endpoint_url
+        self.region = region
         self._client = client
 
     @classmethod
@@ -113,11 +136,15 @@ class S3ObjectLockPublisher:
             prefix=str(options.get("prefix", "checkpoints/")),
             mode=mode,
             retain_days=retain,
+            endpoint_url=str(options.get("endpoint_url", "")),
+            region=str(options.get("region", "")),
         )
 
     def describe(self) -> str:
+        where = f" at {self.endpoint_url}" if self.endpoint_url else ""
         return (
-            f"s3-object-lock: s3://{self.bucket}/{self.prefix} ({self.mode}, {self.retain_days}d)"
+            f"s3-object-lock: s3://{self.bucket}/{self.prefix}{where} "
+            f"({self.mode}, {self.retain_days}d)"
         )
 
     # ------------------------------------------------------------------ client
@@ -132,7 +159,33 @@ class S3ObjectLockPublisher:
             # Credentials come from the environment the way every AWS tool
             # takes them. Deliberately not from `qed.yaml`: the config file is
             # something somebody commits.
-            self._client = boto3.client("s3")
+            if not self.endpoint_url:
+                self._client = boto3.client(
+                    "s3", **({"region_name": self.region} if self.region else {})
+                )
+                return self._client
+
+            from botocore.config import Config
+
+            # A non-AWS endpoint -- MinIO, Ceph, or an S3 gateway inside the
+            # network the instance runs in. This is the deployment the product
+            # is for: a self-hosted kernel whose anchors do not have to leave
+            # the organisation to be outside the instance's own control.
+            #
+            # **Path-style addressing is not a preference here.** boto3's
+            # default (`auto`) builds a virtual-host URL -- `bucket.host` --
+            # which resolves for `s3.amazonaws.com` and does not resolve for
+            # `anchors.127.0.0.1` or for any hostname without a wildcard DNS
+            # record. Every such deployment needs path style, and the failure
+            # without it is a DNS error that reads like the bucket is down.
+            self._client = boto3.client(
+                "s3",
+                endpoint_url=self.endpoint_url,
+                config=Config(s3={"addressing_style": "path"}),
+                # Signing needs a region even where the server ignores it, and
+                # a non-AWS endpoint usually has nothing to discover one from.
+                region_name=self.region or "us-east-1",
+            )
         return self._client
 
     # ----------------------------------------------------------------- publish

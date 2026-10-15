@@ -14,10 +14,13 @@ comparing against, and about the rule that holds whatever happens:
 * **but it never disappears either** -- the failure lands in the
   ``checkpoints`` table, in the next checkpoint's payload, and in `qed doctor`.
 
-S3 is tested against a fake client that records its calls. A real bucket with
-object-lock enabled is not something a test suite can create, and the
-behaviour worth pinning is which arguments `put_object` gets -- a publisher
-that quietly omits `ObjectLockMode` provides no lock while reporting success.
+S3 is tested here against a fake client that records its calls, which pins the
+arguments `put_object` gets -- a publisher that quietly omits `ObjectLockMode`
+provides no lock while reporting success. That is the shape of the claim and
+not the claim: a fake accepts any call and refuses no delete.
+`tests/evidence/test_s3_object_lock_live.py` runs the same publisher against a
+real MinIO and asserts the refusal, which is what `THREAT_MODEL.md`'s
+chain-rewrite row actually rests on.
 """
 
 from __future__ import annotations

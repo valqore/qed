@@ -167,5 +167,7 @@ because an approver with no reason in front of them has nothing to judge.
 steps rather than only as pytest: `qed check` → `qed export` → `qed-verify`,
 then the same again with a tampered record to prove the verifier still refuses
 it. The `postgres` job repeats the end-to-end run against a real PostgreSQL,
-and the `deploy` job builds the container and renders the Helm chart. Those
-steps are the closest thing in the repo to a worked example of this page.
+the `anchors` job publishes a checkpoint to a real S3 server and then tries to
+delete it, and the `deploy` job builds the container, renders the Helm chart
+and runs `qed demo` inside the frozen binary. Those steps are the closest thing
+in the repo to a worked example of this page.

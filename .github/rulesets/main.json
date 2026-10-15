@@ -38,6 +38,7 @@
           { "context": "check (windows-latest, 3.12)" },
           { "context": "check (windows-latest, 3.13)" },
           { "context": "postgres" },
+          { "context": "anchors" },
           { "context": "docs" },
           { "context": "deploy" }
         ]

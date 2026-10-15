@@ -594,6 +594,78 @@ jobs:
   # `compliance/frameworks.yaml` was missing from `package-data`, so the image
   # started and then died on its first request. Both passed every static
   # check, both failed the moment anybody ran the thing.
+  # THREAT_MODEL's one control for "the operator rewrote the whole chain": a
+  # checkpoint root in a place the instance cannot revise. Its only test used a
+  # hand-written fake S3 client, which can show that the publisher *asks* for
+  # an object-lock and nothing about whether a lock resulted -- a fake refuses
+  # no delete. So this job runs the publisher over HTTP against a server that
+  # enforces retention and asserts the refusals.
+  #
+  # LocalStack rather than MinIO: MinIO's images stopped being anonymously
+  # pullable from Docker Hub and its quay tags need a login, which would make
+  # this job fail for a reason that is not ours. LocalStack's S3 is an
+  # independent reimplementation, so a refusal it produces is evidence about
+  # the semantics -- and `QED_TEST_S3_ENDPOINT` points the same tests at MinIO,
+  # Ceph or real AWS unchanged.
+  anchors:
+    runs-on: ubuntu-latest
+    services:
+      s3:
+        # Pinned: a floating `:4` would make a LocalStack release able to turn
+        # this red on a morning nobody touched the repository.
+        image: localstack/localstack:4.14.0
+        env:
+          SERVICES: s3
+          EAGER_SERVICE_LOADING: 1
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -fs http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      QED_TEST_S3_ENDPOINT: http://127.0.0.1:4566
+      # LocalStack accepts any credentials and signing needs some. These are
+      # not secrets and are not meant to look like any.
+      AWS_ACCESS_KEY_ID: qed-test
+      AWS_SECRET_ACCESS_KEY: qed-test
+      AWS_DEFAULT_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install, with the s3 extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,s3]" -e packages/qed-verify
+
+      # A test that skips itself proves nothing, and an endpoint variable that
+      # stops reaching the tests is exactly the wiring that fails silently.
+      - name: The object-lock tests really ran
+        run: |
+          set -euo pipefail
+          pytest tests/evidence/test_s3_object_lock_live.py -q -m slow -p no:cacheprovider | tee /tmp/s3.txt
+          grep -qE "[0-9]+ passed" /tmp/s3.txt
+          # One assertion is AWS behaviour LocalStack does not model and is
+          # skipped by design (QED_TEST_S3_AWS). Everything else must run.
+          if grep -qE "[2-9] skipped|1[0-9]+ skipped" /tmp/s3.txt; then
+            echo "more than the one AWS-only test skipped: is QED_TEST_S3_ENDPOINT reaching them?" >&2
+            exit 1
+          fi
+
+      # The publisher's other half: the fake-client tests still have to pass
+      # with boto3 installed, because `botocore` present changes which
+      # exceptions the module sees.
+      - name: The publisher's unit tests, with boto3 importable
+        run: pytest tests/evidence/test_publishers.py -q
+
   # SPEC 26's docs site. A separate job because it is the one artifact a reader
   # consumes directly, and because `--strict` turns a dead cross-reference into
   # a failure -- which is the whole reason to build it in CI rather than trust

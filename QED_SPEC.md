@@ -731,7 +731,8 @@ approvals:
 evidence:
   store: sqlite:///data/qed.db | postgresql://…
   signing_key: file:///data/evidence-key.pem | vault-transit://qed-evidence | awskms://alias/qed (ECDSA_P256)
-  checkpoint: { every_records: 1000, every_seconds: 3600, publishers: [{ type: s3-object-lock, bucket: acme-qed-anchors }, { type: file, path: /data/anchors }] }
+  checkpoint: { every_records: 1000, every_seconds: 3600, publishers: [{ type: s3-object-lock, bucket: acme-qed-anchors, mode: COMPLIANCE, retain_days: 2555, endpoint_url: "", region: "" }, { type: file, path: /data/anchors }] }
+  # `endpoint_url` points the s3-object-lock publisher at an S3-compatible store inside the organisation (MinIO, Ceph, a gateway), which is the deployment a self-hosted kernel wants: the anchor has to be outside *this instance's* control, not outside the building. Setting it forces path-style addressing, because a virtual-host URL (`bucket.host`) does not resolve against anything but AWS. `region` is for signing. Credentials come from the environment, never from this file.
   retention: { payload: 7y, default: forever }
   masking: default | strict
 adapters:
