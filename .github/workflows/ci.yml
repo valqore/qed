@@ -25,7 +25,7 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -87,7 +87,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The whole range, not a shallow tip: this walks every commit the PR
           # adds, and a shallow clone has no merge base to diff against.
@@ -119,8 +119,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -178,9 +178,9 @@ jobs:
         python-version: ["3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -508,9 +508,9 @@ jobs:
       QED_TEST_POSTGRES_DSN: postgresql://postgres:qed-ci@127.0.0.1:5432/qed_test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -601,9 +601,9 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -641,7 +641,7 @@ jobs:
           grep -q "Policy language" site/spec/index.html
           grep -q "STRIDE" site/threat-model/index.html
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docs-site
           path: site/
@@ -650,9 +650,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -662,7 +662,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]" -e packages/qed-verify
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           # Pinned: `helm template` output is what the chart tests parse, and
           # an unpinned release changes the renderer under them.
@@ -675,7 +675,7 @@ jobs:
       # noticed because the tests only ever built for the host. The emulated
       # build costs a few minutes; a release that builds two architectures
       # should test two.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
