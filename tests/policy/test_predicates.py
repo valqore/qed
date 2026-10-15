@@ -185,3 +185,55 @@ class TestErrors:
             node = {"not": node}
         with pytest.raises(PredicateError, match="nested"):
             check(node)
+
+
+class TestTheRegexBudget:
+    """The ReDoS guard, and the load it must not mistake for an attack.
+
+    `qed/core/policy/predicates.py` bounds every `regex` match with a wall
+    clock. Nothing tested that the bound bites, and in October 2026 it bit the
+    wrong thing instead: a CI runner under load spent a 100 ms budget on a
+    pattern that matches in 219 microseconds, and the rule failed to evaluate.
+    A rule that cannot evaluate is neither an allow nor a block, so both halves
+    are worth a test -- that a catastrophic pattern is still refused, and that
+    an ordinary one is not.
+    """
+
+    #: Measured, not assumed. Of six textbook catastrophic patterns, five are
+    #: optimised away by the `regex` module -- `(x+x+)+y`, `^(a+)+$` and
+    #: `(.*a){20}` all return in under a millisecond against inputs that defeat
+    #: `re`. This one does not.
+    CATASTROPHIC = "(a|a)*$"
+
+    #: The pattern from the masking rule that failed CI, against a value of the
+    #: shape it is written for.
+    ORDINARY = r"(?i)\b(ssn|national_id|date_of_birth|passport)\b"
+    ORDINARY_VALUE = "SELECT ssn, date_of_birth FROM customers WHERE id = 42"
+
+    def test_a_catastrophic_pattern_is_refused_rather_than_run(self) -> None:
+        proposal: dict[str, object] = {"action": {"name": "a" * 30 + "b"}}
+        with pytest.raises(PredicateError, match="timed out"):
+            evaluate_predicate({"field": "action.name", "regex": self.CATASTROPHIC}, proposal, {})
+
+    def test_an_ordinary_pattern_is_not_mistaken_for_one(self) -> None:
+        proposal: dict[str, object] = {"action": {"params_redacted": {"sql": self.ORDINARY_VALUE}}}
+        assert (
+            evaluate_predicate(
+                {"field": "action.params_redacted.sql", "regex": self.ORDINARY},
+                proposal,
+                {},
+            )
+            is True
+        )
+
+    def test_the_budget_is_wide_enough_to_survive_a_busy_machine(self) -> None:
+        """The number itself, asserted rather than left to a comment.
+
+        Deliberately not a timing assertion: a test that measures elapsed time
+        is the thing that broke here. What can be checked without a clock is
+        that the budget stands far enough above a real match -- sub-millisecond
+        -- that scheduling noise cannot spend it.
+        """
+        from qed.core.policy.predicates import REGEX_TIMEOUT
+
+        assert REGEX_TIMEOUT >= 1.0

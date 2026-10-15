@@ -44,6 +44,42 @@ depends on it. A test that mutates an input has to establish that it mutated
 it; otherwise its failure message describes a defect in the product when the
 defect is in the test.
 
+### Fixed — a ReDoS guard that spent its budget on machine load
+
+Three of five Dependabot branches had a red cell. Two were a wall-clock race in
+the rate-limit tests that `6add28a` had already removed — those branches simply
+predated it. The third was not a test problem:
+
+```
+PredicateError: regex evaluation timed out:
+  '(?i)(ssn|national_id|date_of_birth|passport)'
+```
+
+That pattern has no backtracking in it. Measured against a value of the shape
+it is written for, it matches in **219 microseconds** — 457 times inside the
+100 ms budget it was refused for. What it spent was not 100 ms of regex engine
+but 100 ms of **wall clock** on a loaded runner, which descheduled the thread
+mid-match. `regex`'s timeout is wall clock; it cannot tell the two apart.
+
+The consequence is worse than a red build. `PredicateError` is not caught
+anywhere on the decision path, so a rule that trips this does not allow and
+does not block — it fails to evaluate, and the machine's load decided that.
+
+`REGEX_TIMEOUT` is now **1 second**: still a bound on catastrophic
+backtracking, now four thousand times a real match rather than four hundred.
+The budget was never a latency target — SPEC §18's 50 ms p95 is enforced
+elsewhere, and a pattern that needs a second is a lint problem, not a runtime
+one.
+
+**And the guard had no test.** Writing one turned up something worth keeping:
+of six textbook catastrophic patterns, the `regex` module optimises five away —
+`(x+x+)+y`, `^(a+)+$` and `(.*a){20}` all return in under a millisecond against
+inputs that defeat `re`. `(a|a)*$` does not, and is what the new test uses, so
+there is now a case proving the bound still bites as well as one proving an
+ordinary pattern is not mistaken for an attack. A third asserts the budget
+itself, deliberately without measuring elapsed time: a test with a clock in it
+is what broke here.
+
 ### Fixed — the Intel macOS binary was assembled from two different OpenSSLs
 
 The runner fix got the Intel job a machine in three seconds, and the binary it

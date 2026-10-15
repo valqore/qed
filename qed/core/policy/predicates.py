@@ -31,7 +31,16 @@ __all__ = [
     "validate_predicate",
 ]
 
-REGEX_TIMEOUT: Final = 0.1
+# One second, not the 100 ms this started with. A legitimate pattern matches in
+# microseconds -- the one that failed CI took 219 of them -- so the old budget
+# was not 100 ms of regex engine, it was 100 ms of wall clock on a shared
+# machine, and a loaded runner spent it by descheduling the thread mid-match.
+# That turned machine load into `PredicateError`, which is a rule failing to
+# evaluate: not an allow and not a block. The budget exists to bound
+# catastrophic backtracking, not to be a latency target -- SPEC 18's 50 ms p95
+# is enforced elsewhere and a pattern that needs a second is a lint problem,
+# not a runtime one.
+REGEX_TIMEOUT: Final = 1.0
 
 
 class _Missing:

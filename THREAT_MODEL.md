@@ -121,7 +121,7 @@ is the shape of the product.
 |---|---|---|
 | A caller floods the API | Per-adapter and per-principal token buckets, 429 with `Retry-After`; a refusal writes nothing to the chain | `qed/core/ratelimit.py` |
 | An oversized proposal | 64 KB proposal, 16 KB `params_redacted` | `qed/adapters/common.py` |
-| A catastrophic regex in a rule | `regex` module with a 100 ms timeout | `qed/core/policy/predicates.py` |
+| A catastrophic regex in a rule | `regex` module with a 1000 ms timeout | `qed/core/policy/predicates.py` |
 | A malformed input crashes a parser | Fuzzed: a malformed input yields the refusal its caller handles | `tests/test_fuzz_parsers.py` |
 | An unreachable database hangs every command | `connect_timeout` (10s) | `qed/infra/storage/postgres.py` |
 | An unreachable anchor stalls the chain | A publisher returns a failed receipt; it never raises | `qed/infra/publishers/__init__.py` |
