@@ -116,6 +116,7 @@ nav:
       - Testing a rule set: policy-testing.md
       - Blast radius: blast-radius.md
       - Evidence format: evidence-format.md
+      - Replaying a decision: replay.md
       - Assurance classes: assurance-classes.md
   - Putting it in front of something:
       - MCP proxy: mcp-proxy.md

@@ -76,7 +76,7 @@ What works today:
 | **Self-governance**: qed's own admin ops behind an approval | `qed/core/admin.py`, ADR-0014 |
 | **Frozen evidence format 1.0** + conformance fixture and cross-version test | `docs/evidence-format.md`, `tests/evidence/fixtures/`, ADR-0015 |
 | **Landing page**, one file, no external request | `landing/index.html` |
-| CLI: `keys`, `check`, `policy`, `export`, `verify`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
+| CLI: `demo`, `keys`, `adapters`, `check`, `policy`, `export`, `verify`, `replay`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
 
 Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
 `mode: mitm` for the HTTP proxy, the `remote.packs` **feed** (the air-gap

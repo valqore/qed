@@ -44,9 +44,17 @@ def _listed() -> dict[str, set[str]]:
 
 
 def _unbuilt() -> set[str]:
-    """The names SPEC §14 says are specified and absent."""
+    """The names SPEC §14 says are specified and absent, if it names any.
+
+    Empty is a legitimate answer and became the real one on 2026-10-15, when
+    `replay` was built and the sentence was deleted. The test below therefore
+    checks the drift it was written for -- a name in that sentence that is
+    now built -- rather than insisting the sentence exist.
+    """
     section = _spec_section()
-    line = next(line for line in section.splitlines() if "not built" in line)
+    line = next((line for line in section.splitlines() if "not built**:" in line), "")
+    if not line:
+        return set()
     return {re.findall(r"[a-z-]+", entry)[0] for entry in re.findall(r"`([^`]+)`", line)}
 
 
@@ -74,12 +82,18 @@ def test_the_cli_has_every_command_the_spec_lists_as_built() -> None:
     assert not absent, f"SPEC 14 lists commands that do not exist: {absent}"
 
 
-def test_the_unbuilt_ones_are_named_as_unbuilt() -> None:
-    """`replay` and `adapters` are specified and absent. The day one is built
-    it has to move out of that sentence, or this says so."""
+def test_nothing_is_named_as_unbuilt_while_being_built() -> None:
+    """A command cannot be both. `adapters` and `replay` were each listed as
+    specified-and-absent while being built, which is how the spec came to
+    recommend `qed adapters add` to operators for twelve weeks before it
+    existed -- so the day a name moves into the CLI it has to leave that
+    sentence, and this says so if it does not.
+
+    The other direction -- a name the spec lists as built that the CLI does
+    not have -- is `test_the_cli_has_every_command_the_spec_lists_as_built`.
+    """
     overlap = sorted(_unbuilt() & set(_implemented()))
     assert not overlap, f"named as not built, but built: {overlap}"
-    assert _unbuilt(), "the 'not built' sentence names nothing; did it get rewritten?"
 
 
 @pytest.mark.parametrize("group", sorted(g.name for g in app.registered_groups))

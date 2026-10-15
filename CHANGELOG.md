@@ -6,6 +6,89 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `qed replay <proposal_id>`
+
+The last thing SPEC §14 listed as specified and not built. §14's inventory is
+now the whole of §14.
+
+`qed verify` answers *is this record authentic*. Every check it makes is
+self-referential — hashes over the record's own fields, signatures over those
+hashes — so a chain an operator **rewrote and re-signed** passes it completely.
+That is the top entry in `THREAT_MODEL.md`'s own list of what it cannot catch.
+`replay` answers the other question: does this verdict follow from the policy
+it says it was decided under. `tests/cli/test_replay.py` rewrites a verdict,
+re-signs the whole chain with the real signing key, asserts `qed verify`
+returns **0**, and then asserts `qed replay` returns **2**.
+
+Three answers get three exit codes: 0 reproduced, 2 differs with nothing to
+account for it, 1 the question could not be answered. Folding the third into
+the second would make a missing file indistinguishable from a forged record,
+which is the state a pipeline is most often in.
+
+What makes it honest is the accounting for its inputs.
+
+The clock is **exact**: `check_proposal` stamps the proposal record, the
+verdict record and the engine's `now` from one value, so the record's own
+timestamp is what the engine was told the time was.
+
+The policy is **not in the chain**. `policy_loaded` carries a bundle's hash,
+not its rules, so a hash mismatch makes `replay` refuse rather than answer.
+Re-deciding under today's rules is a reasonable thing to want and is not a
+replay; presenting its answer as one would be the most misleading thing this
+command could do. `--policy` points at the archived bundle.
+
+The budget ledger and the mandate are **assumed and named** — the ledger has
+moved since, and `mandate_issued` keeps an id and a window rather than the
+signed document. Every difference is then classified against the rules that
+actually read `derived.budget.*` and `derived.mandate.*`: a difference an
+assumption explains is reported as *inconclusive*, and a difference in a rule
+reading only the proposal is reported as a finding. `blast_radius` is never
+excused, because it is computed from the proposal, which is recorded in full.
+
+Approvals are handled as an overlay rather than a decision. `check_proposal`
+runs the engine and *then* consults the approval store, so a recorded ALLOW
+may be a REQUIRE_APPROVAL that met an open window. Comparing decisions
+directly would report a mismatch for every correctly approved action in every
+chain that has ever been used. The engine's own decision is recovered first and
+the overlay checked as its own claim — an ALLOW that the policy says needed an
+approval, carrying none, is a finding.
+
+New docs page, `docs/replay.md`, and the chain-rewrite section of
+`THREAT_MODEL.md` now says what replay does and does not add: forging one
+verdict comes to require forging a consistent policy to go with it, but an
+operator who can rewrite the chain can rewrite `policy_loaded` too, and a
+rewrite that deletes records leaves nothing to replay. An anchor is still the
+only thing that fixes history in place.
+
+### Fixed — SPEC §5 claimed something collected the history counters
+
+Building `replay` meant enumerating which of the engine's inputs can be
+recovered from the chain, which turned up one that is never supplied at all.
+
+§5 read: *"`compute_derived.history` reads a snapshot passed in `ctx`
+(collected by the API layer before calling the engine)"*. The API layer does
+not collect it. Nothing does — not the API, not the MCP or HTTP proxies, not
+the Claude Code hook, not `qed check`. `HistoryDerived` is threaded through
+`check_proposal` into `EvalContext` and every caller leaves it at its default,
+so every decision this build has made saw `calls_24h = 0` and
+`blocks_24h = 0`.
+
+Two shipped rules read those counters and therefore cannot fire: `AG-BUD-007`
+(`calls_24h >= 500`, "High call rate in the last day") and `AG-IDN-010`
+(`blocks_24h >= 5`, "Repeated blocks from the same principal"). Both are
+`mode: shadow`, so nothing was wrongly allowed or blocked — but both are
+counted in the pack's rule total and in its compliance mappings, and an
+operator reading either one would reasonably expect a runaway loop or a
+probing agent to be surfaced.
+
+Corrected in the spec rather than papered over, and **not** implemented here:
+collecting the counters means a store query on the decision path, which is a
+trade against §21's latency budget and a decision worth making deliberately
+instead of as a side effect of a documentation fix.
+`tests/core/test_replay.py` pins the current behaviour, so the day the
+counters become real the test fails and says to revisit what `replay` should
+do about an input that has just become unrecoverable.
+
 ### Added — `qed adapters add|list|rotate`
 
 SPEC §12.6 has specified this command since week 1, SPEC §17 lists "adapter

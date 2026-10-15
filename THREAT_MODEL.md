@@ -190,6 +190,20 @@ change it (`evidence.checkpoint.publishers`). An instance with none configured
 has no answer to this threat, which is why `qed doctor` says so in yellow
 rather than reporting "anchors: none" as a neutral fact.
 
+`qed replay <proposal_id>` narrows it, and the distinction is worth being
+precise about. It decides a recorded proposal again against the bundle whose
+hash the record names, so a rewritten verdict that no longer follows from that
+policy is reported even though it verifies. `tests/cli/test_replay.py` does
+exactly this: rewrites a verdict, re-signs the whole chain with the real key,
+confirms `qed verify` returns 0, and then shows `qed replay` returning 2.
+
+It is **not** a substitute for an anchor, for two reasons. An operator who can
+rewrite the chain can rewrite the `policy_loaded` record and ship a bundle to
+match, and then the replay agrees -- the anchor is what fixes a root in time
+where that cannot be done. And a rewrite that simply *deletes* records leaves
+nothing to replay. What replay adds is that forging one verdict now requires
+forging a consistent policy to go with it, rather than editing a number.
+
 ### 4. Break-glass bypasses self-governance by design
 
 `--break-glass "<reason>"` rotates a key with no approval. It exists because

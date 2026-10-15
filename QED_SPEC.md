@@ -422,7 +422,11 @@ def evaluate(
 ```
 `max_decision`: `BLOCK` > `REQUIRE_APPROVAL`. Blast radius: deterministic table (kind, scope, writes/deletes, environment, name patterns) → 0–100; documented in `docs/blast-radius.md`; ported from Valqore `governance/blast_radius.py` with the K8s-specific parts removed.
 
-`compute_derived.history` reads a **snapshot** passed in `ctx` (collected by the API layer before calling the engine) — the engine itself performs no I/O.
+`compute_derived.history` reads a **snapshot** passed in `ctx` rather than querying anything — the engine itself performs no I/O.
+
+**Nothing collects that snapshot, so it is always zero.** `HistoryDerived` is threaded through `check_proposal` into `EvalContext`, and no caller in `qed` passes it: not the API, not the MCP or HTTP proxies, not the Claude Code hook, not `qed check`. Every decision this build has made saw `calls_24h = 0` and `blocks_24h = 0`. This sentence used to say the API layer collected it, which was never true and was invisible because zero is a plausible number.
+
+Two shipped rules read those counters and therefore **cannot fire**: `AG-BUD-007` (`derived.history.calls_24h >= 500`, "High call rate in the last day") and `AG-IDN-010` (`derived.history.blocks_24h >= 5`, "Repeated blocks from the same principal"). Both are `mode: shadow`, so nothing is wrongly allowed or blocked by it — but both are counted in the pack's rule total and in its compliance mappings, and an operator reading either rule would reasonably expect a loop or a probing agent to be surfaced. Found on 2026-10-15 while building `replay`, which has to know which inputs it can recover. Collecting the counters means a store query on the decision path, which is a trade against the §21 latency budget and a decision to make deliberately rather than as a side effect of this correction.
 
 ---
 
@@ -669,15 +673,27 @@ Rate limits: per adapter 100 proposals/s default; per principal 20/s. 429 with `
 
 ---
 
-## 14. CLI (`qed`, Typer) — 21 top-level commands (vs. Valqore's 208); no new top-level command without a spec update
+## 14. CLI (`qed`, Typer) — 22 top-level commands (vs. Valqore's 208); no new top-level command without a spec update
 
-`demo` · `serve [--ui] [--dev]` · `mcp -- <cmd> | --upstream-url` · `proxy` · `hook <agent>` · `install <agent>` · `login` · `token` · `check` · `approve` · `approvals` · `status` · `checkpoint` · `mandate sign|list|revoke` · `policy lint|test|explain|normalize-frameworks` · `keys init|rotate|export-public` · `adapters add|list|rotate` · `export` · `verify` (thin wrapper over qed-verify) · `doctor [--offline]` · `packs import|list|verify`.
+`demo` · `serve [--ui] [--dev]` · `mcp -- <cmd> | --upstream-url` · `proxy` · `hook <agent>` · `install <agent>` · `login` · `token` · `check` · `approve` · `approvals` · `status` · `checkpoint` · `mandate sign|list|revoke` · `policy lint|test|explain|normalize-frameworks` · `keys init|rotate|export-public` · `adapters add|list|rotate` · `replay` · `export` · `verify` (thin wrapper over qed-verify) · `doctor [--offline]` · `packs import|list|verify`.
 
 `demo` decides five proposals against a throwaway instance and verifies the chain it wrote: no configuration, no keys, no network, every record marked `dev`, and exit 0 although it contains a BLOCK (§12.5 belongs to `check`, and a demo's exit code is whether the demo ran).
 
 `adapters add|list|rotate` was built on 2026-10-15. `add` writes the entry into `qed.yaml` and prints a generated secret once; `list` reports whether each registered adapter's `secret_env` is actually set and long enough, which previously required starting the server and reading `/v1/status`; `rotate` issues a new secret while continuing to accept the old one until `--finish`, because a shared secret cannot change on two machines at the same instant and a cutover rotation refuses live traffic as `AG-IDN-005`.
 
-Specified and **not built**: `replay <proposal_id>`. A decision is re-derived from the chain by hand. It is absent rather than stubbed, because a command that prints "not implemented" ends up in somebody's script.
+`replay <proposal_id>` was built on 2026-10-15, and **the inventory above is now the whole of §14** -- nothing specified here is unbuilt.
+
+`replay` decides a recorded proposal again and reports whether the record follows from the policy it says it was decided under. This is the question `verify` cannot answer: every check the verifier makes is self-referential, so a chain an operator rewrote and re-signed passes it completely (`THREAT_MODEL.md`, chain-rewrite row). Deciding the proposal again is what notices, and `tests/cli/test_replay.py` proves it on a re-signed chain that `qed verify` returns 0 for.
+
+What the chain can and cannot give it is the whole design:
+
+- **Exact.** The proposal and the verdict are recorded in full, and `check_proposal` stamps the proposal record, the verdict record and `ctx.now` from one value -- so the engine's clock is the record's own timestamp, not an approximation.
+- **Not in evidence at all.** `policy_loaded` carries a bundle's **hash**, not its rules, so the policy cannot be reconstructed from the chain. A hash mismatch makes `replay` **refuse** rather than answer: re-deciding under today's rules is a different question, and presenting its answer as a replay would be the most misleading thing the command could do. `--policy` points it at the archived bundle.
+- **Assumed, and named.** The budget ledger state (the ledger has moved since) and the signed mandate (`mandate_issued` keeps an id and a window, not the document). Every difference is classified against the rules that read `derived.budget.*` / `derived.mandate.*`, so a difference an assumption explains is reported as inconclusive and a difference in a rule reading only the proposal is reported as a finding. `blast_radius` is never excused -- it is computed from the proposal, which is recorded.
+
+Exit **0** reproduced, **2** differs with nothing to account for it, **1** the question could not be answered (no such proposal, a chain that does not verify, a policy whose hash does not match). Three answers, three codes: folding "differs" into 1 would make a forged record indistinguishable from a missing file.
+
+The 24-hour history counters are **not** assumed, and that is a statement about this build rather than about replay: `HistoryDerived` is threaded through `check_proposal` into `EvalContext` and nothing in `qed` ever passes it, so every decision made so far saw zeros and replaying with zeros reproduces the real input. Two shipped rules read those counters and therefore cannot fire -- see §5.
 
 `tests/cli/test_command_set.py` holds this list to the CLI in both directions: a command the CLI gained and this line did not is a failure, and so is a name here that no longer exists. The rule above said "no new top-level command without a spec update" for twelve weeks and nothing checked it, which is how `approvals`, `status` and `checkpoint` came to be built and unlisted.
 

@@ -23,6 +23,7 @@ import re
 import sys
 import textwrap
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
@@ -43,8 +44,11 @@ from qed.core.schemas import (
     Decision,
     Enforcement,
     Environment,
+    EvalContext,
     EvidenceType,
+    HistoryDerived,
     Mandate,
+    Verdict,
     rfc3339_ms,
     utcnow,
 )
@@ -73,6 +77,7 @@ if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
     from qed.adapters.http_proxy.proxy import HttpProxyStats
     from qed.adapters.mcp.proxy import ProxyStats
     from qed.core.admin import AdminOperation, GateDecision
+    from qed.core.replay import ReplayReport
     from qed.core.schemas import EvidenceRecord
     from qed.demo import Step
 
@@ -2361,6 +2366,268 @@ def verify(
     for note in report.unchecked:
         typer.echo(f"not checked -- {note}", err=True)
     raise typer.Exit(0 if report.ok else 1)
+
+
+# ------------------------------------------------------------------- replay
+
+
+#: `replay` answers three different things and they must not share an exit
+#: code. 0 the record follows from its policy; 2 it does not, and nothing
+#: accounts for the difference; 1 the question could not be answered at all --
+#: no such proposal, a chain that does not verify, or a policy whose hash does
+#: not match the one the decision was made under. Folding "differs" into 1
+#: would make a real finding indistinguishable from a missing file, which is
+#: the state a pipeline is most likely to be in.
+EXIT_REPLAY_DIFFERS: Final = 2
+
+
+def _records_for_replay(
+    source: Path | None, directory: Path, config: Path | None, instance_id: str | None
+) -> tuple[str, str | None]:
+    """The chain text to replay from, and the instance id to bind it to."""
+    if source is not None:
+        return source.read_text(encoding="utf-8"), instance_id
+    session = open_session(directory=directory, config_path=config, strict_policy=False)
+    try:
+        return to_jsonl(session.store.iter_evidence()), instance_id or session.config.instance_id
+    finally:
+        session.close()
+
+
+@app.command()
+def replay(
+    proposal_id: Annotated[str, typer.Argument(help="The proposal id to re-decide.")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    policy: PolicyOption = None,
+    source: Annotated[
+        Path | None,
+        typer.Option("--from", help="JSONL export to read. Default: the local chain."),
+    ] = None,
+    budget_file: Annotated[
+        Path | None,
+        typer.Option("--budget", help="BudgetState as JSON, as it was when this was decided."),
+    ] = None,
+    mandate_file: Annotated[
+        Path | None, typer.Option("--mandate", help="The Mandate the decision was made under.")
+    ] = None,
+    calls_24h: Annotated[
+        int | None, typer.Option("--calls-24h", help="History counter as it was.")
+    ] = None,
+    blocks_24h: Annotated[
+        int | None, typer.Option("--blocks-24h", help="History counter as it was.")
+    ] = None,
+    instance_id: Annotated[
+        str | None,
+        typer.Option("--instance-id", help="Instance an export belongs to, for the chain check."),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Decide a recorded proposal again and report whether the record follows.
+
+    `qed verify` shows a record is authentic; a chain rewritten wholesale and
+    re-signed passes it. This answers the other question: **does this verdict
+    follow from the policy it says it was decided under.**
+
+    The chain holds the proposal, the verdict and the timestamp that was the
+    engine's clock, so those are exact. It holds the policy's *hash* and not
+    its rules, so replaying needs the bundle itself -- and if its hash does
+    not match, this refuses rather than quietly answering "what would today's
+    policy decide", which is a different question with a much weaker answer.
+    Point `--policy` at the archived bundle.
+
+    Three inputs are in no record: the budget ledger state, the signed mandate
+    (`mandate_issued` keeps its id and window, not the document) and the
+    24-hour history counters. Supply them, or they are defaulted and **named
+    as assumed** -- and any difference in a rule that reads them is then
+    attributed to the assumption instead of reported as a finding. A
+    difference in a rule that reads only the proposal is reported, because
+    nothing else can explain it.
+
+    Exit 0 reproduced, 2 differs with nothing to explain it, 1 the question
+    could not be answered.
+    """
+    try:
+        from qed_verify.verify import load_jsonl, verify_records
+    except ImportError:
+        _fail("qed-verify is not installed: pip install ./packages/qed-verify")
+        return
+
+    from qed.core.replay import replay_verdict
+    from qed.infra.keys.file import load_public_keys
+
+    text, bound_to = _records_for_replay(source, directory, config, instance_id)
+    records = load_jsonl(text)
+
+    # A record that has not been verified cannot support a statement about
+    # what follows from it: "this verdict matches the policy" is worth
+    # nothing if the verdict is not the one the kernel signed.
+    report = verify_records(
+        records, load_public_keys(directory / PUBLIC_DIR_NAME), instance_id=bound_to
+    )
+    if not report.ok:
+        _fail(
+            f"the chain does not verify, so a replay of it would prove nothing:\n{report.summary()}"
+        )
+        return
+
+    proposal_record = _find_record(records, "proposal", "proposal", "id", proposal_id)
+    verdict_record = _find_record(records, "verdict", "verdict", "proposal_id", proposal_id)
+    if proposal_record is None or verdict_record is None:
+        missing = "proposal" if proposal_record is None else "verdict"
+        _fail(
+            f"no {missing} record for {proposal_id} in this chain. A payload stripped by "
+            "retention cannot be replayed, and `qed export` only carries what is left "
+            "(SPEC 10.6)."
+        )
+        return
+
+    proposal = ActionProposal.model_validate(_inner(proposal_record, "proposal"))
+    recorded = Verdict.model_validate(_inner(verdict_record, "verdict"))
+
+    try:
+        session = open_session(
+            directory=directory, policy_paths=policy, config_path=config, strict_policy=False
+        )
+    except MissingSigningKey as exc:
+        _fail(str(exc))
+        return
+    bundle = session.bundle
+    ledger_budget = session.store.load_budget(proposal.principal.token_jti)
+    session.close()
+
+    assumed: list[str] = []
+    if budget_file is not None:
+        budget = BudgetState.model_validate_json(budget_file.read_text(encoding="utf-8"))
+    else:
+        # The ledger as it is now, which is what `check_proposal` reads when a
+        # caller passes no budget. It is still an assumption -- the ledger has
+        # moved since, and that is exactly why it is named -- but it is a far
+        # better one than an empty state, which would make every rule reading
+        # `derived.budget.*` fire differently and turn each replay
+        # inconclusive for no reason.
+        budget = ledger_budget or BudgetState(token_jti=proposal.principal.token_jti)
+        assumed.append("budget")
+    mandate = None
+    if mandate_file is not None:
+        mandate = Mandate.model_validate_json(mandate_file.read_text(encoding="utf-8"))
+    elif proposal.principal.mandate_id:
+        # Only assumed when the proposal claimed one. A proposal with no
+        # `mandate_id` was decided with no mandate, which is recorded fact.
+        assumed.append("mandate")
+    # Not assumed: nothing in `qed` ever passes `history` to `check_proposal`,
+    # so every decision it has made saw zeros and replaying with zeros
+    # reproduces the real input. The flags exist for a chain from a build that
+    # does supply them. See `qed/core/replay.py` and the test that pins it.
+    history = HistoryDerived(calls_24h=calls_24h or 0, blocks_24h=blocks_24h or 0)
+
+    # The clock is not assumed: `check_proposal` stamps the proposal record,
+    # the verdict record and `ctx.now` from one value, so the record's own
+    # timestamp *is* what the engine was told the time was.
+    ctx = EvalContext(
+        now=datetime.fromisoformat(str(proposal_record["ts"]).replace("Z", "+00:00")),
+        mandate=mandate,
+        history=history,
+    )
+
+    result = replay_verdict(proposal, recorded, bundle, budget, ctx, assumed_inputs=tuple(assumed))
+
+    if as_json:
+        typer.echo(json.dumps(result.to_dict(), indent=2))
+    else:
+        _print_replay(result)
+
+    if not result.policy_matches:
+        raise typer.Exit(EXIT_ERROR)
+    raise typer.Exit(EXIT_ALLOW if not result.unexplained else EXIT_REPLAY_DIFFERS)
+
+
+def _inner(record: dict[str, Any], key: str) -> dict[str, Any]:
+    payload = record.get("payload")
+    assert isinstance(payload, dict)  # `_find_record` only returns matches
+    inner = payload[key]
+    assert isinstance(inner, dict)
+    return inner
+
+
+def _find_record(
+    records: list[dict[str, Any]], type_: str, key: str, id_field: str, wanted: str
+) -> dict[str, Any] | None:
+    """The one record of `type_` whose payload names `wanted`.
+
+    Works in dictionaries rather than `EvidenceRecord`, because these come
+    from `qed_verify.load_jsonl`, which deliberately does not import the
+    writer's models -- a verifier that parsed with the same code that wrote
+    the record could not catch the record being wrong.
+    """
+    for record in records:
+        if record.get("type") != type_:
+            continue
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            # Stripped by retention. Not an error here: a later record may
+            # still carry it, and the caller reports the absence.
+            continue
+        inner = payload.get(key)
+        if isinstance(inner, dict) and inner.get(id_field) == wanted:
+            return record
+    return None
+
+
+def _print_replay(result: ReplayReport) -> None:
+    if not result.policy_matches:
+        typer.secho("cannot replay", fg=typer.colors.RED, bold=True)
+        typer.echo(f"  proposal         : {result.proposal_id}")
+        typer.echo(f"  decided under    : {result.recorded_policy_hash}")
+        typer.echo(f"  replayed against : {result.replayed_policy_hash}")
+        typer.echo("")
+        typer.echo(
+            "The chain records a policy's hash, not its rules, so the bundle that made "
+            "this decision cannot be reconstructed from evidence. Point `--policy` at "
+            "the bundle that was in force. Re-deciding under today's policy would "
+            "answer a different question."
+        )
+        return
+
+    if result.reproduced:
+        typer.secho("reproduced", fg=typer.colors.GREEN, bold=True)
+    elif result.inconclusive:
+        typer.secho("inconclusive", fg=typer.colors.YELLOW, bold=True)
+    else:
+        typer.secho("DIFFERS", fg=typer.colors.RED, bold=True)
+
+    typer.echo(f"  proposal : {result.proposal_id}")
+    typer.echo(f"  policy   : {result.recorded_policy_hash[:16]}... (matches)")
+    engine = result.recorded_engine_version
+    if not result.engine_matches:
+        typer.echo(f"  engine   : recorded {engine}, running {result.replayed_engine_version}")
+    else:
+        typer.echo(f"  engine   : {engine}")
+    if result.approval_overlay:
+        typer.echo(f"  approval : {result.approval_overlay}")
+
+    if result.assumed_inputs:
+        typer.echo("")
+        typer.echo(f"assumed (not in any record): {', '.join(result.assumed_inputs)}")
+
+    if result.differences:
+        typer.echo("")
+        for difference in result.differences:
+            colour = typer.colors.YELLOW if difference.attributed_to else typer.colors.RED
+            typer.secho(f"  {difference.format()}", fg=colour)
+
+    if result.inconclusive:
+        typer.echo("")
+        typer.echo(
+            "Every difference is explained by an input this replay had to assume, so "
+            "this is neither a pass nor a failure. Supply the real one to settle it."
+        )
+    elif not result.engine_matches and result.unexplained:
+        typer.echo("")
+        typer.echo(
+            "The engine version differs, which can change a decision on its own. "
+            "Replay with the version named above before reading this as tampering."
+        )
 
 
 # -------------------------------------------------------------------- serve
