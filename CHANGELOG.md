@@ -6,6 +6,38 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — one registry's hourly quota could fail the release gate
+
+The container tests built from a single base image: whichever registry
+`QED_BUILDER_IMAGE` named, read as the only permitted source. On 2026-10-15
+ECR Public answered `429 Too Many Requests -- Data limit exceeded` to the
+anonymous pull, four tests errored, and `deploy` — a required status check —
+went red on a commit that touched nothing to do with containers.
+
+That variable was already a workaround: the build had been moved to AWS's
+mirror because Docker Hub's anonymous limit was doing the same thing. Both
+quotas are counted per source address, and CI runners share addresses with
+everyone else on the pool, so retrying the same host is the weakest answer
+available. The fixtures now resolve the base image across three independent
+registries (ECR Public, `mirror.gcr.io`, Docker Hub), two rounds with a
+backoff, and `QED_BUILDER_IMAGE` becomes a *preference* tried first rather
+than the only option.
+
+The same list now covers the arm64 build, which had no mirror handling at all
+and fell through to the Dockerfile's Docker Hub default — the registry with
+the smallest anonymous allowance of the three. The base image is also pulled
+in its own step before the build, because `docker build` reports a throttled
+registry and a broken Dockerfile identically: as a failed build, against this
+commit.
+
+It is still a failure and not a skip when every registry refuses. A skip there
+is a green `deploy` with the shipped artifact never built, which is the
+failure mode this directory's probe already exists to prevent. Seven static
+tests hold the list to the properties that make it safe: independent hosts,
+one interpreter version across all of them (a fallback quietly building on
+3.13 would reintroduce the ABI mismatch these tests were written for), and a
+pin that neither replaces the list nor duplicates an entry in it.
+
 ### Fixed — the only control against a rewritten chain was tested against a fake
 
 `THREAT_MODEL.md` has one control for "the whole chain is rewritten by the

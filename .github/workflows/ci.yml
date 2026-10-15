@@ -758,6 +758,14 @@ jobs:
       # really for. `QED_BUILDER_IMAGE` points the build at AWS's mirror of
       # the same official Python image, for the same reason the Postgres
       # service container does.
+      #
+      # It is a **preference, not a pin**: the fixture tries this first and
+      # then the other mirrors in `BUILDER_MIRRORS`. It used to be the only
+      # source, and on 2026-10-15 ECR Public answered `429 -- Data limit
+      # exceeded` to the anonymous pull and took this required check down on a
+      # commit that touched none of it. The quota is per source address and
+      # these runners share addresses, so the fix is another registry rather
+      # than another attempt.
       # Once, not twice: this used to run as two steps, which built the
       # container twice for one result.
       #

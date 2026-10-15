@@ -150,6 +150,76 @@ class TestWhatTheDockerfileSays:
         assert b"\r" not in STAGE_SCRIPT.read_bytes()
 
 
+class TestWhereTheBaseImageComesFrom:
+    """The build depends on a third party that is allowed to say no.
+
+    It said no on 2026-10-15: ECR Public answered `429 Too Many Requests --
+    Data limit exceeded` to an anonymous pull, four tests errored, and the
+    `deploy` required check went red on a commit about something else. These
+    tests are static, so they run everywhere and cost nothing -- the mirror
+    list is the kind of thing that rots quietly between the rare occasions it
+    is exercised.
+    """
+
+    def test_there_is_more_than_one_registry(self) -> None:
+        """One mirror is a single point of failure with extra steps. The
+        quotas are per source address and CI runners share addresses, so the
+        second and third entries have to be different *hosts*, not different
+        paths on the same one."""
+        hosts = {
+            mirror.split("/")[0] if "." in mirror.split("/")[0] else "docker.io"
+            for mirror in BUILDER_MIRRORS
+        }
+        assert len(hosts) == len(BUILDER_MIRRORS), f"not independent registries: {hosts}"
+
+    def test_every_mirror_names_the_same_interpreter(self) -> None:
+        """The whole point of the list is that it does not matter which one
+        answers. The runtime stage copies the builder's Python, so a mirror
+        naming a different version would make the build's correctness depend
+        on which registry was throttling that hour -- the ABI mismatch in this
+        module's docstring, arriving at random."""
+        for mirror in BUILDER_MIRRORS:
+            assert mirror.endswith(f":{BUILDER_TAG}"), mirror
+
+    def test_the_mirrors_agree_with_the_dockerfile_default(self) -> None:
+        """A `BUILDER_IMAGE` arg whose default drifts from the list means a
+        local `docker build` and CI are building different images."""
+        assert f"ARG BUILDER_IMAGE=python:{BUILDER_TAG}" in dockerfile()
+
+    def test_a_pinned_image_is_tried_first_but_is_not_the_only_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CI pins one to express a preference. Reading that as the only
+        permitted source is the bug: it turned a registry's hourly quota into
+        a red `main`."""
+        monkeypatch.setenv("QED_BUILDER_IMAGE", "registry.example/python:" + BUILDER_TAG)
+        candidates = _builder_candidates()
+        assert candidates[0] == "registry.example/python:" + BUILDER_TAG
+        assert len(candidates) == len(BUILDER_MIRRORS) + 1
+        assert set(BUILDER_MIRRORS) <= set(candidates)
+
+    def test_pinning_a_mirror_does_not_duplicate_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CI pins the ECR mirror, which is already in the list. Trying it
+        twice in a row is exactly the retry-the-same-host behaviour the list
+        replaced."""
+        monkeypatch.setenv("QED_BUILDER_IMAGE", BUILDER_MIRRORS[0])
+        candidates = _builder_candidates()
+        assert candidates == BUILDER_MIRRORS
+        assert len(candidates) == len(set(candidates))
+
+    def test_no_pin_means_the_mirror_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("QED_BUILDER_IMAGE", raising=False)
+        assert _builder_candidates() == BUILDER_MIRRORS
+
+    def test_an_empty_pin_is_not_a_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`env: QED_BUILDER_IMAGE: ${{ vars.THING }}` with the variable unset
+        is the empty string, not an absent variable. Passed through, it
+        becomes `--build-arg BUILDER_IMAGE=` and the build fails on an empty
+        `FROM`."""
+        monkeypatch.setenv("QED_BUILDER_IMAGE", "   ")
+        assert _builder_candidates() == BUILDER_MIRRORS
+
+
 # --------------------------------------------------------------------------
 # Real
 # --------------------------------------------------------------------------
@@ -174,6 +244,76 @@ def _probe(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str] | 
         return None
 
 
+#: One more round after the first, because a throttle is often over in seconds.
+PULL_ROUNDS = 2
+PULL_BACKOFF_S = 5.0
+
+
+def _pull_first_available(
+    candidates: tuple[str, ...], timeout: int, platform: str | None = None
+) -> tuple[str | None, str]:
+    """The first of `candidates` that pulls, or why none of them did.
+
+    Every image this file needs comes from a registry that can refuse, and the
+    refusal that matters is not an outage: it is a quota. `public.ecr.aws`
+    answers `429 Too Many Requests -- Data limit exceeded` and Docker Hub
+    answers `toomanyrequests`, both counted **per source address**, and CI
+    runners share addresses with everyone else on the pool. So the answer is
+    not a longer retry against the same host -- it is another host, and only
+    then another round.
+    """
+    attempts: list[str] = []
+    for round_number in range(PULL_ROUNDS):
+        if round_number:
+            time.sleep(PULL_BACKOFF_S)
+        for image in candidates:
+            argv = ["docker", "pull", *(["--platform", platform] if platform else []), image]
+            pull = _probe(argv, timeout)
+            if pull is None:
+                attempts.append(f"{image}: timed out after {timeout}s")
+                continue
+            if pull.returncode == 0:
+                return image, ""
+            attempts.append(f"{image}: {pull.stderr.strip()[-200:]}")
+    return None, "; ".join(attempts)
+
+
+#: Mirrors of the **same** official Python image, tried in order.
+#:
+#: They must all name the same interpreter. The runtime stage copies the
+#: builder's Python, so a fallback that quietly built on 3.13 would reproduce
+#: the ABI mismatch described at the top of this file -- from a green build,
+#: on a day when one registry happened to be throttling.
+#: `test_every_mirror_names_the_same_interpreter` holds the list to that.
+#:
+#: Why a list at all: on 2026-10-15 `public.ecr.aws` answered 429 to the
+#: anonymous pull and took `deploy` -- a required check -- down with it, on a
+#: commit that touched none of this. The probe image below has had a mirror
+#: list since the last time a registry did this to us; the builder, the bigger
+#: pull in the job that gates releases, did not. The fix had been applied to
+#: the cheap half only.
+BUILDER_TAG = "3.12-slim-bookworm"
+BUILDER_MIRRORS = (
+    f"public.ecr.aws/docker/library/python:{BUILDER_TAG}",
+    f"mirror.gcr.io/library/python:{BUILDER_TAG}",
+    f"python:{BUILDER_TAG}",
+)
+
+
+def _builder_candidates() -> tuple[str, ...]:
+    """`QED_BUILDER_IMAGE` first when set, then every mirror.
+
+    CI sets that variable to express a *preference* -- try AWS's mirror before
+    Docker Hub -- and the fixture used to read it as the only permitted
+    source, which is how one registry's hourly data cap became a red `main`.
+    A preference it remains; the fallbacks are what make it safe to have one.
+    """
+    pinned = os.environ.get("QED_BUILDER_IMAGE", "").strip()
+    if not pinned:
+        return BUILDER_MIRRORS
+    return (pinned, *(mirror for mirror in BUILDER_MIRRORS if mirror != pinned))
+
+
 def docker_available() -> bool:
     if shutil.which("docker") is None:
         return False
@@ -191,15 +331,25 @@ def image(tmp_path_factory: pytest.TempPathFactory) -> str:
     than a warning -- reported against whichever test happened to be running.
     """
     log = tmp_path_factory.mktemp("docker") / "build.log"
-    # CI points this at AWS's mirror of the same official image, because Docker
-    # Hub's unauthenticated pull limit is per runner IP and shared -- a failure
-    # that looks like ours and is not.
-    mirror = os.environ.get("QED_BUILDER_IMAGE")
-    build_args = ["--build-arg", f"BUILDER_IMAGE={mirror}"] if mirror else []
+    # The base image is pulled in its own step, before the build, for the same
+    # reason the emulation probe pulls separately: a registry that refuses and
+    # a Dockerfile that is wrong are different problems, and `docker build`
+    # reports them identically -- as a failed build, against this commit.
+    #
+    # Pulling first is also what makes a mirror list usable at all. Inside a
+    # build there is one `FROM` and no second chance.
+    base, why_not = _pull_first_available(_builder_candidates(), PULL_TIMEOUT_S)
+    assert base is not None, (
+        "no registry would serve the builder base image, so the container could "
+        "not be built. This is the environment and not the commit -- but it is "
+        "deliberately a failure and not a skip, because a skip here is a green "
+        f"`deploy` with the image never built. Tried: {why_not}"
+    )
     command = [
         "docker",
         "build",
-        *build_args,
+        "--build-arg",
+        f"BUILDER_IMAGE={base}",
         "-f",
         str(DOCKERFILE),
         "-t",
@@ -359,11 +509,8 @@ PROBE_IMAGES = (
     "busybox:latest",
 )
 
-#: One more round after the first, because a throttle is often over in seconds.
-PULL_ROUNDS = 2
-PULL_BACKOFF_S = 5.0
-
-#: Shorter than `PULL_TIMEOUT_S`, which sized a single attempt. Six attempts at
+#: Shorter than `PULL_TIMEOUT_S`, which sizes the builder base -- a far larger
+#: image than busybox. Six attempts at
 #: that timeout is an eighteen-minute stall at collection time if the network
 #: blackholes rather than refuses, and collection is where nothing is reported
 #: yet. A busybox manifest and one layer is seconds; a minute is already
@@ -373,21 +520,12 @@ PROBE_PULL_TIMEOUT_S = 60
 
 def _pull_probe_image() -> tuple[str | None, str]:
     """The first probe image that pulls, or why none of them did."""
-    attempts: list[str] = []
-    for round_number in range(PULL_ROUNDS):
-        if round_number:
-            time.sleep(PULL_BACKOFF_S)
-        for image in PROBE_IMAGES:
-            pull = _probe(
-                ["docker", "pull", "--platform", FOREIGN_PLATFORM, image], PROBE_PULL_TIMEOUT_S
-            )
-            if pull is None:
-                attempts.append(f"{image}: timed out after {PROBE_PULL_TIMEOUT_S}s")
-                continue
-            if pull.returncode == 0:
-                return image, ""
-            attempts.append(f"{image}: {pull.stderr.strip()[-200:]}")
-    return None, "no probe image could be pulled -- " + "; ".join(attempts)
+    image, why_not = _pull_first_available(
+        PROBE_IMAGES, PROBE_PULL_TIMEOUT_S, platform=FOREIGN_PLATFORM
+    )
+    if image is None:
+        return None, "no probe image could be pulled -- " + why_not
+    return image, ""
 
 
 def emulation_available() -> tuple[bool, str]:
@@ -438,6 +576,15 @@ def emulation_available() -> tuple[bool, str]:
 def foreign_image(tmp_path_factory: pytest.TempPathFactory) -> str:
     tag = "qed-test:foreign"
     log = tmp_path_factory.mktemp("docker-foreign") / "build.log"
+    # The same mirror list, for the same reason. Resolved against the host
+    # architecture rather than this one: a quota is a property of the registry
+    # and the source address, not of the manifest being asked for, so a
+    # registry that served the amd64 variant a moment ago will serve the arm64
+    # one. Without this the foreign build fell through to the Dockerfile's own
+    # default -- Docker Hub -- which has the smallest anonymous allowance of
+    # the three.
+    base, why_not = _pull_first_available(_builder_candidates(), PULL_TIMEOUT_S)
+    assert base is not None, f"no registry would serve the builder base image: {why_not}"
     with log.open("wb") as sink:
         build = subprocess.run(
             [
@@ -446,6 +593,8 @@ def foreign_image(tmp_path_factory: pytest.TempPathFactory) -> str:
                 "build",
                 "--platform",
                 FOREIGN_PLATFORM,
+                "--build-arg",
+                f"BUILDER_IMAGE={base}",
                 "-f",
                 str(DOCKERFILE),
                 "-t",
