@@ -21,6 +21,19 @@ between the two means something.
 
 ```bash
 pip install valqore-qed
+qed demo
+```
+
+`qed demo` needs nothing: it generates a key, writes a `qed.yaml`, decides five
+proposals -- a read, a destructive migration, an open security group, an
+unapproved egress and an agent nobody authorised -- and verifies the chain it
+wrote. It exits 0 although a `BLOCK` is in it, because the exit code of a demo
+is whether the demo ran, and every record it writes is marked `dev` so the
+chain cannot be mistaken for evidence.
+
+Then the same path by hand, which is what an adapter does:
+
+```bash
 qed keys init --dir ./state
 qed check proposal.json --dir ./state     # 0 ALLOW · 2 BLOCK · 3 REQUIRE_APPROVAL
 qed export --dir ./state > chain.jsonl

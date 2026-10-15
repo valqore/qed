@@ -6,6 +6,60 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `qed demo`, one command from nothing to a verified chain
+
+Before this, the shortest honest path from "cloned the repository" to "saw a
+verdict" was: write a `qed.yaml`, run `qed keys init`, pick a pack, hand-craft
+an `ActionProposal`, find `qed export`, then find `qed-verify` and the three
+arguments it needs. Every one of those is in the documentation and none of them
+is a first impression. The remaining exit criteria in SPEC §22 are all people —
+two design partners in enforce, auditor acceptance, 300 stars — and all three
+start with a stranger deciding in a minute whether this is real.
+
+`qed demo` generates a key, writes a `qed.yaml`, decides five proposals and
+verifies the chain it wrote. The arc is deliberate: a read in dev that nothing
+objects to, a `DROP TABLE` in production routed to a human with the blast
+radius already computed, an open security group refused outright, an export to
+an unallow-listed host that a **shadow** rule records and lets through, and an
+unattended agent with no mandate stopped before any rule runs. That is the
+whole product in five lines, and the last two are the ones nothing else in the
+repository showed without a configuration file.
+
+Three properties it keeps, because each is a way a demo becomes a liability:
+
+- **Every record is marked `dev`**, in the record rather than in the prose
+  around it. An export of a demo chain says what it is wherever it ends up, and
+  the directory it writes (`./qed-demo`) carries a `.gitignore` of its own so a
+  generated signing key cannot be committed by accident.
+- **It exits 0 although a BLOCK is in it.** `qed check` returns the verdict as
+  its exit code (SPEC §12.5); a demo returns whether the demo ran.
+- **What it claims the pack decides is asserted in the test suite.** Each scene
+  carries its expected verdict and `tests/cli/test_demo.py` checks all five
+  against the shipped pack, so a rule change fails a test instead of surprising
+  somebody's first run. The same file asserts the `dev` flag on every exported
+  record, that the chain verifies through the real `qed-verify`, that the files
+  the `Next` section points at can be read by the command it suggests, and —
+  with `socket.socket` monkeypatched to raise — that the demo needs no network.
+
+Nothing new was built underneath. The proposals come from
+`qed.adapters.common.build_proposal`, the function the MCP and HTTP adapters
+use, and they are decided through `check_proposal`, the path a real adapter
+takes. A demo of code nobody runs would be worth less than no demo.
+
+### Fixed — SPEC §14's command list, and the rule that nothing was enforcing
+
+`qed/cli.py` has opened with "SPEC 14 forbids adding a top-level command
+without a spec update" since week 1. Nothing checked it, and three commands —
+`approvals`, `status`, `checkpoint` — were built and never listed, while
+`replay` and `adapters` were listed and never built. The count in the heading
+said 18; the CLI had 19 names before `demo` and 20 after.
+
+The inventory is now correct, the two unbuilt commands are named as unbuilt
+rather than quietly listed as features, and `tests/cli/test_command_set.py`
+holds the list to the CLI in both directions, group subcommands included. A
+command the CLI gains and the spec does not is now a failing test, which is
+what the sentence in the docstring has been promising for twelve weeks.
+
 ### Changed — a rule that cannot be evaluated is skipped, and the skip is recorded
 
 `PredicateError` was caught nowhere in `qed/`. The guard that bounds a

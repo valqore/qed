@@ -663,9 +663,15 @@ Rate limits: per adapter 100 proposals/s default; per principal 20/s. 429 with `
 
 ---
 
-## 14. CLI (`qed`, Typer) — 18 top-level commands (vs. Valqore's 208); no new top-level command without a spec update
+## 14. CLI (`qed`, Typer) — 20 top-level commands (vs. Valqore's 208); no new top-level command without a spec update
 
-`serve [--ui] [--dev]` · `mcp -- <cmd> | --upstream-url` · `proxy` · `hook <agent>` · `install <agent>` · `login` · `token` · `check` · `approve` · `mandate sign|list|revoke` · `policy lint|test|explain|normalize-frameworks` · `keys init|rotate|export-public` · `export` · `verify` (thin wrapper over qed-verify) · `replay <proposal_id>` · `doctor [--offline]` · `adapters add|list|rotate` · `packs import|list|verify`.
+`demo` · `serve [--ui] [--dev]` · `mcp -- <cmd> | --upstream-url` · `proxy` · `hook <agent>` · `install <agent>` · `login` · `token` · `check` · `approve` · `approvals` · `status` · `checkpoint` · `mandate sign|list|revoke` · `policy lint|test|explain|normalize-frameworks` · `keys init|rotate|export-public` · `export` · `verify` (thin wrapper over qed-verify) · `doctor [--offline]` · `packs import|list|verify`.
+
+`demo` decides five proposals against a throwaway instance and verifies the chain it wrote: no configuration, no keys, no network, every record marked `dev`, and exit 0 although it contains a BLOCK (§12.5 belongs to `check`, and a demo's exit code is whether the demo ran).
+
+Specified and **not built**: `replay <proposal_id>` and `adapters add|list|rotate`. An adapter is registered in `qed.yaml` (§16) and a decision is re-derived from the chain by hand. They are absent rather than stubbed, because a command that prints "not implemented" ends up in somebody's script.
+
+`tests/cli/test_command_set.py` holds this list to the CLI in both directions: a command the CLI gained and this line did not is a failure, and so is a name here that no longer exists. The rule above said "no new top-level command without a spec update" for twelve weeks and nothing checked it, which is how `approvals`, `status` and `checkpoint` came to be built and unlisted.
 
 ---
 

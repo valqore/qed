@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import textwrap
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
@@ -71,6 +72,8 @@ if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
     from qed.adapters.http_proxy.proxy import HttpProxyStats
     from qed.adapters.mcp.proxy import ProxyStats
     from qed.core.admin import AdminOperation, GateDecision
+    from qed.core.schemas import EvidenceRecord
+    from qed.demo import Step
 
 #: Failures that are a statement about the operator's chain, not a bug in qed.
 #:
@@ -102,6 +105,20 @@ class QedGroup(TyperGroup):
         except OPERATOR_ERRORS as exc:
             typer.secho(f"qed: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(EXIT_ERROR) from None
+
+    def list_commands(self, ctx: Any) -> list[str]:
+        """Definition order, with `demo` first.
+
+        Typer keeps the order the commands were written in, which is roughly
+        the order an operator meets them. `demo` is the exception: it is the
+        first command a stranger should run and it was written last, so it is
+        lifted to the front of `--help` here rather than by moving its hundred
+        lines away from the helpers they belong with.
+        """
+        names = super().list_commands(ctx)
+        if "demo" not in names:  # pragma: no cover - defensive
+            return names
+        return ["demo", *(name for name in names if name != "demo")]
 
 
 app = typer.Typer(
@@ -2692,6 +2709,146 @@ def install(
             "not swallowed. Use --fail-mode closed to refuse instead.",
             fg=typer.colors.YELLOW,
         )
+
+
+# ----------------------------------------------------------------------- demo
+
+
+@app.command()
+def demo(
+    directory: Annotated[
+        Path,
+        typer.Option("--dir", help="Where to put the throwaway instance."),
+    ] = Path("qed-demo"),
+) -> None:
+    """Decide five proposals against a throwaway instance, then verify the chain.
+
+        qed demo
+
+    Needs no configuration, no keys, no network and no agent: it generates a
+    signing key, writes a `qed.yaml`, decides a read, a destructive migration,
+    an open security group, an unapproved egress and an unauthorised agent, and
+    verifies the chain it just wrote.
+
+    **Exits 0 even though a BLOCK is in it.** `qed check` returns the verdict as
+    its exit code (SPEC 12.5); this returns whether the demo ran, so pasting it
+    into a pipeline to see what it does cannot fail the pipeline.
+
+    Every record is marked `dev`, in the record itself -- a demo chain that
+    could be mistaken for evidence would be worse than no demo. The directory
+    it writes (`./qed-demo` by default) holds a `.gitignore` of its own, so a
+    generated key and a demo chain cannot be committed by accident. Delete it
+    when you are done; running the demo again into it extends the same chain.
+    """
+    from qed.demo import run
+
+    steps, session = run(directory)
+    try:
+        _demo_report(directory, steps, session)
+    finally:
+        session.close()
+
+
+def _demo_report(state: Path, steps: list[Step], session: Session) -> None:
+    """Print the run. Separate from the command so the output has one home."""
+    colour = {
+        Decision.ALLOW: typer.colors.GREEN,
+        Decision.REQUIRE_APPROVAL: typer.colors.YELLOW,
+        Decision.BLOCK: typer.colors.RED,
+    }
+    typer.echo("")
+    typer.secho("qed demo", bold=True, nl=False)
+    typer.echo("  five proposals, one chain, nothing to configure")
+    typer.echo("")
+    typer.echo(f"  state   {state}{os.sep}  (generated key, sqlite chain, every record dev)")
+    typer.echo(
+        f"  policy  agent-baseline, {len(session.bundle.active_rules())} active rules, "
+        f"mode {session.config.mode.value}"
+    )
+    typer.echo("")
+
+    for index, step in enumerate(steps, start=1):
+        verdict = step.outcome.verdict
+        decided = verdict.decision
+        suffix = (
+            f"   (would be {verdict.would_decision.value} in enforce)"
+            if verdict.would_decision is not decided
+            else ""
+        )
+        typer.echo(f"  {index}  ", nl=False)
+        typer.secho(f"{decided.value:<17}", fg=colour[decided], bold=True, nl=False)
+        typer.echo(f" {step.scene.headline}{suffix}")
+        typer.echo(
+            f"       {step.proposal.action.name} -> {step.proposal.action.target}"
+            f"   blast radius {verdict.blast_radius}/100"
+        )
+        for hit in verdict.hits:
+            marker = "~" if hit.mode.value == "shadow" else "!"
+            typer.echo(f"       {marker} {hit.rule_id}  {hit.message}")
+        typer.secho(f"       {step.scene.teaches}", dim=True)
+        typer.echo("")
+
+    records = list(session.store.iter_evidence())
+    # Counted rather than described, because the count is not "two per
+    # decision": the chain opens with its genesis and the policy it loaded, and
+    # the approval the second scene asked for is a record of its own.
+    kinds = Counter(record.type.value for record in records)
+    # In chain order, not alphabetical: the order is the story (genesis, the
+    # policy it loaded, then the decisions).
+    breakdown = ", ".join(f"{kinds[name]} {name}" for name in dict.fromkeys(kinds))
+    typer.echo(f"  chain   {len(records)} records -- {breakdown}")
+    typer.echo(f"          head {records[-1].hash[:16]}...")
+    _demo_verify(state, session, records)
+
+    config = state / "qed.yaml"
+    typer.echo("")
+    typer.secho("  Next", bold=True)
+    typer.echo(f"    qed policy explain {steps[1].path}")
+    typer.echo("          why the numbers came out that way -- writes nothing")
+    typer.echo(f"    qed export --dir {state} --config {config} --format oscal")
+    typer.echo("          the same chain as an OSCAL assessment result")
+    typer.echo(f"    qed verify --dir {state} --config {config}")
+    typer.echo("          check it yourself, or hand the export to `qed-verify`")
+    typer.echo("")
+    typer.echo("  Then put it in front of a real agent: `qed install claude-code --human you@`,")
+    typer.echo("  and read docs/onboarding-shadow-to-enforce.md before turning `mode: enforce` on.")
+    typer.echo("")
+
+
+def _demo_verify(state: Path, session: Session, records: list[EvidenceRecord]) -> None:
+    """Verify the demo chain with the standalone verifier, or say it was not verified.
+
+    `qed-verify` is a separate distribution on purpose -- an auditor installs
+    it without installing the kernel -- so a `pip install valqore-qed` may not
+    have it. The demo says so plainly rather than printing a verification it
+    did not do, which is the failure this repository already shipped once
+    (`qed-verify` printed OK over a genesis check it had skipped).
+    """
+    try:
+        from qed_verify.verify import load_jsonl, verify_records
+    except ImportError:
+        typer.secho(
+            "          not verified: qed-verify is not installed (pip install qed-verify)",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    from qed.infra.keys.file import load_public_keys
+
+    report = verify_records(
+        load_jsonl(to_jsonl(records)),
+        load_public_keys(state / PUBLIC_DIR_NAME),
+        instance_id=session.config.instance_id,
+    )
+    if report.ok and report.complete:
+        typer.secho(
+            "          verified: contiguous, unmodified, signed, and bound to "
+            f"instance {session.config.instance_id!r}",
+            fg=typer.colors.GREEN,
+        )
+        return
+    for line in report.summary().splitlines():
+        typer.secho(f"          {line}", fg=typer.colors.RED if not report.ok else None)
 
 
 def main() -> None:

@@ -9,6 +9,12 @@ without a week where your agents are broken and nobody knows which rule did it.
 Every command on this page was run to write it, and the output is quoted rather
 than invented.
 
+If you have not seen a verdict yet, run `qed demo` first. It decides five
+proposals against a throwaway instance and verifies the chain, so the shapes
+on this page -- a shadow rule that records what it would have done, a BLOCK
+with no approval path, `would_decision` -- are ones you have already watched
+happen. Nothing on this page depends on it.
+
 !!! note "One `--config` for every command"
     The chain's genesis record is bound to `instance_id`, so a command run
     without the config that created the chain is refused:

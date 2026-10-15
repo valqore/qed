@@ -1,5 +1,10 @@
 # Examples
 
+For the zero-configuration version of all of this, run `qed demo`: it builds
+its own proposals with the same `build_proposal` the adapters use, decides
+five of them against a throwaway instance and verifies the chain. The files
+here are for when you want to edit one and decide it yourself.
+
 Everything here runs. Each file is either executed by the test suite or quoted
 in a document whose commands were run to write it — `docs/validation.md` is the
 page about why that distinction matters in this repository.

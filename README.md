@@ -98,6 +98,19 @@ including the ones that are less flattering.
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]" -e packages/qed-verify
 
+qed demo
+```
+
+One command, no configuration: it generates a key, writes a `qed.yaml`, decides
+five proposals — a read, a destructive migration, an open security group, an
+unapproved egress and an agent nobody authorised — and verifies the chain it
+just wrote. It exits 0 although a `BLOCK` is in it, because the exit code of a
+demo is whether the demo ran. Everything lands in `./qed-demo` (gitignored by
+the demo itself, every record marked `dev`); delete it when you are done.
+
+Then the same thing by hand, which is what an adapter does:
+
+```bash
 qed keys init --dir .qed                         # Ed25519 evidence key, 0600
 qed check examples/proposals/prod-db-drop.json --dir .qed
 qed export --dir .qed --out chain.jsonl

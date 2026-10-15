@@ -205,6 +205,22 @@ class TestTheBinaryActuallyRuns:
         assert verified.returncode == 0, verified.stdout + verified.stderr
         assert "OK" in verified.stdout
 
+    def test_demo_runs_in_the_frozen_binary(self, binary: Path, tmp_path: Path) -> None:
+        """`qed demo` is the first command a Homebrew user runs, and it touches
+        more of the wheel than any other single command: the signing key, the
+        policy pack, the store, the chain writer and the bundled verifier.
+
+        The `not verified` assertion is the one that earns its place. The demo
+        degrades politely when `qed-verify` is missing, which is right for a
+        `pip install valqore-qed` and wrong for the binary -- it ships the
+        verifier, so a demo that printed the polite line here would mean the
+        bundling had silently broken.
+        """
+        result = self.run(binary, "demo", "--dir", str(tmp_path / "demo"))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "verified: contiguous, unmodified, signed" in result.stdout
+        assert "not verified" not in result.stdout
+
     def test_verify_does_not_tell_a_binary_user_to_run_pip(
         self, binary: Path, tmp_path: Path
     ) -> None:
