@@ -46,7 +46,7 @@ Leaf: `{ field: <dotted path>, <operator>: <value> }`.
 | `equals`, `not_equals` | exact |
 | `in`, `not_in` | operand must be a list |
 | `glob` | `fnmatch`, case sensitive; operand may be a list (any match) |
-| `regex` | evaluated with a timeout; a timeout is an error, not a pass |
+| `regex` | evaluated with a 1 s timeout; a timeout is never a pass — it skips the rule, recorded as `AG-PRD-001` |
 | `gt`, `gte`, `lt`, `lte` | numbers only; booleans are not numbers |
 | `exists` | operand must be `true` or `false` |
 | `contains` | substring for strings, membership for lists |
@@ -105,6 +105,22 @@ rule order; a golden test shuffles the bundle and compares bytes.
 
 A rising `no_rule_matched` ratio means the policy has gaps. That is the metric
 to watch, not the block count.
+
+### A rule that cannot be evaluated
+
+A `when` that raises — in practice a `regex` that spends its 1 s budget, since
+`qed policy lint` refuses every structural error before a bundle loads — **skips
+its rule**. The rule is not a hit, and it is not treated as a miss either: the
+verdict carries a synthetic `AG-PRD-001` hit naming the rule and the reason, in
+`mode: shadow` so that it records the gap without deciding anything, and
+`qed_decisions_rule_skipped_total` counts the decision.
+
+This is deliberate in both directions. Counting the failure as a match would
+turn machine load into a BLOCK; refusing the proposal would hand one bad pattern
+in one rule the power to stop every action the kernel governs. What must not
+happen is the third option: a verdict that comes out as though the bundle had
+one fewer rule in it, with nobody told. `qed policy explain` lists the skipped
+rules under `rules_skipped`. See `docs/adr/0016-an-unevaluable-rule-is-skipped-and-recorded.md`.
 
 ## Shadow
 

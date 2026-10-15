@@ -36,7 +36,10 @@ __all__ = [
 # was not 100 ms of regex engine, it was 100 ms of wall clock on a shared
 # machine, and a loaded runner spent it by descheduling the thread mid-match.
 # That turned machine load into `PredicateError`, which is a rule failing to
-# evaluate: not an allow and not a block. The budget exists to bound
+# evaluate: not an allow and not a block. The engine skips such a rule and
+# records it as `AG-PRD-001` (ADR-0016), so the budget being spent is now
+# visible rather than silent -- but it is still a rule that did not run, which
+# is why the budget is wide. The budget exists to bound
 # catastrophic backtracking, not to be a latency target -- SPEC 18's 50 ms p95
 # is enforced elsewhere and a pattern that needs a second is a lint problem,
 # not a runtime one.
@@ -77,7 +80,14 @@ COMPOSITE_KEYS: Final = frozenset({"any", "all", "not"})
 
 
 class PredicateError(ValueError):
-    """Raised for a structurally invalid predicate. Surfaced as a lint error."""
+    """Raised for a predicate that cannot be evaluated.
+
+    Almost always a lint error: `validate_predicate` raises it for every
+    structural fault before a bundle loads, so no such predicate reaches the
+    engine. The one that can is a regex spending its budget at evaluation time,
+    and the engine catches it there — the rule is skipped and recorded as
+    `AG-PRD-001` rather than deciding anything (ADR-0016).
+    """
 
 
 # --------------------------------------------------------------------------

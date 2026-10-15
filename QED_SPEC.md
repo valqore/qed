@@ -361,10 +361,11 @@ Ops: `equals`, `not_equals`, `in`, `not_in`, `glob`, `regex`, `gt`, `gte`, `lt`,
 Composite: `any: [...]`, `all: [...]`, `not: {...}`.
 Derived fields available: `derived.blast_radius` (int, computed before rules), `derived.budget.steps_remaining`, `derived.budget.tokens_remaining`, `derived.budget.seconds_remaining`, `derived.budget.money_remaining_cents`, `derived.mandate.present` (bool), `derived.mandate.within` (bool), `derived.chain_depth` (int), `derived.history.calls_24h`, `derived.history.blocks_24h`.
 Field access on `params_redacted` only; raw params never reach the engine.
+A predicate that cannot be evaluated — in practice a `regex` that spends its timeout — **MUST NOT** count as a match and **MUST NOT** fail the proposal: its rule is skipped and the verdict MUST carry a synthetic `AG-PRD-001` hit, `mode: shadow`, naming the rule and the reason (ADR-0016).
 
 ### 4.5 Precedence and defaults (MUST)
 1. Compute `applies_to` filter → candidate rules.
-2. Evaluate `when` for each candidate → hits.
+2. Evaluate `when` for each candidate → hits. A `when` that cannot be evaluated skips its rule and adds the synthetic `AG-PRD-001` record (ADR-0016); it does not become a hit and does not fail the decision.
 3. Effective decision = max over **enforce-mode** hits by order `BLOCK > REQUIRE_APPROVAL`; if no enforce hits → `default_verdict` (config; default `ALLOW`) and `default_applied = true`, synthetic hit `AG-DEF-001`.
 4. `would_decision` = same over **all** hits (enforce + shadow).
 5. Mandate constraint check (`derived.mandate.within == false` for unattended) → synthetic `AG-IDN-006` BLOCK, enforce mode, regardless of rules.
@@ -379,6 +380,7 @@ Field access on `params_redacted` only; raw params never reach the engine.
 - `AG-DAT-*` data/egress: 001 secret pattern in params, 002 PII pattern in params, 003 egress to non-allowlisted domain, 007 open ingress 0.0.0.0/0 (BLOCK).
 - `AG-SKL-*` skills: 001 unknown skill source, 002 skill requests tools outside token scope, 003 skill without allowed-tools manifest.
 - `AG-DEF-001` no rule matched (synthetic).
+- `AG-PRD-001` a rule's predicate could not be evaluated and the rule was skipped (synthetic, shadow mode, records only).
 Each rule carries `compliance` mappings imported from Valqore's AIG rules (mapping data only).
 
 ---
@@ -761,7 +763,7 @@ Full STRIDE in `THREAT_MODEL.md`. Key MUSTs:
 ## 18. Observability
 
 - **Events**: `GET /v1/events` SSE; each event = redacted `EvidenceRecord` summary (`seq, ts, type, decision, rule_ids, principal_display?, agent, action.name, target, environment, assurance, mode`). Backfill via `?from_seq=`.
-- **Metrics** (Prometheus): `qed_decisions_total{decision,mode,environment,adapter_kind}`, `qed_decision_latency_seconds` (histogram; target p95 < 50 ms), `qed_approvals_total{decision}`, `qed_approval_wait_seconds`, `qed_budget_exhausted_total`, `qed_chain_lag_records` (outbox depth), `qed_chain_last_checkpoint_age_seconds`, `qed_ungated_windows_total`, `qed_no_rule_matched_ratio`.
+- **Metrics** (Prometheus): `qed_decisions_total{decision,mode,environment,adapter_kind}`, `qed_decision_latency_seconds` (histogram; target p95 < 50 ms), `qed_approvals_total{decision}`, `qed_approval_wait_seconds`, `qed_budget_exhausted_total`, `qed_chain_lag_records` (outbox depth), `qed_chain_last_checkpoint_age_seconds`, `qed_ungated_windows_total`, `qed_no_rule_matched_ratio`, `qed_decisions_rule_skipped_total` (a rule's predicate could not be evaluated).
 - **SIEM**: OCSF-shaped JSON (class `Authorization` / `API Activity` mapping documented in `docs/siem.md`) via webhook or stdout; CEF optional.
 
 ---

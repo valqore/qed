@@ -23,10 +23,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from qed.api.observe import record_decision
 from qed.api.routers.metrics import METRICS, WAIT_BUCKETS
+from qed.core.policy.engine import PREDICATE_FAILED, SYNTHETIC_RULES
+from qed.core.schemas import Decision, RuleHit, Verdict
 from qed.infra.metrics import LATENCY_BUCKETS, MetricsRegistry
+from qed.runtime import CheckOutcome
 from tests.api.conftest import Signer
-from tests.conftest import BASE_PROPOSAL, deep_merge
+from tests.conftest import BASE_PROPOSAL, deep_merge, make_proposal
 
 PROD_DROP: dict[str, object] = {
     "action": {
@@ -217,6 +221,36 @@ class TestDecisionsAreCounted:
         otherwise the number the target is about can only be interpolated."""
         assert 0.05 in LATENCY_BUCKETS
         assert sum(1 for edge in LATENCY_BUCKETS if edge < 0.05) >= 3
+
+    def test_a_skipped_rule_is_counted(self) -> None:
+        """`qed_decisions_rule_skipped_total`. A rule whose predicate could not
+        be evaluated was skipped (ADR-0016), so this decision was taken with
+        less policy than the bundle holds. It is in the evidence either way;
+        the counter is what makes it alertable instead of archaeology."""
+        assert self._skipped_counter(SYNTHETIC_RULES[PREDICATE_FAILED].hit()) == 1.0
+
+    def test_an_ordinary_decision_does_not_move_that_counter(self) -> None:
+        assert self._skipped_counter(SYNTHETIC_RULES["AG-DEF-001"].hit()) == 0.0
+
+    @staticmethod
+    def _skipped_counter(*hits: RuleHit) -> float:
+        proposal = make_proposal()
+        verdict = Verdict(
+            proposal_id=proposal.id,
+            decision=Decision.ALLOW,
+            would_decision=Decision.ALLOW,
+            hits=list(hits),
+            blast_radius=0,
+            policy_hash="0" * 64,
+        )
+        registry = MetricsRegistry()
+        record_decision(
+            registry,
+            proposal=proposal,
+            outcome=CheckOutcome(verdict=verdict, enforced=True, records=[]),
+            seconds=0.001,
+        )
+        return registry.counter("qed_decisions_rule_skipped_total")
 
     def test_approval_waits_use_their_own_buckets(self) -> None:
         """Minutes to hours, not milliseconds. The latency buckets would put

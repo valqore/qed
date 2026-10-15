@@ -18,7 +18,7 @@ from typing import Final
 
 from qed.core.policy.derived import compute_derived
 from qed.core.policy.model import ApprovalSpec, PolicyBundle, Rule
-from qed.core.policy.predicates import evaluate_predicate
+from qed.core.policy.predicates import PredicateError, evaluate_predicate
 from qed.core.schemas import (
     ENGINE_VERSION,
     ActionProposal,
@@ -33,7 +33,19 @@ from qed.core.schemas import (
     Verdict,
 )
 
-__all__ = ["SYNTHETIC_RULES", "evaluate", "explain"]
+__all__ = ["PREDICATE_FAILED", "SYNTHETIC_RULES", "evaluate", "explain"]
+
+#: The hit the engine records when a rule's ``when`` could not be evaluated and
+#: the rule was skipped (ADR-0016). A constant because `qed/api/observe.py`
+#: counts it: a rule id spelled out in two files is a metric that stops
+#: counting the day the id changes.
+PREDICATE_FAILED: Final = "AG-PRD-001"
+
+#: How much of a skipped rule's error text reaches the evidence record. The
+#: reason is kept -- it is what separates "this pattern is catastrophic" from
+#: "the machine was busy" -- and bounded, because the text contains the rule's
+#: own regex and a record is not the place for an unbounded one.
+_MAX_REASON: Final = 120
 
 _RANK: Final[dict[Decision, int]] = {
     Decision.ALLOW: 0,
@@ -45,7 +57,7 @@ _RANK: Final[dict[Decision, int]] = {
 class _Synthetic:
     """A hit the engine raises itself, not from the bundle."""
 
-    __slots__ = ("compliance", "fix", "message", "rule_id", "severity", "verdict")
+    __slots__ = ("compliance", "fix", "message", "mode", "rule_id", "severity", "verdict")
 
     def __init__(
         self,
@@ -55,8 +67,10 @@ class _Synthetic:
         message: str,
         fix: str | None = None,
         compliance: tuple[tuple[str, str], ...] = (),
+        mode: Mode = Mode.enforce,
     ) -> None:
         self.rule_id = rule_id
+        self.mode = mode
         self.verdict = verdict
         self.severity = severity
         self.message = message
@@ -68,7 +82,7 @@ class _Synthetic:
             rule_id=self.rule_id,
             verdict=self.verdict,
             severity=self.severity,
-            mode=Mode.enforce,
+            mode=self.mode,
             message=self.message,
             fix=self.fix,
             compliance=[ComplianceRef(framework=f, control=c) for f, c in self.compliance],
@@ -107,6 +121,21 @@ SYNTHETIC_RULES: Final[dict[str, _Synthetic]] = {
         "No rule matched this action; the bundle default was applied.",
         "If this class of action should be governed, add a rule for it.",
         (("nist_ai_rmf", "MEASURE-2.7"),),
+    ),
+    # The one synthetic hit that is a report rather than a decision: `evaluate`
+    # appends it *after* the decision is made, with `mode: shadow`, so that a
+    # consumer recomputing the decision from the enforce-mode hits still gets
+    # the decision the kernel gave. Its `message` is replaced per verdict with
+    # the rule ids that were skipped (ADR-0016).
+    PREDICATE_FAILED: _Synthetic(
+        PREDICATE_FAILED,
+        Decision.ALLOW,
+        Severity.HIGH,
+        "A rule could not be evaluated and was skipped, neither allowing nor blocking this action.",
+        "Fix the rule's `when` -- a regex that spends its budget under machine load is the "
+        "usual cause -- and check whether this action should have been governed.",
+        (("nist_ai_rmf", "MEASURE-2.7"),),
+        mode=Mode.shadow,
     ),
 }
 
@@ -164,21 +193,77 @@ def _synthetic_verdict(
     )
 
 
-def matching_rules(proposal: ActionProposal, bundle: PolicyBundle, derived: Derived) -> list[Rule]:
-    """Active rules whose ``applies_to`` and ``when`` both hold.
+def _match(
+    proposal: ActionProposal, bundle: PolicyBundle, derived: Derived
+) -> tuple[list[Rule], list[tuple[str, str]]]:
+    """The rules that fired, and the rules whose ``when`` could not be evaluated.
 
-    Sorted by ``rule_id``, so the result cannot depend on which file a rule was
-    read from or in what order the files were read.
+    Both lists are ordered by ``rule_id``, so neither can depend on which file a
+    rule was read from or in what order the files were read.
+
+    **A predicate that raises skips its rule** (ADR-0016). In practice that is a
+    regex spending its 1 s budget, since `qed policy lint` refuses every
+    structural error before a bundle ever loads. A rule that cannot be evaluated
+    is not a hit and not an absence of one, and the two alternatives are both
+    worse: counting the failure as a match turns machine load into a BLOCK,
+    and refusing the whole proposal hands one bad pattern in one rule the power
+    to stop every action the kernel governs. So the rule is left out of the
+    decision and the skip is reported in the verdict as ``AG-PRD-001`` -- the
+    one thing that must not happen is the decision coming out as if the bundle
+    had one fewer rule in it and nobody being told.
     """
     proposal_json = proposal.model_dump(mode="json")
     derived_json = derived.model_dump(mode="json")
-    out: list[Rule] = []
+    matched: list[Rule] = []
+    skipped: list[tuple[str, str]] = []
     for rule in sorted(bundle.active_rules(), key=lambda r: r.rule_id):
         if not _applies(rule, proposal):
             continue
-        if rule.when is None or evaluate_predicate(rule.when, proposal_json, derived_json):
-            out.append(rule)
-    return out
+        if rule.when is None:
+            matched.append(rule)
+            continue
+        try:
+            fired = evaluate_predicate(rule.when, proposal_json, derived_json)
+        except PredicateError as exc:
+            skipped.append((rule.rule_id, str(exc)))
+            continue
+        if fired:
+            matched.append(rule)
+    return matched, skipped
+
+
+def matching_rules(proposal: ActionProposal, bundle: PolicyBundle, derived: Derived) -> list[Rule]:
+    """Active rules whose ``applies_to`` and ``when`` both hold.
+
+    A rule whose predicate could not be evaluated is not here and is not an
+    error either; see :func:`_match`, which is what reports it.
+    """
+    return _match(proposal, bundle, derived)[0]
+
+
+def _skipped_message(skipped: list[tuple[str, str]]) -> str:
+    """One line naming every rule that was skipped, and why.
+
+    One line because an SDK explanation and a hook's `reason` are single-line
+    strings, and one hit rather than one per rule because `hits` is a list of
+    rule ids and repeating the same id would make a verdict that reads as if
+    ``AG-PRD-001`` had fired twice.
+    """
+    detail = "; ".join(f"{rule_id}: {_clip(reason)}" for rule_id, reason in skipped)
+    if len(skipped) == 1:
+        return (
+            "A rule could not be evaluated and was skipped, neither allowing nor "
+            f"blocking this action: {detail}"
+        )
+    return (
+        f"{len(skipped)} rules could not be evaluated and were skipped, neither allowing "
+        f"nor blocking this action: {detail}"
+    )
+
+
+def _clip(reason: str) -> str:
+    flat = " ".join(reason.split())
+    return flat if len(flat) <= _MAX_REASON else flat[:_MAX_REASON] + "..."
 
 
 def evaluate(
@@ -197,7 +282,8 @@ def evaluate(
     if derived.mandate.present and not derived.mandate.within:
         return _synthetic_verdict(proposal, "AG-IDN-006", bundle, derived)
 
-    hits = [_rule_hit(rule) for rule in matching_rules(proposal, bundle, derived)]
+    matched, skipped = _match(proposal, bundle, derived)
+    hits = [_rule_hit(rule) for rule in matched]
     enforce_hits = [h for h in hits if h.mode is Mode.enforce]
 
     decision = _max_decision(enforce_hits, bundle.default_verdict)
@@ -211,6 +297,18 @@ def evaluate(
             SYNTHETIC_RULES["AG-DEF-001"]
             .hit()
             .model_copy(update={"verdict": bundle.default_verdict})
+        )
+
+    if skipped:
+        # Appended last, deliberately. This hit says a rule was *missing* from
+        # the decision, so letting it take part in making one would be a
+        # different claim -- and `default_applied` stays as computed, because
+        # the default really was applied. `AG-PRD-001` beside `AG-DEF-001` is
+        # the honest reading: no rule matched, and one rule never got to say.
+        hits.append(
+            SYNTHETIC_RULES[PREDICATE_FAILED]
+            .hit()
+            .model_copy(update={"message": _skipped_message(skipped)})
         )
 
     return Verdict(
@@ -263,6 +361,13 @@ def explain(
             for reason, points in blast_radius.explain(proposal)
         ],
         "rules_in_scope": considered,
+        # Each rule that `applies_to` selected and whose `when` then failed to
+        # evaluate, with the reason unclipped: this view is read by an operator
+        # on a terminal, not written to an evidence record.
+        "rules_skipped": [
+            {"rule_id": rule_id, "reason": reason}
+            for rule_id, reason in _match(proposal, bundle, derived)[1]
+        ],
         "policy_hash": bundle.hash,
         "rules_total": len(bundle.rules),
         "rules_active": len(bundle.active_rules()),

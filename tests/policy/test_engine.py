@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Final
 
 import pytest
 import yaml
 
-from qed.core.policy.engine import approval_spec, evaluate, explain
+from qed.core.policy.engine import PREDICATE_FAILED, approval_spec, evaluate, explain
 from qed.core.policy.loader import load_bundle
 from qed.core.policy.model import PolicyBundle
 from qed.core.schemas import (
@@ -17,6 +18,7 @@ from qed.core.schemas import (
     Decision,
     EvalContext,
     Mode,
+    RuleHit,
     Verdict,
 )
 from tests.conftest import NOW, make_proposal
@@ -188,6 +190,112 @@ class TestSyntheticShortCircuits:
         bundle = bundle_of(tmp_path, BLOCKER)
         budget = BudgetState(token_jti="j", budget=Budget(steps=1), steps_used=1)
         assert run(make_proposal(), bundle, budget).policy_hash == bundle.hash
+
+
+class TestARuleThatCannotBeEvaluated:
+    """A `when` that raises skips its rule and is recorded (ADR-0016).
+
+    The case that put this here: a masking rule's regex spent its budget on a
+    loaded CI runner. A rule that cannot be evaluated is not an allow and not a
+    block, and until this was decided it was neither recorded -- the verdict
+    came out as though the bundle had one fewer rule in it.
+
+    `(a|a)*$` is the pattern, measured rather than assumed: of six textbook
+    catastrophic patterns the `regex` module optimises five away, and this is
+    the one that still times out. See `tests/policy/test_predicates.py`.
+    """
+
+    CATASTROPHIC: Final = {
+        "rule_id": "TT-RDS-001",
+        "name": "A rule nobody can evaluate",
+        "message": "No.",
+        "verdict": "BLOCK",
+        "when": {"field": "action.name", "regex": "(a|a)*$"},
+    }
+
+    @pytest.fixture
+    def defeats_it(self) -> ActionProposal:
+        return make_proposal({"action": {"name": "a" * 30 + "b"}})
+
+    def _hit(self, verdict: Verdict) -> RuleHit:
+        return next(h for h in verdict.hits if h.rule_id == PREDICATE_FAILED)
+
+    def test_the_rule_is_skipped_rather_than_fired(self, tmp_path: Path, defeats_it) -> None:
+        verdict = run(defeats_it, bundle_of(tmp_path, self.CATASTROPHIC))
+        assert verdict.decision is Decision.ALLOW
+        assert "TT-RDS-001" not in {h.rule_id for h in verdict.hits}
+
+    def test_the_skip_is_recorded_with_the_rule_and_the_reason(
+        self, tmp_path: Path, defeats_it
+    ) -> None:
+        """The reason, not just the fact: it is what separates a pattern that
+        is catastrophic from a machine that was busy, and an operator reading
+        the chain six weeks later has nothing else to go on."""
+        hit = self._hit(run(defeats_it, bundle_of(tmp_path, self.CATASTROPHIC)))
+        assert "TT-RDS-001" in hit.message
+        assert "timed out" in hit.message
+        assert "\n" not in hit.message
+        assert hit.fix is not None
+
+    def test_the_skip_hit_does_not_decide(self, tmp_path: Path, defeats_it) -> None:
+        """`mode: shadow` and `ALLOW`, so that anything recomputing the decision
+        from the enforce-mode hits still gets the decision the kernel gave."""
+        hit = self._hit(run(defeats_it, bundle_of(tmp_path, self.CATASTROPHIC)))
+        assert hit.mode is Mode.shadow
+        assert hit.verdict is Decision.ALLOW
+
+    def test_the_other_rules_still_decide(self, tmp_path: Path) -> None:
+        """One unevaluable rule must not take the rest of the bundle with it."""
+        proposal = make_proposal(
+            {"action": {"name": "a" * 30 + "b"}, "context": {"environment": "prod"}}
+        )
+        verdict = run(proposal, bundle_of(tmp_path, self.CATASTROPHIC, BLOCKER))
+        assert verdict.decision is Decision.BLOCK
+        assert {h.rule_id for h in verdict.hits} == {"TT-BLK-001", PREDICATE_FAILED}
+
+    def test_the_bundle_default_is_still_what_applied(self, tmp_path: Path, defeats_it) -> None:
+        """Both hits, and both true: no rule matched, and one never got to say."""
+        verdict = run(defeats_it, bundle_of(tmp_path, self.CATASTROPHIC))
+        assert verdict.default_applied
+        assert {h.rule_id for h in verdict.hits} == {"AG-DEF-001", PREDICATE_FAILED}
+
+    def test_a_configured_default_is_not_overridden_by_the_skip(
+        self, tmp_path: Path, defeats_it
+    ) -> None:
+        """The skip hit is appended after the decision. An instance configured
+        to require approval by default must not come out ALLOW because an
+        ALLOW-shaped record was appended to its hits."""
+        bundle = bundle_of(tmp_path, self.CATASTROPHIC, default_verdict=Decision.REQUIRE_APPROVAL)
+        verdict = run(defeats_it, bundle)
+        assert verdict.decision is Decision.REQUIRE_APPROVAL
+        assert verdict.would_decision is Decision.REQUIRE_APPROVAL
+
+    def test_nothing_is_recorded_when_every_predicate_evaluates(self, tmp_path: Path, prod) -> None:
+        verdict = run(prod, bundle_of(tmp_path, BLOCKER))
+        assert PREDICATE_FAILED not in {h.rule_id for h in verdict.hits}
+
+    def test_explain_names_the_skipped_rule(self, tmp_path: Path, defeats_it) -> None:
+        report = explain(
+            defeats_it,
+            bundle_of(tmp_path, self.CATASTROPHIC),
+            BudgetState(token_jti="j"),
+            EvalContext(now=NOW),
+        )
+        skipped = report["rules_skipped"]
+        assert isinstance(skipped, list)
+        assert [entry["rule_id"] for entry in skipped] == ["TT-RDS-001"]
+
+    def test_the_recorded_reason_is_bounded(self, tmp_path: Path) -> None:
+        """A rule's own regex ends up in an evidence record, so the text that
+        carries it is clipped rather than however long the author made it."""
+        # The catastrophic branch first, so the pattern still times out; the
+        # second branch is there only to make the text long.
+        long_pattern = "(a|a)*$|" + "x" * 400
+        rule = {**self.CATASTROPHIC, "when": {"field": "action.name", "regex": long_pattern}}
+        verdict = run(
+            make_proposal({"action": {"name": "a" * 30 + "b"}}), bundle_of(tmp_path, rule)
+        )
+        assert len(self._hit(verdict).message) < 300
 
 
 def test_approval_spec_picks_the_most_severe_rule(tmp_path: Path, prod) -> None:

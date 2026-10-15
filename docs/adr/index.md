@@ -45,3 +45,5 @@ they are the ones with teeth.
 | [0012](0012-a-pack-bundle-is-one-signed-envelope.md) | A pack bundle is one signed envelope, and an import cannot stop the kernel |
 | [0013](0013-the-anchor-client-sends-six-values.md) | The anchor client sends six values, and the operator names the log |
 | [0014](0014-qed-governs-its-own-admin-operations.md) | QED governs its own admin operations, off by default, with a loud break-glass |
+| [0015](0015-the-evidence-format-is-frozen-against-a-fixture-not-a-promise.md) | The evidence format is frozen against a committed fixture, not a promise |
+| [0016](0016-an-unevaluable-rule-is-skipped-and-recorded.md) | A rule that cannot be evaluated is skipped, and the skip is recorded |

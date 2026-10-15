@@ -1,6 +1,7 @@
 """``GET /metrics`` — Prometheus exposition (SPEC §18).
 
-The nine metrics SPEC §18 names, and nothing else. Each is declared here, next
+The metrics SPEC §18 names, plus the counters its ratios are derived from and
+nothing more speculative than that. Each is declared here, next
 to the code that reads it, rather than registered at import time somewhere
 else: a metric whose definition lives apart from its use is one that outlives
 the thing it measured.
@@ -75,6 +76,10 @@ METRICS: Final[dict[str, tuple[str, str]]] = {
     "qed_decisions_no_rule_total": (
         "counter",
         "Decisions that matched no rule and fell through to the default verdict.",
+    ),
+    "qed_decisions_rule_skipped_total": (
+        "counter",
+        "Decisions taken with a rule skipped because its predicate could not be evaluated.",
     ),
 }
 

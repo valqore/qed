@@ -18,6 +18,7 @@ made.
 
 from __future__ import annotations
 
+from qed.core.policy.engine import PREDICATE_FAILED
 from qed.core.schemas import ActionProposal
 from qed.infra.metrics import MetricsRegistry
 from qed.infra.siem import SiemShipper
@@ -68,6 +69,15 @@ def record_decision(
     registry.increment("qed_decisions_observed_total")
     if outcome.verdict.default_applied:
         registry.increment("qed_decisions_no_rule_total")
+
+    # A rule that could not be evaluated was skipped (ADR-0016), so this
+    # decision was taken with less policy than the bundle contains. It is in
+    # the evidence record either way; the counter is here because a hole in the
+    # policy is something an operator should be alerted to rather than find
+    # later in a chain. One increment per decision, not per rule: how many
+    # rules were skipped is in the hit's message.
+    if any(hit.rule_id == PREDICATE_FAILED for hit in outcome.verdict.hits):
+        registry.increment("qed_decisions_rule_skipped_total")
 
     if siem is not None:
         for appended in outcome.records:

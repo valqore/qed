@@ -158,3 +158,4 @@ nav:
       - ADR-0013 The anchor client sends six values: adr/0013-the-anchor-client-sends-six-values.md
       - ADR-0014 QED governs its own admin operations: adr/0014-qed-governs-its-own-admin-operations.md
       - ADR-0015 The evidence format is frozen against a fixture: adr/0015-the-evidence-format-is-frozen-against-a-fixture-not-a-promise.md
+      - ADR-0016 An unevaluable rule is skipped and recorded: adr/0016-an-unevaluable-rule-is-skipped-and-recorded.md

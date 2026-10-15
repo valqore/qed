@@ -6,6 +6,36 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Changed — a rule that cannot be evaluated is skipped, and the skip is recorded
+
+`PredicateError` was caught nowhere in `qed/`. The guard that bounds a
+catastrophic regex (`REGEX_TIMEOUT`, widened to 1 s in the previous entry)
+raises at evaluation time, and that exception propagated straight out of
+`evaluate` — so a timing-out pattern in one rule produced no decision at all,
+and the adapter's own fail-open or fail-closed behaviour decided the action
+instead. Nothing in the evidence chain said a rule had not run.
+
+A `when` that raises now **skips its rule**, and the verdict carries a synthetic
+`AG-PRD-001` hit naming every skipped rule and the reason. The hit is
+`mode: shadow` with verdict `ALLOW`, appended after the decision is computed, so
+anything recomputing the decision from the enforce-mode hits still arrives at
+the decision the kernel gave; `default_applied` is untouched, which means a
+verdict can carry both `AG-DEF-001` and `AG-PRD-001` — no rule matched, and one
+rule never got to say. `qed_decisions_rule_skipped_total` counts the decision
+and `qed policy explain` lists the rules under `rules_skipped`.
+
+Both alternatives are worse and ADR-0016 says why. Counting the failure as a
+match is fail-closed and tempting, but the failure that actually happened was
+machine load: it would turn a busy runner into a BLOCK of work the policy
+allows, and a `BLOCK` rule and an `ALLOW` rule would move in opposite
+directions for the same cause. Refusing the proposal — what the code did by
+accident — hands one bad pattern in one rule a denial of service against every
+action the kernel governs.
+
+SPEC §4.4, §4.5 and §4.6 record the behaviour; §18 gains the counter. The
+unevaluable rule costs its own coverage and nothing else, and the cost is
+visible in the chain rather than inferred later from an absence.
+
 ## [1.0.0] — 2026-10-12
 
 **The evidence format is frozen.** That is what the major version means here,
