@@ -85,7 +85,13 @@ than the only option.
 
 The same list now covers the arm64 build, which had no mirror handling at all
 and fell through to the Dockerfile's Docker Hub default — the registry with
-the smallest anonymous allowance of the three. The base image is also pulled
+the smallest anonymous allowance of the three. It resolves the **foreign**
+manifest, not the host's: the first attempt resolved against the host on the
+reasoning that a quota belongs to the registry rather than to the manifest
+asked for, and CI disproved it within the hour. ECR Public's limit is on
+bytes, the amd64 pull spent what was left, and the arm64 build failed 429
+beside an amd64 build that had just succeeded. Pulling the foreign manifest
+is what lets it fall through to the next registry at all. The base image is also pulled
 in its own step before the build, because `docker build` reports a throttled
 registry and a broken Dockerfile identically: as a failed build, against this
 commit.

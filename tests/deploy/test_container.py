@@ -207,6 +207,82 @@ class TestWhereTheBaseImageComesFrom:
         assert candidates == BUILDER_MIRRORS
         assert len(candidates) == len(set(candidates))
 
+    def test_a_platform_is_asked_for_when_one_is_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The arm64 build must pull the arm64 manifest, not the host's.
+
+        Resolving against the host and then building for another architecture
+        looks like it works -- the pull succeeds -- and leaves `docker buildx`
+        to fetch the foreign manifest itself, from the one registry, with no
+        fallback. That shipped, and ECR Public's byte quota failed the arm64
+        build an hour later while the amd64 build beside it passed.
+        """
+        seen: list[list[str]] = []
+
+        def record(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+            seen.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr("tests.deploy.test_container._probe", record)
+        image, _ = _pull_first_available(("example/thing:1",), 10, platform="linux/arm64")
+        assert image == "example/thing:1"
+        assert seen == [["docker", "pull", "--platform", "linux/arm64", "example/thing:1"]]
+
+    def test_no_platform_is_asked_for_when_none_is_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--platform` on the host build would pin it to whatever this
+        machine is, which is the opposite of what a default should do."""
+        seen: list[list[str]] = []
+
+        def record(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+            seen.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr("tests.deploy.test_container._probe", record)
+        _pull_first_available(("example/thing:1",), 10)
+        assert seen == [["docker", "pull", "example/thing:1"]]
+
+    def test_the_next_registry_is_tried_when_the_first_refuses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A 429 from one host must reach the next host, not a retry of the
+        same one -- the quotas are per source address and a runner cannot
+        change its address."""
+        refused = subprocess.CompletedProcess(
+            [], 1, "", "429 Too Many Requests: toomanyrequests: Data limit exceeded"
+        )
+        attempts: list[str] = []
+
+        def record(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+            attempts.append(argv[-1])
+            if argv[-1] == "first/one:1":
+                return refused
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr("tests.deploy.test_container._probe", record)
+        image, why_not = _pull_first_available(("first/one:1", "second/two:1"), 10)
+        assert image == "second/two:1"
+        assert why_not == ""
+        assert attempts == ["first/one:1", "second/two:1"]
+
+    def test_every_refusal_is_reported_when_none_answer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The failure message has to name what each registry said. A test
+        that fails with "could not pull" sends whoever reads CI to reproduce
+        an environment they do not have."""
+        monkeypatch.setattr(
+            "tests.deploy.test_container._probe",
+            lambda argv, timeout: subprocess.CompletedProcess(argv, 1, "", "429 from " + argv[-1]),
+        )
+        monkeypatch.setattr("tests.deploy.test_container.PULL_BACKOFF_S", 0.0)
+        image, why_not = _pull_first_available(("first/one:1", "second/two:1"), 10)
+        assert image is None
+        assert "first/one:1" in why_not
+        assert "second/two:1" in why_not
+
     def test_no_pin_means_the_mirror_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("QED_BUILDER_IMAGE", raising=False)
         assert _builder_candidates() == BUILDER_MIRRORS
@@ -576,15 +652,22 @@ def emulation_available() -> tuple[bool, str]:
 def foreign_image(tmp_path_factory: pytest.TempPathFactory) -> str:
     tag = "qed-test:foreign"
     log = tmp_path_factory.mktemp("docker-foreign") / "build.log"
-    # The same mirror list, for the same reason. Resolved against the host
-    # architecture rather than this one: a quota is a property of the registry
-    # and the source address, not of the manifest being asked for, so a
-    # registry that served the amd64 variant a moment ago will serve the arm64
-    # one. Without this the foreign build fell through to the Dockerfile's own
-    # default -- Docker Hub -- which has the smallest anonymous allowance of
-    # the three.
-    base, why_not = _pull_first_available(_builder_candidates(), PULL_TIMEOUT_S)
-    assert base is not None, f"no registry would serve the builder base image: {why_not}"
+    # The same mirror list, resolved **for the architecture this actually
+    # builds**. The first version resolved against the host, on the reasoning
+    # that a quota belongs to the registry and the source address rather than
+    # to the manifest being asked for -- so a registry that had just served
+    # amd64 would serve arm64 too. That was wrong, and CI said so within the
+    # hour: ECR Public's limit is on bytes transferred, the amd64 pull spent
+    # what was left of it, and the arm64 manifest came back 429 while the
+    # host build beside it had succeeded. Pulling the foreign manifest here is
+    # what lets this fall through to the next registry, which is the whole
+    # point of having a list.
+    base, why_not = _pull_first_available(
+        _builder_candidates(), PULL_TIMEOUT_S, platform=FOREIGN_PLATFORM
+    )
+    assert base is not None, (
+        f"no registry would serve the {FOREIGN_PLATFORM} builder base image: {why_not}"
+    )
     with log.open("wb") as sink:
         build = subprocess.run(
             [

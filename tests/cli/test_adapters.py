@@ -353,9 +353,7 @@ class TestTheSecretItPrintsIsTheSecretTheServerWants:
         name = export.split("export ", 1)[1].split("=", 1)[0]
         monkeypatch.setenv(name, secret)
 
-        app_under_test = create_app(
-            directory=instance, config_path=instance / "qed.yaml"
-        )
+        app_under_test = create_app(directory=instance, config_path=instance / "qed.yaml")
         with TestClient(app_under_test) as client:
             assert client.get("/readyz").status_code == 200
             signer = Signer(client, adapter_id="mcp-proxy-ci", secret=secret)
@@ -377,9 +375,7 @@ class TestTheSecretItPrintsIsTheSecretTheServerWants:
         secret = secret_from(result.output)
         monkeypatch.setenv("QED_ADAPTER_SECRET_MCP_PROXY_CI", secret)
 
-        app_under_test = create_app(
-            directory=instance, config_path=instance / "qed.yaml"
-        )
+        app_under_test = create_app(directory=instance, config_path=instance / "qed.yaml")
         with TestClient(app_under_test) as client:
             signer = Signer(client, adapter_id="mcp-proxy-ci", secret="w" * 44)
             assert signer.post("/v1/proposals", BASE_PROPOSAL).status_code == 401
@@ -400,15 +396,11 @@ class TestTheSecretItPrintsIsTheSecretTheServerWants:
         old_secret = secret_from(first.output)
         monkeypatch.setenv("QED_ADAPTER_SECRET_MCP_PROXY_CI", old_secret)
 
-        second = runner.invoke(
-            app, ["adapters", "rotate", "mcp-proxy-ci", "--dir", str(instance)]
-        )
+        second = runner.invoke(app, ["adapters", "rotate", "mcp-proxy-ci", "--dir", str(instance)])
         new_secret = secret_from(second.output)
         monkeypatch.setenv("QED_ADAPTER_SECRET_MCP_PROXY_CI_V2", new_secret)
 
-        app_under_test = create_app(
-            directory=instance, config_path=instance / "qed.yaml"
-        )
+        app_under_test = create_app(directory=instance, config_path=instance / "qed.yaml")
         with TestClient(app_under_test) as client:
             for index, secret in enumerate((new_secret, old_secret)):
                 signer = Signer(client, adapter_id="mcp-proxy-ci", secret=secret)
