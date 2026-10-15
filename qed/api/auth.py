@@ -95,25 +95,43 @@ class AdapterAuth:
     def __init__(self, config: QedConfig, *, dev: bool = False) -> None:
         self.dev = dev
         self.max_skew = timedelta(seconds=config.api.max_clock_skew_seconds)
-        self._secrets: dict[str, str] = {}
+        #: Usually one secret per adapter. Two while a rotation is in flight:
+        #: a shared secret cannot change on two machines at the same instant,
+        #: and refusing the old one before the fleet has restarted turns a
+        #: rotation into an outage (AG-IDN-005 is a blocked action under
+        #: `fail: closed`). `qed adapters rotate --finish` drops the old one.
+        self._secrets: dict[str, tuple[str, ...]] = {}
         self._problems: list[str] = []
         for entry in config.registered_adapters:
             self._load(entry)
 
     def _load(self, entry: AdapterCredential) -> None:
-        secret = os.environ.get(entry.secret_env)
-        if not secret:
-            self._problems.append(
-                f"adapter {entry.adapter_id} names {entry.secret_env}, which is not set"
-            )
+        secret = self._usable(entry, entry.secret_env, required=True)
+        if secret is None:
             return
+        accepted = [secret]
+        if entry.previous_secret_env:
+            # Absent is fine and is the ordinary end of a rotation: the
+            # operator has removed the variable and not yet run `--finish`.
+            # Present and unusable is not, because it means the overlap this
+            # entry claims to provide does not exist.
+            previous = self._usable(entry, entry.previous_secret_env, required=False)
+            if previous is not None and previous != secret:
+                accepted.append(previous)
+        self._secrets[entry.adapter_id] = tuple(accepted)
+
+    def _usable(self, entry: AdapterCredential, name: str, *, required: bool) -> str | None:
+        secret = os.environ.get(name)
+        if not secret:
+            if required:
+                self._problems.append(f"adapter {entry.adapter_id} names {name}, which is not set")
+            return None
         if len(secret) < MIN_SECRET_LENGTH:
             self._problems.append(
-                f"adapter {entry.adapter_id}: {entry.secret_env} is shorter than "
-                f"{MIN_SECRET_LENGTH} characters"
+                f"adapter {entry.adapter_id}: {name} is shorter than {MIN_SECRET_LENGTH} characters"
             )
-            return
-        self._secrets[entry.adapter_id] = secret
+            return None
+        return secret
 
     @property
     def mode(self) -> AuthMode:
@@ -132,8 +150,8 @@ class AdapterAuth:
         return AuthMode(
             kind="unconfigured",
             reason=(
-                f"{detail}. Register one under `adapters:` in qed.yaml with a `secret_env`, "
-                "or start with --dev for local work."
+                f"{detail}. Register one with `qed adapters add <id>`, which writes the "
+                "entry and prints a secret, or start with --dev for local work."
             ),
         )
 
@@ -171,8 +189,8 @@ class AdapterAuth:
             )
         if not claimed:
             raise self._unauthenticated(f"the {HEADER_ADAPTER} header is missing")
-        secret = self._secrets.get(claimed)
-        if secret is None:
+        accepted = self._secrets.get(claimed)
+        if accepted is None:
             # Same message either way: which adapter ids exist is not something
             # an unauthenticated caller gets to enumerate (AG-IDN-005).
             raise self._unauthenticated("unknown adapter or bad signature")
@@ -186,11 +204,18 @@ class AdapterAuth:
             )
 
         self._check_skew(timestamp, now)
-        expected = sign(
-            secret,
-            canonical_string(method=method, path=path, timestamp=timestamp, nonce=nonce, body=body),
+        canonical = canonical_string(
+            method=method, path=path, timestamp=timestamp, nonce=nonce, body=body
         )
-        if not hmac.compare_digest(expected, signature):
+        # Usually one secret; two while a rotation is in flight. Each is
+        # compared with `compare_digest` rather than `==`, so a wrong
+        # signature takes the same time whichever byte it first differs at.
+        # Stopping at the one that matches is fine: it reveals only which of
+        # this adapter's own secrets was used, to a caller who has already
+        # produced a valid signature with it.
+        if not any(
+            hmac.compare_digest(sign(candidate, canonical), signature) for candidate in accepted
+        ):
             raise self._unauthenticated("unknown adapter or bad signature")
         return claimed
 

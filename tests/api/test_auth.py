@@ -206,6 +206,124 @@ class TestConfiguration:
         assert [a.adapter_id for a in load_config(nested).config.registered_adapters] == ["a"]
 
 
+class TestARotationInFlight:
+    """Both secrets verify until `qed adapters rotate --finish`.
+
+    A shared secret cannot be replaced on the instance and on every adapter at
+    the same instant. Without an overlap, every request signed with the old
+    one during the rollout is refused as `AG-IDN-005` -- an unknown adapter --
+    and under `fail: closed` a refused request is a blocked action. So the
+    rotation window is the feature, and these are the tests that say it works:
+    without them `previous_secret_env` is a config key that parses.
+    """
+
+    PREVIOUS_ENV = "QED_TEST_PREVIOUS_SECRET"
+    PREVIOUS_SECRET = "p" * 44
+
+    @pytest.fixture(autouse=True)
+    def _current_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests build their own app, so the `qed_config` fixture that
+        normally sets the current secret is not in play."""
+        monkeypatch.setenv(SECRET_ENV, SECRET)
+
+    def rotating_config(self, path: Path) -> Path:
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "adapters": [
+                        {
+                            "adapter_id": ADAPTER_ID,
+                            "secret_env": SECRET_ENV,
+                            "previous_secret_env": self.PREVIOUS_ENV,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_the_new_secret_is_accepted(
+        self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(self.PREVIOUS_ENV, self.PREVIOUS_SECRET)
+        config = self.rotating_config(tmp_path / "qed.yaml")
+        with TestClient(create_app(directory=api_dir, config_path=config)) as client:
+            assert Signer(client).post("/v1/proposals", BASE_PROPOSAL).status_code == 200
+
+    def test_the_previous_secret_is_also_accepted(
+        self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The adapter that has not been restarted yet. This passing is the
+        difference between a rotation and an outage."""
+        monkeypatch.setenv(self.PREVIOUS_ENV, self.PREVIOUS_SECRET)
+        config = self.rotating_config(tmp_path / "qed.yaml")
+        with TestClient(create_app(directory=api_dir, config_path=config)) as client:
+            signer = Signer(client, secret=self.PREVIOUS_SECRET)
+            assert signer.post("/v1/proposals", BASE_PROPOSAL).status_code == 200
+
+    def test_a_third_secret_is_still_refused(
+        self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An overlap that accepted anything would be worse than no rotation
+        at all."""
+        monkeypatch.setenv(self.PREVIOUS_ENV, self.PREVIOUS_SECRET)
+        config = self.rotating_config(tmp_path / "qed.yaml")
+        with TestClient(create_app(directory=api_dir, config_path=config)) as client:
+            signer = Signer(client, secret="z" * 44)
+            assert signer.post("/v1/proposals", BASE_PROPOSAL).status_code == 401
+
+    def test_finishing_the_rotation_stops_accepting_the_old_one(
+        self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--finish` removes `previous_secret_env` from the config, and the
+        old secret must stop working -- otherwise the rotation never actually
+        retired anything."""
+        monkeypatch.setenv(self.PREVIOUS_ENV, self.PREVIOUS_SECRET)
+        finished = tmp_path / "finished.yaml"
+        finished.write_text(
+            yaml.safe_dump({"adapters": [{"adapter_id": ADAPTER_ID, "secret_env": SECRET_ENV}]}),
+            encoding="utf-8",
+        )
+        with TestClient(create_app(directory=api_dir, config_path=finished)) as client:
+            signer = Signer(client, secret=self.PREVIOUS_SECRET)
+            assert signer.post("/v1/proposals", BASE_PROPOSAL).status_code == 401
+
+    def test_an_unset_previous_variable_is_not_a_startup_problem(
+        self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ordinary end of a rotation: the operator has removed the old
+        variable and not yet run `--finish`. Treating that as a configuration
+        error would make `/readyz` fail for a correctly rotated instance."""
+        monkeypatch.delenv(self.PREVIOUS_ENV, raising=False)
+        config = self.rotating_config(tmp_path / "qed.yaml")
+        with TestClient(create_app(directory=api_dir, config_path=config)) as client:
+            assert client.get("/readyz").status_code == 200
+            assert Signer(client).post("/v1/proposals", BASE_PROPOSAL).status_code == 200
+
+    def test_an_unusable_previous_secret_does_not_take_the_instance_down(
+        self, api_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stale rotation variable must not stop the kernel serving.
+
+        The current secret is fine, so the instance can authenticate every
+        adapter that has been restarted; what is missing is only the grace
+        for the ones that have not. Failing `/readyz` here would turn a
+        half-finished rotation into an outage -- which is the exact thing the
+        overlap exists to prevent, arriving by a different route.
+
+        It is not silent either: `qed adapters list` reports the overlap as
+        unusable, which is where an operator mid-rotation is looking.
+        """
+        monkeypatch.setenv(self.PREVIOUS_ENV, "short")
+        config = self.rotating_config(tmp_path / "qed.yaml")
+        with TestClient(create_app(directory=api_dir, config_path=config)) as client:
+            assert client.get("/readyz").status_code == 200
+            assert Signer(client).post("/v1/proposals", BASE_PROPOSAL).status_code == 200
+            stale = Signer(client, secret="short")
+            assert stale.post("/v1/proposals", BASE_PROPOSAL).status_code == 401
+
+
 class TestTheCanonicalString:
     def test_both_sides_build_the_same_bytes(self) -> None:
         canonical = canonical_string(

@@ -271,7 +271,15 @@ curl -s localhost:8710/readyz | jq
 ```
 
 `/readyz` answers 503 until there is a signing key and a way to authenticate
-adapters (SPEC §17). Adapters sign each request; see `docs/api.md`.
+adapters (SPEC §17). Without `--dev`, register one first:
+
+```bash
+qed adapters add mcp-proxy-ci --dir .qed    # prints the secret once
+qed adapters list --dir .qed                # is the variable actually set?
+```
+
+Adapters sign each request; see `docs/api.md` for the signature and for how
+`qed adapters rotate` keeps the old secret working while a fleet restarts.
 
 ### Put it in your pipeline
 

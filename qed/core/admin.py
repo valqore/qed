@@ -77,6 +77,12 @@ class AdminOperation(StrEnum):
     keys_rotate = "keys_rotate"
     packs_import = "packs_import"
     policy_reload = "policy_reload"
+    #: Registering an adapter grants an identity the right to submit proposals
+    #: to this kernel, which is the most consequential thing an operator can do
+    #: to it short of editing the policy. SPEC §17 names "adapter add" in the
+    #: list; it is here now that the command exists.
+    adapters_add = "adapters_add"
+    adapters_rotate = "adapters_rotate"
 
 
 #: What an `admin_action` payload calls the approval it spent. One constant,

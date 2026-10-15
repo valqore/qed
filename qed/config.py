@@ -206,14 +206,24 @@ class AdapterCredential(Frozen):
 
     The secret is never in ``qed.yaml``. ``secret_env`` names the environment
     variable holding it, so the config file stays safe to commit and the secret
-    stays out of the process table and out of any backup of the repo. SPEC §12.6
-    describes a ``qed adapters add`` command with per-adapter rotation. It is
-    not built: registration is this list, and rotation is editing it.
+    stays out of the process table and out of any backup of the repo.
+    ``qed adapters add|list|rotate`` (SPEC §12.6) maintains this list.
+
+    ``previous_secret_env`` is the overlap a rotation needs. A shared secret
+    cannot be changed on two machines at the same instant: between the moment
+    the instance starts accepting the new secret and the moment the last
+    adapter is restarted with it, every request signed with the old one is
+    refused as ``AG-IDN-005`` -- an unknown adapter, which on ``fail: closed``
+    is a blocked action. So a rotation names the old variable here, both are
+    accepted while it is set, and ``qed adapters rotate --finish`` removes it
+    once the fleet has caught up. A rotation with no overlap is an outage with
+    a changelog entry.
     """
 
     adapter_id: str
     secret_env: str
     kind: str = "mcp"
+    previous_secret_env: str = ""
 
 
 class RateLimitConfig(Frozen):
@@ -343,7 +353,7 @@ class AdminConfig(Frozen):
     admin:
       self_governed: true
       approvers: ["group:platform-oncall"]
-      operations: [keys_rotate, packs_import]
+      operations: [keys_rotate, packs_import, adapters_add, adapters_rotate]
       timeout: 24h
     ```
 
@@ -365,6 +375,10 @@ class AdminConfig(Frozen):
     #: refused: a gate nobody can open is not a gate, it is an outage waiting
     #: for the first rotation.
     approvers: list[str] = Field(default_factory=list)
+    #: The default stays `keys_rotate` and `packs_import`: widening it would
+    #: turn self-governance on for operations an existing instance was not
+    #: gating yesterday, on upgrade, with no edit to its config. An operator
+    #: who wants `adapters_add` gated adds the name.
     operations: list[str] = Field(default_factory=lambda: ["keys_rotate", "packs_import"])
     #: How long a request stays open. Longer than an agent's approval by
     #: default: nobody rotates a key in the ninety seconds an agent waits.

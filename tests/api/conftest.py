@@ -38,9 +38,14 @@ SECRET = "s" * 48
 class Signer:
     """Signs requests the way an adapter does, then sends them."""
 
-    def __init__(self, client: TestClient, *, adapter_id: str = ADAPTER_ID) -> None:
+    def __init__(
+        self, client: TestClient, *, adapter_id: str = ADAPTER_ID, secret: str = SECRET
+    ) -> None:
         self.client = client
         self.adapter_id = adapter_id
+        # Overridable so a test can sign as the adapter that has not been
+        # restarted yet, which is the whole of a rotation overlap.
+        self.secret = secret
 
     def headers(self, method: str, path: str, body: bytes, *, nonce: str = "") -> dict[str, str]:
         timestamp = rfc3339_ms(utcnow())
@@ -51,7 +56,7 @@ class Signer:
             HEADER_ADAPTER: self.adapter_id,
             HEADER_TIMESTAMP: timestamp,
             HEADER_NONCE: nonce,
-            HEADER_SIGNATURE: sign(SECRET, canonical),
+            HEADER_SIGNATURE: sign(self.secret, canonical),
         }
 
     def post(self, path: str, payload: object, **kwargs: Any) -> Any:

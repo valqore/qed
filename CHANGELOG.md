@@ -6,6 +6,66 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `qed adapters add|list|rotate`
+
+SPEC §12.6 has specified this command since week 1, SPEC §17 lists "adapter
+add" among the operations qed should govern about itself, and `qed check
+--server` tells an operator to *"register it on the instance first with `qed
+adapters add`"* — pointing at a command that did not exist. Registration was
+hand-editing a list in `qed.yaml` and inventing a shared secret, which is the
+first thing anybody does with this product after `qed demo` and the one step
+with no feedback of any kind until an adapter is refused as `AG-IDN-005`.
+
+`add` writes the entry and generates the secret. The secret is printed once
+and stored nowhere: `qed.yaml` carries `secret_env`, the *name* of the
+environment variable, so the config file stays safe to commit, and nothing
+puts the value in the evidence chain. There is no command that will show it
+again. A generated 43-character secret also removes the failure where
+`MIN_SECRET_LENGTH` rejects, at server startup, the password somebody typed
+into the config an hour earlier.
+
+`list` answers the question that previously required starting the server and
+reading `/v1/status`: for each registered adapter, whether its variable is
+actually set and long enough. Never the value.
+
+`rotate` has an overlap, and the overlap is the point. A shared secret cannot
+be replaced on the instance and on every adapter at the same instant; in
+between, requests signed with the old one are refused as an unknown adapter,
+and under `fail: closed` a refused request is a blocked action. So a rotation
+moves the secret to a new variable and records the old one as
+`previous_secret_env`; both verify until `qed adapters rotate <id> --finish`
+removes it. The same shape as key rotation (ADR-0010) — the old credential
+stays usable for exactly as long as something may still present it. A stale
+overlap variable does not fail `/readyz`, because taking an instance out of
+service over a half-finished rotation is the outage the overlap exists to
+prevent arriving by another route; `qed adapters list` reports the overlap's
+state instead.
+
+Registering or rotating an adapter changes who may submit proposals to the
+kernel, so both are self-governed admin operations (SPEC §17) and both append
+an `admin_action` record naming the adapter and the variable. The default
+`admin.operations` list is unchanged: widening it would gate operations an
+existing instance was not gating yesterday, on upgrade, with no edit to its
+config.
+
+### Added — `qed.yaml` can be edited by the tool without being rewritten
+
+`qed adapters add` is the first thing in the product that modifies an
+operator's configuration file, so `qed/infra/config_edit.py` is its own module
+with its own tests. It does not load and re-dump the YAML: comments are not in
+the parse tree, so a round-trip silently deletes every explanation an operator
+wrote down, in the file that configures a policy kernel. The edit is textual —
+find the sequence, insert one item, leave every other byte alone.
+
+What makes that safe is the check afterwards rather than the care beforehand.
+The new file is parsed and validated before it is kept, and the resulting
+configuration must equal the old one plus exactly the one adapter that was
+asked for; anything else and the original bytes go back. A flow-style
+`adapters: []`, which cannot be appended to by anything working in lines, is
+refused rather than guessed at. A nested `adapters:` under a section the
+config reader does not read is not mistaken for the real one — appending
+there would register nothing while printing success.
+
 ### Fixed — one registry's hourly quota could fail the release gate
 
 The container tests built from a single base image: whichever registry

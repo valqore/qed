@@ -53,21 +53,63 @@ a CI job or on a laptop with no browser to redirect.
 
 ### Registering an adapter
 
+```
+qed adapters add adp_laptop_ali
+```
+
+writes the entry and prints the secret once:
+
 ```yaml
 # qed.yaml
 adapters:
   - adapter_id: adp_laptop_ali
-    secret_env: QED_SECRET_LAPTOP_ALI    # the name, never the value
+    secret_env: QED_ADAPTER_SECRET_ADP_LAPTOP_ALI   # the name, never the value
     kind: mcp
 ```
 
 The secret lives in the environment variable named here, so `qed.yaml` stays
-safe to commit and the secret stays out of the process table. It must be at
-least 32 characters: a shorter shared secret is a password somebody typed.
+safe to commit and the secret stays out of the process table, out of backups
+of the repository, and out of the evidence chain. It must be at least 32
+characters: a shorter shared secret is a password somebody typed, which is why
+`add` generates one rather than asking for it.
 
-SPEC §12.6 describes a `qed adapters add` command with per-adapter rotation.
-It is not built: registration is this list in `qed.yaml`, and rotation is
-editing it and restarting.
+**There is no command that shows the secret again.** `qed adapters list`
+reports whether each registered adapter's variable is set and long enough --
+the question that otherwise needs the server running and `/v1/status` read --
+and never the value.
+
+### Rotating a secret
+
+A shared secret cannot be replaced on the instance and on every adapter at the
+same instant. In between, requests signed with the old one are refused as
+`AG-IDN-005`, an unknown adapter, and under `fail: closed` a refused request
+is a blocked action. So rotation has an overlap and it takes two commands:
+
+```
+qed adapters rotate adp_laptop_ali            # new secret; both are accepted
+# ... set it wherever the adapter reads its environment, and restart ...
+qed adapters rotate adp_laptop_ali --finish   # the old one stops working
+```
+
+Between them the entry names both variables:
+
+```yaml
+adapters:
+  - adapter_id: adp_laptop_ali
+    secret_env: QED_ADAPTER_SECRET_ADP_LAPTOP_ALI_V2
+    kind: mcp
+    previous_secret_env: QED_ADAPTER_SECRET_ADP_LAPTOP_ALI
+```
+
+Either signature verifies until `--finish` removes the second line. The
+instance stays ready if the previous variable is already gone -- a
+half-finished rotation must not be an outage -- so `qed adapters list` is
+where the state of the overlap is reported.
+
+Registering or rotating an adapter grants or changes an identity's right to
+submit proposals, so both are self-governed admin operations (SPEC §17) and
+both leave an `admin_action` record naming the adapter and the variable. Not
+the secret: evidence is the one place it must never reach.
 
 ### Signing a request
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import textwrap
 from collections import Counter
@@ -131,10 +132,12 @@ keys_app = typer.Typer(no_args_is_help=True, help="Evidence signing keys.")
 policy_app = typer.Typer(no_args_is_help=True, help="Policy bundle tools.")
 packs_app = typer.Typer(no_args_is_help=True, help="Compliance control catalogues.")
 mandate_app = typer.Typer(no_args_is_help=True, help="Mandates for unattended agents.")
+adapters_app = typer.Typer(no_args_is_help=True, help="Adapter identities (SPEC 12.6).")
 app.add_typer(keys_app, name="keys")
 app.add_typer(policy_app, name="policy")
 app.add_typer(packs_app, name="packs")
 app.add_typer(mandate_app, name="mandate")
+app.add_typer(adapters_app, name="adapters")
 
 DirOption = Annotated[Path, typer.Option("--dir", help="qed state directory (keys and chain).")]
 
@@ -375,6 +378,391 @@ def keys_export_public(
         # `qed keys export-public > public.pem` has to be usable as it is.
         typer.echo(f"# {key.key_id}  {state}")
         typer.echo(key.public_pem.rstrip())
+
+
+# ------------------------------------------------------------------ adapters
+
+
+#: What an adapter id may contain. It travels in an HTTP header
+#: (`X-QED-Adapter-Id`) and lands in evidence that an auditor reads, so the
+#: character set is narrow on purpose: a header value with a newline in it is
+#: a request-splitting bug, and an id that renders differently in two tools is
+#: an identity nobody can follow through the chain.
+ADAPTER_ID_PATTERN: Final = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}$")
+
+
+def _secret_env_name(adapter_id: str) -> str:
+    """The conventional variable name for an adapter's secret."""
+    return "QED_ADAPTER_SECRET_" + re.sub(r"[^A-Z0-9]", "_", adapter_id.upper())
+
+
+def _new_secret() -> str:
+    """A secret the operator never has to think about the strength of.
+
+    32 bytes from `secrets.token_urlsafe` is 43 characters, comfortably past
+    the 32 the API requires. Generated here rather than asked for, because a
+    shared secret somebody invents is a password, and `MIN_SECRET_LENGTH`
+    exists to catch exactly that.
+    """
+    import secrets as _secrets
+
+    return _secrets.token_urlsafe(32)
+
+
+def _adapters_config(directory: Path, explicit: Path | None) -> Path:
+    """Which `qed.yaml` these commands read and write.
+
+    `--config` when given, otherwise `<dir>/qed.yaml`. The fallback is a
+    convention and not discovery: nothing else in `qed` looks for a config
+    file it was not handed, and these commands print the path they used so
+    that editing the wrong file is a thing an operator can see rather than
+    deduce.
+
+    A missing file is refused rather than created. An `add` that invented a
+    `qed.yaml` would leave a config the running instance never reads -- the
+    adapter would look registered and be refused as `AG-IDN-005`, which is
+    the most expensive way to learn where the file should have gone.
+    """
+    path = explicit if explicit is not None else directory / "qed.yaml"
+    if not path.is_file():
+        _fail(
+            f"there is no config file at {path}, so there is nothing to register the "
+            "adapter in. Create one (SPEC 16), or pass `--config`."
+        )
+        raise AssertionError  # pragma: no cover - `_fail` raises
+    return path
+
+
+@adapters_app.command("add")
+def adapters_add(
+    adapter_id: Annotated[str, typer.Argument(help="The identity to register, e.g. mcp-proxy-ci.")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    kind: Annotated[str, typer.Option("--kind", help="What sort of adapter this is.")] = "mcp",
+    secret_env: Annotated[
+        str,
+        typer.Option("--secret-env", help="Variable the secret will live in. Default is derived."),
+    ] = "",
+    by: ByOption = "",
+    approval: ApprovalOption = None,
+    break_glass: BreakGlassOption = "",
+) -> None:
+    """Register an adapter and print its secret once (SPEC 12.6).
+
+    Writes `adapter_id`, `secret_env` and `kind` into `qed.yaml` and generates
+    the shared secret. **The secret is printed and never stored**: it goes in
+    the environment variable named here, which is why `qed.yaml` stays safe to
+    commit. There is no command that will show it again -- `qed adapters
+    rotate` issues a new one.
+
+    Registering an adapter grants an identity the right to submit proposals to
+    this kernel, so it is a self-governed admin operation (SPEC 17) and it
+    leaves an `admin_action` record naming the adapter and the variable. Not
+    the secret: evidence is the one place a shared secret must never reach.
+    """
+    from qed.config import AdapterCredential
+    from qed.core.admin import AdminOperation
+    from qed.infra.config_edit import ConfigEditRefused, add_adapter
+
+    if not ADAPTER_ID_PATTERN.match(adapter_id):
+        _fail(
+            f"{adapter_id!r} is not a usable adapter id. Lower-case letters, digits, "
+            "hyphens and underscores, 2 to 63 characters, starting with a letter or "
+            "digit -- it travels in an HTTP header and into evidence."
+        )
+        return
+
+    path = _adapters_config(directory, config)
+    try:
+        session = open_session(directory=directory, config_path=path, strict_policy=False)
+    except MissingSigningKey as exc:
+        _fail(str(exc))
+        return
+
+    entry = AdapterCredential(
+        adapter_id=adapter_id,
+        secret_env=secret_env or _secret_env_name(adapter_id),
+        kind=kind,
+    )
+
+    decision = _admin_gate(
+        session,
+        AdminOperation.adapters_add,
+        by=by,
+        approval=approval,
+        break_glass=break_glass,
+        detail={"adapter_id": adapter_id, "secret_env": entry.secret_env},
+    )
+    if decision is None:
+        return
+
+    try:
+        add_adapter(path, entry)
+    except ConfigEditRefused as exc:
+        session.close()
+        _fail(str(exc))
+        return
+
+    secret = _new_secret()
+    session.writer.append(
+        type_=EvidenceType.admin_action,
+        assurance=Assurance.kernel,
+        payload={
+            "action": "adapters_add",
+            "adapter_id": adapter_id,
+            "secret_env": entry.secret_env,
+            "kind": entry.kind,
+            **decision.payload(),
+        },
+    )
+    session.close()
+
+    typer.secho("registered", fg=typer.colors.GREEN, bold=True)
+    typer.echo(f"  adapter : {adapter_id}")
+    typer.echo(f"  kind    : {entry.kind}")
+    typer.echo(f"  config  : {path}")
+    typer.echo("")
+    typer.echo("Set this on the instance and on the adapter, then restart both:")
+    typer.echo("")
+    typer.echo(f"  export {entry.secret_env}={secret}")
+    typer.echo("")
+    typer.secho(
+        "This is the only time the secret is shown. It is not in qed.yaml and not in the chain.",
+        fg=typer.colors.YELLOW,
+    )
+
+
+@adapters_app.command("list")
+def adapters_list(
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit as JSON.")] = False,
+) -> None:
+    """Show registered adapters and whether each one can actually authenticate.
+
+    The second half is the point. A registered adapter whose `secret_env` is
+    unset is refused at runtime with `AG-IDN-005` -- an unknown adapter -- and
+    the only previous way to discover that was to start the server and read
+    `/v1/status`. Secrets are never printed; what is reported is whether the
+    variable is set and long enough.
+    """
+    from qed.api.auth import MIN_SECRET_LENGTH
+    from qed.config import load_config
+
+    path = config if config is not None else directory / "qed.yaml"
+    loaded = load_config(path if path.is_file() else None)
+    rows: list[dict[str, object]] = []
+    for entry in loaded.config.registered_adapters:
+        secret = os.environ.get(entry.secret_env, "")
+        if not secret:
+            state = "no secret"
+        elif len(secret) < MIN_SECRET_LENGTH:
+            state = "too short"
+        else:
+            state = "ready"
+        row: dict[str, object] = {
+            "adapter_id": entry.adapter_id,
+            "kind": entry.kind,
+            "secret_env": entry.secret_env,
+            "state": state,
+        }
+        if entry.previous_secret_env:
+            # The overlap's own state, checked the same way as the current
+            # secret. `/readyz` deliberately stays green on a stale rotation
+            # variable -- an instance that can authenticate restarted
+            # adapters must keep serving -- so this is where an operator
+            # mid-rotation finds out the grace period is not actually there.
+            previous = os.environ.get(entry.previous_secret_env, "")
+            row["previous_secret_env"] = entry.previous_secret_env
+            row["overlap"] = (
+                "accepted"
+                if len(previous) >= MIN_SECRET_LENGTH
+                else ("too short" if previous else "unset")
+            )
+        rows.append(row)
+
+    if as_json:
+        typer.echo(json.dumps({"config": str(loaded.path or ""), "adapters": rows}, indent=2))
+        return
+
+    if not rows:
+        typer.echo("no adapters are registered")
+        typer.echo("")
+        typer.echo("  qed adapters add <id>")
+        return
+
+    width = max(len(str(row["adapter_id"])) for row in rows)
+    for row in rows:
+        colour = {
+            "ready": typer.colors.GREEN,
+            "no secret": typer.colors.RED,
+            "too short": typer.colors.RED,
+        }[str(row["state"])]
+        typer.echo(f"{row['adapter_id']!s:<{width}}  {row['kind']:<6}  ", nl=False)
+        typer.secho(f"{row['state']:<9}", fg=colour, nl=False)
+        typer.echo(f"  ${row['secret_env']}")
+        if row.get("previous_secret_env"):
+            # "unset" is not "finished": the entry still names the old
+            # variable, so the overlap it promises simply is not in effect.
+            # Saying `rotation complete` here would tell an operator the
+            # opposite of what `--finish` is for.
+            note = {
+                "accepted": "still accepted",
+                "unset": "unset, so no overlap is in effect",
+                "too short": "set but too short, so no overlap is in effect",
+            }[str(row["overlap"])]
+            typer.echo(f"{'':<{width}}  rotating via ${row['previous_secret_env']} ({note})")
+
+
+@adapters_app.command("rotate")
+def adapters_rotate(
+    adapter_id: Annotated[str, typer.Argument(help="The adapter to give a new secret.")],
+    directory: DirOption = DEFAULT_DIR,
+    config: ConfigOption = None,
+    finish: Annotated[
+        bool,
+        typer.Option("--finish", help="End a rotation: stop accepting the previous secret."),
+    ] = False,
+    by: ByOption = "",
+    approval: ApprovalOption = None,
+    break_glass: BreakGlassOption = "",
+) -> None:
+    """Issue a new secret for an adapter, keeping the old one working meanwhile.
+
+    A shared secret cannot change on two machines at the same instant. Between
+    the instance taking the new secret and the last adapter being restarted
+    with it, every request signed with the old one would be refused as
+    `AG-IDN-005` -- and under `fail: closed` a refused request is a blocked
+    action. So rotation is two steps:
+
+        qed adapters rotate mcp-proxy-ci     # new secret; both accepted
+        ...roll it out across the fleet...
+        qed adapters rotate mcp-proxy-ci --finish    # old one stops working
+
+    Until `--finish`, the entry names both variables and either signature
+    verifies. A rotation that skipped the overlap would be an outage with a
+    changelog entry, which is why it is not offered as a flag.
+    """
+    from qed.config import AdapterCredential
+    from qed.core.admin import AdminOperation
+    from qed.infra.config_edit import ConfigEditRefused, rewrite_adapter
+
+    path = _adapters_config(directory, config)
+    try:
+        session = open_session(directory=directory, config_path=path, strict_policy=False)
+    except MissingSigningKey as exc:
+        _fail(str(exc))
+        return
+
+    current = next(
+        (entry for entry in session.config.registered_adapters if entry.adapter_id == adapter_id),
+        None,
+    )
+    if current is None:
+        session.close()
+        _fail(
+            f"adapter {adapter_id} is not registered in {path}. "
+            "`qed adapters list` shows the ones that are."
+        )
+        return
+
+    if finish and not current.previous_secret_env:
+        session.close()
+        _fail(
+            f"adapter {adapter_id} is not mid-rotation, so there is no previous secret to "
+            "stop accepting."
+        )
+        return
+
+    decision = _admin_gate(
+        session,
+        AdminOperation.adapters_rotate,
+        by=by,
+        approval=approval,
+        break_glass=break_glass,
+        detail={"adapter_id": adapter_id, "finish": finish},
+    )
+    if decision is None:
+        return
+
+    if finish:
+        updated = AdapterCredential(
+            adapter_id=adapter_id,
+            secret_env=current.secret_env,
+            kind=current.kind,
+        )
+    else:
+        # The new secret goes in a *new* variable, and the old name becomes
+        # the previous one. Reusing one variable would mean the overlap had
+        # nowhere to live: the moment it is overwritten the old secret is gone
+        # from the machine, which is the cutover this exists to avoid.
+        updated = AdapterCredential(
+            adapter_id=adapter_id,
+            secret_env=_next_secret_env(current.secret_env),
+            kind=current.kind,
+            previous_secret_env=current.secret_env,
+        )
+
+    try:
+        rewrite_adapter(path, updated)
+    except ConfigEditRefused as exc:
+        session.close()
+        _fail(str(exc))
+        return
+
+    secret = "" if finish else _new_secret()
+    session.writer.append(
+        type_=EvidenceType.admin_action,
+        assurance=Assurance.kernel,
+        payload={
+            "action": "adapters_rotate",
+            "adapter_id": adapter_id,
+            "secret_env": updated.secret_env,
+            "previous_secret_env": updated.previous_secret_env,
+            "finished": finish,
+            **decision.payload(),
+        },
+    )
+    session.close()
+
+    if finish:
+        typer.secho("rotation finished", fg=typer.colors.GREEN, bold=True)
+        typer.echo(f"  adapter : {adapter_id}")
+        typer.echo(f"  accepts : ${updated.secret_env} only")
+        typer.echo("")
+        typer.echo(f"${current.previous_secret_env} can now be removed from the environment.")
+        return
+
+    typer.secho("rotating", fg=typer.colors.GREEN, bold=True)
+    typer.echo(f"  adapter  : {adapter_id}")
+    typer.echo(f"  new      : ${updated.secret_env}")
+    typer.echo(f"  previous : ${current.secret_env} (still accepted)")
+    typer.echo("")
+    typer.echo("Set the new secret on the instance and on the adapter, then restart both:")
+    typer.echo("")
+    typer.echo(f"  export {updated.secret_env}={secret}")
+    typer.echo("")
+    typer.echo("When every adapter is using it:")
+    typer.echo("")
+    typer.echo(f"  qed adapters rotate {adapter_id} --finish")
+    typer.echo("")
+    typer.secho(
+        "This is the only time the new secret is shown.",
+        fg=typer.colors.YELLOW,
+    )
+
+
+def _next_secret_env(current: str) -> str:
+    """The variable name for the next secret in a rotation.
+
+    `..._V2`, `..._V3`, and so on. A counter rather than a date because the
+    name goes in a config file that lives for years and `_20261015` reads as
+    an expiry to the next person.
+    """
+    match = re.search(r"_V(\d+)$", current)
+    if match:
+        return f"{current[: match.start()]}_V{int(match.group(1)) + 1}"
+    return f"{current}_V2"
 
 
 # --------------------------------------------------------------------- check
@@ -2000,8 +2388,10 @@ def serve(
     """Run the HTTP API (SPEC 13), and with `--ui` the web pages too (SPEC 19).
 
     `/readyz` answers 503 until there is a signing key and a way to
-    authenticate adapters, so `qed keys init` comes first. Without `--dev`,
-    register an adapter under `adapters:` in qed.yaml with a `secret_env`.
+    authenticate adapters, so `qed keys init` comes first, then
+    `qed adapters add <id>`. Without `--dev` an instance with no registered
+    adapter cannot tell callers apart, and SPEC 17 requires it to refuse
+    them rather than guess.
 
     `--ui` needs the separate `qed-ui` package, which is AGPL-3.0 and ships
     apart from this Apache-2.0 wheel on purpose (SPEC 20.4). Without it the
