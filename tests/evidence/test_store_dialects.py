@@ -80,7 +80,13 @@ class TestTheMigrationsAreShared:
     def test_there_is_one_set(self) -> None:
         """Not one directory per dialect. The week-1 scripts sit in the SQL
         subset both engines accept, which was replayed against a real
-        PostgreSQL 17 rather than taken on trust."""
+        PostgreSQL 17 rather than taken on trust.
+
+        Spelled out rather than counted, so adding a migration is a decision
+        somebody makes here too. A schema change that nobody had to
+        acknowledge is how `history_daily` came to be created by 0001 and
+        never read by anything for twelve weeks.
+        """
         scripts = migrations()
         assert [s.name for s in scripts] == [
             "0001_init.sql",
@@ -88,6 +94,10 @@ class TestTheMigrationsAreShared:
             "0003_mandates.sql",
             "0004_approvals.sql",
             "0005_outbox_refs.sql",
+            # The first to alter an existing table, which is what the ledger
+            # in `schema_migrations` was added for: SQLite has no
+            # `ADD COLUMN IF NOT EXISTS`, so it must run exactly once.
+            "0006_history.sql",
         ]
 
     def test_they_are_ordered_by_name(self) -> None:

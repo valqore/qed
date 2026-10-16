@@ -21,12 +21,20 @@ import regex
 
 from qed.core.policy.fields import is_known_path
 
+#: How deep a `when` tree may nest. One constant, because the evaluator
+#: refuses past it, the linter refuses past it, and `predicate_fields`
+#: stops walking there -- three places that must agree or a rule could be
+#: accepted, evaluated, and read for its fields to three different depths.
+MAX_DEPTH: Final = 20
+
 __all__ = [
     "COMPOSITE_KEYS",
+    "MAX_DEPTH",
     "MISSING",
     "OPERATORS",
     "PredicateError",
     "evaluate_predicate",
+    "predicate_fields",
     "resolve_field",
     "validate_predicate",
 ]
@@ -214,8 +222,8 @@ def _leaf_op(node: dict[str, object]) -> str:
 def evaluate_predicate(
     node: dict[str, object], proposal: dict[str, object], derived: dict[str, object], depth: int = 0
 ) -> bool:
-    if depth > 20:
-        raise PredicateError("predicate nested deeper than 20 levels")
+    if depth > MAX_DEPTH:
+        raise PredicateError(f"predicate nested deeper than {MAX_DEPTH} levels")
     if "any" in node or "all" in node:
         key = "any" if "any" in node else "all"
         children = node[key]
@@ -234,6 +242,36 @@ def evaluate_predicate(
     return _apply(op, resolve_field(field, proposal, derived), node[op])
 
 
+def predicate_fields(node: object, depth: int = 0) -> set[str]:
+    """Every ``field`` path a predicate reads, however deeply nested.
+
+    Two callers need this and neither can do it by looking at the rule's text:
+    `PolicyBundle.reads_history`, to decide whether collecting the 24-hour
+    counters is worth a store query at all, and `qed/core/replay.py`, to work
+    out which assumed input could explain a difference. A `derived.budget.*`
+    reference three levels inside an ``any``/``not`` tree counts exactly as
+    much as one at the top, so this walks rather than matches.
+
+    Unparseable nodes contribute nothing instead of raising: `qed policy lint`
+    refuses a malformed predicate before a bundle ever loads, and this is used
+    to make a decision about caching rather than about a verdict.
+    """
+    if depth > MAX_DEPTH or not isinstance(node, dict):
+        return set()
+    found: set[str] = set()
+    for key in ("any", "all"):
+        children = node.get(key)
+        if isinstance(children, Sequence) and not isinstance(children, str):
+            for child in children:
+                found |= predicate_fields(child, depth + 1)
+    if "not" in node:
+        found |= predicate_fields(node["not"], depth + 1)
+    path = node.get("field")
+    if isinstance(path, str):
+        found.add(path)
+    return found
+
+
 def _as_node(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise PredicateError("expected a predicate object")
@@ -243,8 +281,8 @@ def _as_node(value: object) -> dict[str, object]:
 def validate_predicate(node: object, path: str = "when", depth: int = 0) -> list[tuple[str, str]]:
     """Static check. Returns ``(lint_code, message)`` pairs; empty means valid."""
     errors: list[tuple[str, str]] = []
-    if depth > 20:
-        return [("invalid_predicate", f"{path}: nested deeper than 20 levels")]
+    if depth > MAX_DEPTH:
+        return [("invalid_predicate", f"{path}: nested deeper than {MAX_DEPTH} levels")]
     if not isinstance(node, dict):
         return [("invalid_predicate", f"{path}: expected an object")]
     keys = set(node)

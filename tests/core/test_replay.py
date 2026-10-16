@@ -16,6 +16,10 @@ So most of these tests are about classification rather than about the engine.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
 import pytest
 
 from qed.core.policy.engine import evaluate
@@ -336,34 +340,152 @@ class TestFindingWhichRulesReadWhat:
                 assert rule.rule_id not in reading, rule.rule_id
 
 
-class TestTheHistoryCountersAreNotAnAssumption:
-    """Pins a fact about the product, so that changing it is deliberate.
+@dataclass(frozen=True)
+class Tripped:
+    """A decision that the 24-hour counters changed, and what it needs."""
 
-    `HistoryDerived` is threaded through `check_proposal` into `EvalContext`
-    and **nothing in `qed` ever passes it**: every decision this product has
-    made saw zeros. Replay therefore uses zeros and does not call history
-    assumed, which is only true while that holds.
+    proposal: ActionProposal
+    recorded: Verdict
+    bundle: PolicyBundle
+    ledger: BudgetState
+    records: list[dict[str, object]]
+    stamp: datetime
+    refresh: int
 
-    If this test fails because something now supplies real counters, the fix
-    is not to change the number here: it is to decide what `qed replay` should
-    do about an input that has become unrecoverable.
+
+def trip_the_history_rule(tmp_path: Path) -> Tripped:
+    """Drive `AG-IDN-010` past its threshold and hand back the last decision.
+
+    Five blocks have to be in the chain before the sixth decision can see
+    them, so this is the cheapest chain in which a history-dependent rule has
+    actually fired -- which is the only kind that can test recovery.
+
+    `refresh_seconds: 0` rather than the default 60, and the reason is the
+    cadence working as designed: with an aligned window, every decision in
+    one bucket sees the same counters, so eight blocks inside one minute all
+    see the count from before the first of them and the rule never fires. A
+    burst is counted in the *next* bucket. Both thresholds in the shipped
+    pack are daily volumes, so that is the intended trade -- but it makes the
+    aligned setting useless for building a tripped chain in a test that runs
+    in half a second.
+    """
+    import json
+
+    from qed.core.evidence.export.jsonl import to_jsonl
+    from qed.runtime import check_proposal
+    from tests.core.test_history import blocking_proposal, instance
+
+    session = instance(tmp_path, refresh=0)
+    try:
+        outcome = None
+        proposal = None
+        for _ in range(8):
+            proposal = blocking_proposal()
+            outcome = check_proposal(session, proposal)
+            if any(hit.rule_id == "AG-IDN-010" for hit in outcome.verdict.hits):
+                break
+        assert outcome is not None and proposal is not None
+        assert any(hit.rule_id == "AG-IDN-010" for hit in outcome.verdict.hits), (
+            "the fixture must produce a decision the counters changed"
+        )
+        records = [
+            json.loads(line)
+            for line in to_jsonl(session.store.iter_evidence()).splitlines()
+            if line.strip()
+        ]
+        jti = proposal.principal.token_jti
+        record = next(
+            item
+            for item in records
+            if item["type"] == "proposal"
+            and item["payload"]["proposal"]["id"] == outcome.verdict.proposal_id
+        )
+        return Tripped(
+            proposal=proposal,
+            # Round-tripped through JSON so the comparison is against what the
+            # chain holds rather than the object the engine returned.
+            recorded=Verdict.model_validate(outcome.verdict.model_dump(mode="json")),
+            bundle=session.bundle,
+            ledger=session.store.load_budget(jti) or BudgetState(token_jti=jti),
+            records=records,
+            stamp=datetime.fromisoformat(str(record["ts"]).replace("Z", "+00:00")),
+            refresh=session.config.history.refresh_seconds,
+        )
+    finally:
+        session.close()
+
+
+class TestTheHistoryCountersAreRecovered:
+    """They used to be neither supplied nor recoverable; now they are both.
+
+    An earlier version of this class pinned the old behaviour by asserting
+    that `AG-BUD-007` and `AG-IDN-010` did not fire for a single proposal --
+    true whether the counters were real or always zero. It was a guard whose
+    assertion held on both sides of the change it existed to catch, and it
+    duly passed when the counters were wired up. These drive the threshold
+    instead.
     """
 
-    def test_no_decision_path_supplies_history(self, qed_dir: object, tmp_path: object) -> None:
-        from pathlib import Path
+    def test_a_decision_the_counters_changed_replays_exactly(self, tmp_path: Path) -> None:
+        """The claim the aligned window buys. A cache with a TTL would have
+        made this permanently inconclusive, because nothing would record which
+        stale value the decision saw."""
+        from qed.core.history import counts_from_records, window_for
 
-        from qed.runtime import check_proposal, open_session
+        case = trip_the_history_rule(tmp_path)
+        start, end = window_for(case.stamp, case.refresh)
+        history, complete = counts_from_records(
+            case.records,
+            principal_hash=case.proposal.principal.human_hash,
+            start=start,
+            end=end,
+        )
+        assert complete
+        assert history.blocks_24h >= 5, history
 
-        directory = Path(str(qed_dir))
-        session = open_session(directory=directory, strict_policy=False)
-        try:
-            outcome = check_proposal(session, make_proposal({"id": "01M5REPLAYHIST0000000000AA"}))
-        finally:
-            session.close()
+        report = replay_verdict(
+            case.proposal,
+            case.recorded,
+            case.bundle,
+            case.ledger,
+            EvalContext(now=case.stamp, history=history),
+            assumed_inputs=("budget",),
+        )
+        assert report.reproduced, [d.format() for d in report.differences]
+        assert "history" not in report.assumed_inputs
 
-        # AG-BUD-007 fires at calls_24h >= 500 and AG-IDN-010 at
-        # blocks_24h >= 5. Neither can fire while the counters are zero, and
-        # neither appears here.
-        fired = {hit.rule_id for hit in outcome.verdict.hits}
-        assert "AG-BUD-007" not in fired
-        assert "AG-IDN-010" not in fired
+    def test_the_same_decision_with_zero_counters_does_not_reproduce(self, tmp_path: Path) -> None:
+        """The counterweight. Without it the test above would also pass
+        against a build whose counters still did nothing: the rule would be
+        missing from both the record and the replay, and they would agree."""
+        from qed.core.schemas import HistoryDerived
+
+        case = trip_the_history_rule(tmp_path)
+        report = replay_verdict(
+            case.proposal,
+            case.recorded,
+            case.bundle,
+            case.ledger,
+            EvalContext(now=case.stamp, history=HistoryDerived()),
+            assumed_inputs=("budget", "history"),
+        )
+        assert not report.reproduced
+        assert report.inconclusive, [d.format() for d in report.differences]
+        assert all(d.attributed_to == "history" for d in report.differences)
+
+    def test_zero_counters_undeclared_are_a_finding(self, tmp_path: Path) -> None:
+        """And if the caller claims it recovered the counters while passing
+        zeros, the difference has nothing to excuse it."""
+        from qed.core.schemas import HistoryDerived
+
+        case = trip_the_history_rule(tmp_path)
+        report = replay_verdict(
+            case.proposal,
+            case.recorded,
+            case.bundle,
+            case.ledger,
+            EvalContext(now=case.stamp, history=HistoryDerived()),
+            assumed_inputs=("budget",),
+        )
+        assert report.unexplained
+        assert not report.inconclusive

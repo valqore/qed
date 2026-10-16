@@ -37,6 +37,7 @@ from qed.core.schemas import (
     Budget,
     BudgetState,
     EvidenceRecord,
+    EvidenceType,
     Mandate,
     SigningKeyInfo,
     rfc3339_ms,
@@ -57,6 +58,36 @@ _EVIDENCE_COLUMNS = (
     "payload_hash, payload, prev_hash, hash, key_id, sig, "
     "proposal_id, approval_id, principal_hash"
 )
+
+#: `decision` is denormalised out of the verdict payload so the history
+#: counters can be answered from indexed columns (migration 0006). It is
+#: **not** part of `EvidenceRecord` and never reaches an export: evidence
+#: format 1.0 is frozen (ADR-0015), and a storage column is not a record
+#: field. `_row_to_record` therefore does not read it and must not.
+_EVIDENCE_WRITE_COLUMNS = _EVIDENCE_COLUMNS + ", decision"
+
+
+def _decision_of(record: EvidenceRecord) -> str | None:
+    """A verdict record's decision, for the denormalised column.
+
+    **Derived from the record rather than passed in**, which is the whole
+    point. A parameter on `append_evidence` would have to be supplied by the
+    direct path, the outbox enqueue, the leader's drain and `append_direct`,
+    and the first caller to forget it would under-count blocks in a way no
+    test would notice -- the column would simply be NULL and a shadow rule
+    would quietly not fire. A projection of the payload cannot drift from it.
+
+    It reads the *masked* payload, which is what is stored and what an export
+    carries, so `qed replay` recomputing the counters from a chain sees the
+    same values this column was built from.
+    """
+    if record.type is not EvidenceType.verdict or not isinstance(record.payload, dict):
+        return None
+    verdict = record.payload.get("verdict")
+    if not isinstance(verdict, dict):
+        return None
+    value = verdict.get("decision")
+    return value if isinstance(value, str) else None
 
 
 class ChainIntegrityError(RuntimeError):
@@ -286,8 +317,8 @@ class SqlStore:
                     f"next sequence number is {expected}, record carries {record.seq}"
                 )
             self._conn.execute(
-                f"INSERT INTO evidence ({_EVIDENCE_COLUMNS}) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO evidence ({_EVIDENCE_WRITE_COLUMNS}) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     record.seq,
                     rfc3339_ms(record.ts),
@@ -306,12 +337,47 @@ class SqlStore:
                     proposal_id,
                     approval_id,
                     principal_hash,
+                    _decision_of(record),
                 ),
             )
         except BaseException:
             self._conn.rollback()
             raise
         self._conn.commit()
+
+    def history_counts(
+        self,
+        *,
+        principal_hash: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[int, int]:
+        """``(calls, blocks)`` for one principal over ``[start, end)``.
+
+        The SQL half of the definition in `qed/core/history.py`, which also
+        implements it over chain records for `qed replay`. Two implementations
+        of one rule can drift, so `tests/core/test_history.py` runs both over
+        the same chain and asserts they agree.
+
+        ``ts`` is compared as text. That is sound and not a shortcut: every
+        timestamp is written by `rfc3339_ms`, so it is fixed-width UTC with
+        three fractional digits and a ``Z`` -- a format whose lexicographic
+        order is its chronological order. It also lets `ix_evidence_ts` and
+        `ix_evidence_principal_ts` serve the range directly.
+        """
+        row = self._conn.execute(
+            "SELECT "
+            "  sum(CASE WHEN type = 'proposal' THEN 1 ELSE 0 END) AS calls, "
+            "  sum(CASE WHEN type = 'verdict' AND decision = 'BLOCK' THEN 1 ELSE 0 END) "
+            "    AS blocks "
+            "FROM evidence "
+            "WHERE principal_hash = ? AND ts >= ? AND ts < ?",
+            (principal_hash, rfc3339_ms(start), rfc3339_ms(end)),
+        ).fetchone()
+        if row is None:  # pragma: no cover - an aggregate always returns a row
+            return 0, 0
+        # `sum` over no rows is NULL on both backends, not 0.
+        return int(row["calls"] or 0), int(row["blocks"] or 0)
 
     def iter_evidence(
         self,

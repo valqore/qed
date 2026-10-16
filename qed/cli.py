@@ -2412,10 +2412,19 @@ def replay(
         Path | None, typer.Option("--mandate", help="The Mandate the decision was made under.")
     ] = None,
     calls_24h: Annotated[
-        int | None, typer.Option("--calls-24h", help="History counter as it was.")
+        int | None,
+        typer.Option("--calls-24h", help="Override the counter recomputed from the chain."),
     ] = None,
     blocks_24h: Annotated[
-        int | None, typer.Option("--blocks-24h", help="History counter as it was.")
+        int | None,
+        typer.Option("--blocks-24h", help="Override the counter recomputed from the chain."),
+    ] = None,
+    refresh_seconds: Annotated[
+        int | None,
+        typer.Option(
+            "--refresh-seconds",
+            help="`history.refresh_seconds` as it was, if it has changed since.",
+        ),
     ] = None,
     instance_id: Annotated[
         str | None,
@@ -2453,6 +2462,7 @@ def replay(
         _fail("qed-verify is not installed: pip install ./packages/qed-verify")
         return
 
+    from qed.core.history import counts_from_records, window_for
     from qed.core.replay import replay_verdict
     from qed.infra.keys.file import load_public_keys
 
@@ -2494,7 +2504,12 @@ def replay(
         return
     bundle = session.bundle
     ledger_budget = session.store.load_budget(proposal.principal.token_jti)
+    config_refresh = session.config.history.refresh_seconds
     session.close()
+
+    # The engine's clock. `check_proposal` stamps the proposal record, the
+    # verdict record and `ctx.now` from one value, so this is not an estimate.
+    ctx_now = datetime.fromisoformat(str(proposal_record["ts"]).replace("Z", "+00:00"))
 
     assumed: list[str] = []
     if budget_file is not None:
@@ -2515,20 +2530,34 @@ def replay(
         # Only assumed when the proposal claimed one. A proposal with no
         # `mandate_id` was decided with no mandate, which is recorded fact.
         assumed.append("mandate")
-    # Not assumed: nothing in `qed` ever passes `history` to `check_proposal`,
-    # so every decision it has made saw zeros and replaying with zeros
-    # reproduces the real input. The flags exist for a chain from a build that
-    # does supply them. See `qed/core/replay.py` and the test that pins it.
-    history = HistoryDerived(calls_24h=calls_24h or 0, blocks_24h=blocks_24h or 0)
+    # Recomputed from the chain rather than assumed, which is what the
+    # aligned window in `qed/core/history.py` exists for: the window is a pure
+    # function of the decision's timestamp, so the same two numbers can be
+    # counted back out of the records. Overridable, because the alignment also
+    # depends on `history.refresh_seconds`, which lives in the config and not
+    # in the chain.
+    if calls_24h is not None or blocks_24h is not None:
+        history = HistoryDerived(calls_24h=calls_24h or 0, blocks_24h=blocks_24h or 0)
+    else:
+        refresh = refresh_seconds if refresh_seconds is not None else config_refresh
+        start, end = window_for(ctx_now, refresh)
+        history, complete = counts_from_records(
+            records,
+            principal_hash=proposal.principal.human_hash,
+            start=start,
+            end=end,
+        )
+        if not complete:
+            # A verdict inside the window has had its payload stripped by
+            # retention, so `blocks_24h` is a lower bound rather than the
+            # number. Reporting it as recovered would be the quiet kind of
+            # wrong this command exists to avoid.
+            assumed.append("history")
 
     # The clock is not assumed: `check_proposal` stamps the proposal record,
     # the verdict record and `ctx.now` from one value, so the record's own
     # timestamp *is* what the engine was told the time was.
-    ctx = EvalContext(
-        now=datetime.fromisoformat(str(proposal_record["ts"]).replace("Z", "+00:00")),
-        mandate=mandate,
-        history=history,
-    )
+    ctx = EvalContext(now=ctx_now, mandate=mandate, history=history)
 
     result = replay_verdict(proposal, recorded, bundle, budget, ctx, assumed_inputs=tuple(assumed))
 

@@ -6,6 +6,122 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — the 24-hour history counters are collected, so two rules can fire
+
+`AG-BUD-007` ("High call rate in the last day", `calls_24h >= 500`) and
+`AG-IDN-010` ("Repeated blocks from the same principal", `blocks_24h >= 5`)
+shipped in week 1 and neither had ever been able to fire. `HistoryDerived` was
+threaded through `check_proposal` into the engine's context and no caller
+passed it, so every decision saw zeros. SPEC §5 said the API layer collected
+the snapshot; nothing did. Both rules were counted in the pack's rule total
+and in its compliance mappings the whole time.
+
+Both numbers now come from the evidence chain, which is the only source an
+auditor also has: `calls_24h` is `proposal` records for this principal in the
+window, `blocks_24h` is `verdict` records whose decision was BLOCK.
+
+**The window is aligned rather than rolling, and that one choice is the whole
+design.** It covers `[end - 24h, end)` with `end` floored to
+`history.refresh_seconds` (new, default 60). Two things follow, and both are
+the point. The query runs **once per principal per bucket** instead of once
+per decision, which is what keeps a store round-trip off the decision path —
+at one decision per second that is one query in sixty. And the window is a
+pure function of the decision's own timestamp, so `qed replay` recomputes the
+identical numbers from the chain.
+
+A cadence built as a cache with a TTL would have been easier to write and
+would have made every replay of a history-dependent rule **inconclusive
+forever**, because nothing would record which stale value a decision happened
+to see. That is the trade this avoids, and it is why the setting is an
+interval rather than a TTL.
+
+The cost is explicit: a burst inside one bucket is counted in the next one.
+Both shipped thresholds are daily volumes, so a minute of staleness cannot
+change an answer a human would call correct. `refresh_seconds: 0` turns
+alignment off — exact counters, one query per decision, still replayable.
+
+Three ways it costs nothing: a bundle whose active rules do not read
+`derived.history.*` is never queried (`PolicyBundle.reads_history`); an action
+with no human principal is never queried, because `principal_hash` is NULL and
+grouping every unattended agent under one NULL identity would make "this
+principal has been blocked repeatedly" mean "some agent somewhere has been";
+and a query that fails is logged and treated as zeros, because both rules that
+read these counters are `shadow` rules about a usage pattern and refusing an
+action over a failed `COUNT` would be the worst trade available.
+
+Migration 0006 adds `decision` to `evidence` and an index on
+`(principal_hash, ts)`. The column is denormalised out of the verdict payload
+because counting blocks by reading payload JSON would need a different
+expression per backend and would stop working once retention strips the
+payload. It is derived **in the store from the record** rather than passed in:
+a parameter would have to be supplied by the direct path, the outbox enqueue,
+the leader's drain and `append_direct`, and the first caller to forget it
+would under-count blocks with nothing to notice — the column would simply be
+NULL and a shadow rule would quietly not fire. The column is storage only; it
+is not a field of `EvidenceRecord` and never reaches an export, so evidence
+format 1.0 is untouched.
+
+`blocks_24h` counts from this migration, since older rows have no `decision`.
+Said in `docs/replay.md`, because an operator comparing a counter to the chain
+by hand would otherwise find it short.
+
+Migration 0006 also **drops `history_daily`**, a table migration 0001 created
+and nothing ever read or wrote. It described per-principal, per-target,
+per-day aggregates where the rules ask for a rolling window over the chain.
+Leaving it would now be worse than before: it would read as a second source
+for numbers that come from `evidence`, and the first person to find two
+sources trusts the wrong one.
+
+### Changed — `qed replay` recovers the history counters instead of assuming them
+
+The aligned window is what makes this possible, and `replay` now recomputes
+both numbers from the records it loaded. They fall back to *assumed*, and are
+reported as such, in two cases: a `verdict` inside the window whose payload
+retention has stripped, which makes `blocks_24h` a lower bound; and
+`history.refresh_seconds` having changed since the decision, which moves the
+boundary — `--refresh-seconds` says what it was.
+
+One implementation in SQL and one over chain records is a place for two
+readings of one definition to drift, invisibly: a replay would report a
+difference in a history-dependent rule and an operator would go looking for
+tampering. `tests/core/test_history.py` runs both over the same chain and
+asserts they agree.
+
+Doing it also turned up that an export carries no principal. `principal_hash`
+is a storage column, not a field of `EvidenceRecord`, so the record walk takes
+the principal out of each `proposal` payload and reaches a verdict through its
+`proposal_id` — which is a thing worth knowing about the format independently
+of this change.
+
+### Fixed — a replay difference could be excused by the wrong assumption
+
+`_attribution` accepted a difference as explained if *any* rule mentioned by
+either verdict read an assumed input. A verdict whose hits differed by both a
+budget rule and a history rule was therefore reported as "explained by the
+assumed budget", and a real difference hid behind an acknowledged one.
+
+Two corrections. The rules considered are now the ones that actually **differ**
+— present on one side only, or present on both with a different mode — because
+a rule both verdicts agree on cannot explain a difference it had no part in.
+And a difference is attributed only when **every** differing rule is accounted
+for; anything left over makes it a finding, and all contributing inputs are
+named rather than the first one found.
+
+### Fixed — a guard whose assertion held on both sides of the change it watched
+
+The previous commit added
+`tests/core/test_replay.py::TestTheHistoryCountersAreNotAnAssumption` to fail
+the day something started supplying real counters. It asserted that
+`AG-BUD-007` and `AG-IDN-010` did not fire for a single proposal — which is
+true whether the counters are real or always zero. It passed, unchanged, when
+the counters were wired up.
+
+Replaced by tests that drive a threshold: five blocks into the chain, the
+sixth decision fires `AG-IDN-010`, and that decision replays exactly with
+nothing assumed. With its counterweight — the same decision replayed with zero
+counters does *not* reproduce — which is what stops the pair passing against a
+build whose counters do nothing.
+
 ### Added — `qed replay <proposal_id>`
 
 The last thing SPEC §14 listed as specified and not built. §14's inventory is

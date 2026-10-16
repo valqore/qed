@@ -19,6 +19,7 @@ import yaml
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from qed.core.evidence.masking import MaskingProfile
+from qed.core.history import DEFAULT_REFRESH_SECONDS
 from qed.core.schemas import Budget, Decision, EvidenceType, Frozen, Mode
 
 if TYPE_CHECKING:  # the policy object is pure core; config only names it
@@ -418,6 +419,49 @@ class AdminConfig(Frozen):
         return frozenset(AdminOperation(item) for item in self.operations)
 
 
+class HistoryConfig(Frozen):
+    """The 24-hour counters two shipped rules read (SPEC §5).
+
+    ```yaml
+    history:
+      refresh_seconds: 60
+    ```
+
+    `AG-BUD-007` and `AG-IDN-010` read `derived.history.calls_24h` and
+    `derived.history.blocks_24h`. Nothing collected them until 2026-10-15, so
+    neither rule could fire; the spec claimed the API layer did.
+
+    `refresh_seconds` is what makes collecting them affordable **and**
+    replayable. The counters cover ``[end - 24h, end)`` with `end` floored to
+    this many seconds, so every decision inside one bucket shares a value --
+    one query per principal per bucket instead of one per decision -- and the
+    window stays a pure function of the decision's own timestamp, which is
+    what lets `qed replay` recompute the same numbers from the chain.
+
+    A cache with a TTL would have been easier to write and would have made
+    every replay of a history-dependent rule permanently inconclusive, because
+    nothing records which stale value a decision happened to see.
+
+    **0 means no alignment**, not "off": the window ends at the decision's own
+    timestamp, the counters are exact, and every decision pays for a query.
+    Turning collection off is not a setting because it does not need to be --
+    a bundle whose active rules do not read `derived.history.*` is never
+    queried at all.
+    """
+
+    refresh_seconds: int = DEFAULT_REFRESH_SECONDS
+
+    @field_validator("refresh_seconds")
+    @classmethod
+    def _not_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                f"`history.refresh_seconds` cannot be negative, and this is {value}. "
+                "Use 0 for an exact window ending at each decision."
+            )
+        return value
+
+
 class BrokerConfig(Frozen):
     """Credential broker (SPEC §7). Empty means every adapter is advisory."""
 
@@ -442,6 +486,7 @@ class QedConfig(Frozen):
     retention: RetentionConfig = RetentionConfig()
     observability: ObservabilityConfig = ObservabilityConfig()
     admin: AdminConfig = AdminConfig()
+    history: HistoryConfig = HistoryConfig()
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 

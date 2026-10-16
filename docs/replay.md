@@ -95,16 +95,31 @@ An input is also only named when it could have mattered: a bundle with no rule
 reading it gets no caveat about it, because a caveat printed on every run is
 one nobody reads.
 
-### The history counters are not assumed
+### The history counters are recovered, not assumed
 
-`derived.history.calls_24h` and `derived.history.blocks_24h` are **always
-zero** in this build. `HistoryDerived` is threaded through `check_proposal`
-into the engine's context and nothing in `qed` ever passes it, so every
-decision made so far saw zeros and replaying with zeros reproduces the real
-input exactly. Two shipped rules read those counters and consequently cannot
-fire — `AG-BUD-007` and `AG-IDN-010`, both `shadow`. See SPEC §5.
-`tests/core/test_replay.py` pins this, so the day something starts collecting
-the counters the test fails and says to revisit it.
+`derived.history.calls_24h` and `derived.history.blocks_24h` are collected
+from the chain, and the way they are collected is what keeps them replayable.
+The window is **aligned**: it covers `[end - 24h, end)` with `end` floored to
+`history.refresh_seconds`, so it is a pure function of the decision's own
+timestamp, and `replay` counts the same two numbers back out of the records.
+
+A cadence built as a cache with a TTL would have been easier to write and
+would have made every replay of a history-dependent rule inconclusive
+forever, because nothing records which stale value a decision happened to see.
+
+Two things put the counters back among the assumptions, and `replay` says so
+when they do:
+
+- a `verdict` record inside the window whose payload retention has stripped.
+  The decision is then unknowable, so `blocks_24h` is a lower bound rather
+  than a number.
+- `history.refresh_seconds` having changed since the decision, which moves
+  the boundary. That value lives in the config and not in the chain, so
+  `--refresh-seconds` is how you say what it was.
+
+One narrower limit, worth knowing before comparing a counter to the chain by
+hand: `blocks_24h` counts from migration 0006, which added the `decision`
+column it reads, so verdicts written before that migration are not counted.
 
 ## Approvals are an overlay, not a decision
 

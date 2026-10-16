@@ -118,6 +118,35 @@ chain tip and computing the link, which on PostgreSQL is round trips rather
 than page reads. Decision latency really is independent of chain latency, and
 this is the measurement that says so.
 
+## The one store read on the decision path
+
+The 24-hour history counters (SPEC §5) are a `COUNT` over `evidence` for one
+principal. Two shipped rules read them, and for twelve weeks nothing collected
+them at all, so the rules could not fire.
+
+Collecting them per decision would have put a query in front of every verdict.
+Instead the window is **aligned** to `history.refresh_seconds` (default 60),
+so every decision inside one bucket shares a value and the query runs **once
+per principal per bucket**. At one decision per second that is one query in
+sixty; at a hundred per second it is one in six thousand. It is served by
+`ix_evidence_principal_ts` and reads no payloads.
+
+Three ways it costs nothing at all: a bundle whose active rules do not read
+`derived.history.*` is never queried; an action with no human principal is
+never queried; and a query that fails is logged and treated as zeros rather
+than failing the decision.
+
+The trade is that a burst inside one bucket is counted in the next one. Both
+shipped thresholds are daily volumes — 500 calls, 5 blocks — so a minute of
+staleness cannot change an answer a human would call correct. Setting
+`refresh_seconds: 0` buys exact counters at one query per decision.
+
+Aligning rather than caching with a TTL is also what keeps the counters
+replayable: the window is a pure function of the decision's timestamp, so
+`qed replay` recomputes the same numbers from the chain. A TTL cache would
+have been cheaper to write and would have made every replay of a
+history-dependent rule inconclusive forever.
+
 ## What is not optimised, on purpose
 
 * **Ed25519 signing is per record.** Batching signatures would make a record's

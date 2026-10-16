@@ -424,9 +424,24 @@ def evaluate(
 
 `compute_derived.history` reads a **snapshot** passed in `ctx` rather than querying anything — the engine itself performs no I/O.
 
-**Nothing collects that snapshot, so it is always zero.** `HistoryDerived` is threaded through `check_proposal` into `EvalContext`, and no caller in `qed` passes it: not the API, not the MCP or HTTP proxies, not the Claude Code hook, not `qed check`. Every decision this build has made saw `calls_24h = 0` and `blocks_24h = 0`. This sentence used to say the API layer collected it, which was never true and was invisible because zero is a plausible number.
+`check_proposal` collects it (`qed/core/history.py`), **since 2026-10-15**. For twelve weeks before that nothing did — this sentence used to claim the API layer collected it, which was never true and was invisible because zero is a plausible number — so `AG-BUD-007` (`calls_24h >= 500`) and `AG-IDN-010` (`blocks_24h >= 5`) were shipped, counted in the pack's rule total and in its compliance mappings, and could not fire.
 
-Two shipped rules read those counters and therefore **cannot fire**: `AG-BUD-007` (`derived.history.calls_24h >= 500`, "High call rate in the last day") and `AG-IDN-010` (`derived.history.blocks_24h >= 5`, "Repeated blocks from the same principal"). Both are `mode: shadow`, so nothing is wrongly allowed or blocked by it — but both are counted in the pack's rule total and in its compliance mappings, and an operator reading either rule would reasonably expect a loop or a probing agent to be surfaced. Found on 2026-10-15 while building `replay`, which has to know which inputs it can recover. Collecting the counters means a store query on the decision path, which is a trade against the §21 latency budget and a decision to make deliberately rather than as a side effect of this correction.
+Both numbers come from the **evidence chain** and nothing else, because that is the only source an auditor also has: `calls_24h` is `proposal` records for this principal in the window, `blocks_24h` is `verdict` records for this principal in the window whose decision was BLOCK.
+
+**The window is aligned, not rolling**, and that single choice is what makes the collection both affordable and replayable. It covers `[end - 24h, end)` with `end` floored to `history.refresh_seconds` (§16, default 60), so:
+
+- every decision inside one bucket shares a value — the query runs once per principal per bucket instead of once per decision, which is what keeps a store round-trip off the decision path (§21);
+- the window is a pure function of the decision's own timestamp, so `qed replay` recomputes the identical numbers from the chain (§14). A cadence implemented as a TTL cache would have been easier and would have made every replay of a history-dependent rule inconclusive forever, because nothing records which stale value a decision happened to see.
+
+The trade is explicit: a burst inside one bucket is counted in the *next* bucket. Both shipped thresholds are daily volumes, so a minute of staleness cannot change an answer a human would call correct. `refresh_seconds: 0` turns alignment off — exact counters, one query per decision, still replayable.
+
+Three things are **not** counted, each deliberately:
+
+- **an unattended agent.** The counters key on `principal_hash`, which is NULL when there is no human principal, so such an action contributes to nothing and sees zeros. Grouping every unattended agent under one NULL identity would make "this principal has been blocked repeatedly" mean "some agent somewhere has been".
+- **anything before migration 0006.** `decision` is denormalised onto `evidence` so blocks can be counted from indexed columns; it is NULL on older rows, so the block counter starts at the migration rather than claiming a history it cannot see.
+- **nothing at all, when no active rule reads `derived.history.*`.** A bundle that cannot look at the counters is never queried for them.
+
+A query that fails is logged and treated as zeros. Both rules that read these counters are `shadow` rules about a usage pattern; refusing an action because a COUNT failed would be the worst trade available.
 
 ---
 
@@ -693,7 +708,7 @@ What the chain can and cannot give it is the whole design:
 
 Exit **0** reproduced, **2** differs with nothing to account for it, **1** the question could not be answered (no such proposal, a chain that does not verify, a policy whose hash does not match). Three answers, three codes: folding "differs" into 1 would make a forged record indistinguishable from a missing file.
 
-The 24-hour history counters are **not** assumed, and that is a statement about this build rather than about replay: `HistoryDerived` is threaded through `check_proposal` into `EvalContext` and nothing in `qed` ever passes it, so every decision made so far saw zeros and replaying with zeros reproduces the real input. Two shipped rules read those counters and therefore cannot fire -- see §5.
+The 24-hour history counters are **recovered**, not assumed, which is what §5's aligned window buys: the window is a pure function of the decision's timestamp, so `replay` counts the same two numbers back out of the chain. They fall back to assumed in two cases, and `replay` says so when they do — a `verdict` inside the window whose payload retention has stripped, which makes `blocks_24h` a lower bound; and `history.refresh_seconds` having changed since the decision, which moves the boundary, so `--refresh-seconds` exists to say what it was.
 
 `tests/cli/test_command_set.py` holds this list to the CLI in both directions: a command the CLI gained and this line did not is a failure, and so is a name here that no longer exists. The rule above said "no new top-level command without a spec update" for twelve weeks and nothing checked it, which is how `approvals`, `status` and `checkpoint` came to be built and unlisted.
 
@@ -723,7 +738,14 @@ CREATE TABLE approval_windows (dedupe_key TEXT, approval_id TEXT, until TEXT, PR
 CREATE TABLE mandates (id TEXT PRIMARY KEY, for_agent TEXT, issued_by_hash TEXT, mandate_json TEXT, valid_from TEXT, valid_until TEXT, revoked_at TEXT);
 CREATE TABLE adapters (adapter_id TEXT PRIMARY KEY, kind TEXT, secret_hash TEXT, cert_fingerprint TEXT, created_at TEXT, rotated_at TEXT);
 CREATE TABLE policy_bundles (hash TEXT PRIMARY KEY, version TEXT, loaded_at TEXT, rules_count INT, diff_json TEXT, loaded_by_hash TEXT);
-CREATE TABLE history_daily (principal_hash TEXT, target TEXT, day TEXT, calls INT, blocks INT, PRIMARY KEY(principal_hash, target, day));
+-- `history_daily` was specified here and created by migration 0001. Nothing
+-- ever read or wrote it: it describes per-principal, per-target, per-day
+-- aggregates, where the two rules that need history ask for a rolling window
+-- over the chain instead. Migration 0006 drops it and adds what the counters
+-- actually need. An empty table would now be worse than none, because it would
+-- read as a second source for numbers that come from `evidence`.
+ALTER TABLE evidence ADD COLUMN decision TEXT;   -- 0006; verdict records only
+CREATE INDEX ix_evidence_principal_ts ON evidence(principal_hash, ts);
 ```
 Postgres additionally: `SELECT pg_try_advisory_lock(1734440037)` (= 0x67617465, ASCII "qed") for chain leader. No ORM; thin repository functions with parameterized SQL; migrations applied at startup (forward-only).
 
@@ -770,6 +792,7 @@ remote:                                   # all optional, outbound-only, hashes 
   packs:  { enabled: false, url: https://packs.qed.dev, public_key: … }
   intel:  { enabled: false }
 observability: { metrics: true, events_sse: true, siem: { format: ocsf, webhook: https://splunk… } }
+history: { refresh_seconds: 60 }          # §5; 0 = exact, one query per decision
 ui: { enabled: true, oidc_client_id: … }
 ```
 Secrets never in `qed.yaml`; only env names or secret-store refs.

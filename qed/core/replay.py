@@ -31,14 +31,22 @@ So every difference is classified. :attr:`ReplayReport.unexplained` is the set
 that no assumed input accounts for, and it is the only set that should worry
 anybody.
 
-**The 24-hour history counters are not assumed, and that is a statement about
-the product rather than about replay.** `HistoryDerived` is threaded all the
-way through `check_proposal` into `EvalContext`, and nothing in `qed` ever
-passes it: every decision this product has ever made saw `calls_24h = 0` and
-`blocks_24h = 0`. Replaying with zeros therefore reproduces the real input
-exactly. `tests/core/test_replay.py` pins that, so the day something starts
-supplying real counters the test fails and says to revisit this -- because on
-that day zeros would silently become an assumption nobody declared.
+**The 24-hour history counters are recovered, not assumed** -- which is the
+reason the collection in `qed/core/history.py` aligns its window instead of
+caching with a TTL. The counters cover ``[end - 24h, end)`` with `end` floored
+to `history.refresh_seconds`, a pure function of the decision's own timestamp,
+so the same two numbers can be counted back out of the chain. A TTL cache
+would have been easier and would have made every replay of a
+history-dependent rule inconclusive forever, because nothing records which
+stale value a decision happened to see.
+
+Two things can still put history back among the assumptions, and the caller
+declares it when they do: a `verdict` record inside the window whose payload
+retention has stripped, so the decision is unknowable and `blocks_24h` can
+only be a lower bound; and an operator having changed `history.refresh_seconds`
+since the decision, which moves the window boundary. That value is in the
+config rather than in the chain, so `--refresh-seconds` exists to say what it
+was.
 
 An input is also only named when it could have mattered. `derived.budget.*` and
 `derived.mandate.*` reach synthetic gates the engine checks before any rule, so
@@ -280,12 +288,29 @@ def _hit_view(verdict: Verdict) -> list[dict[str, str]]:
 
 
 def _attribution(rule_ids: Sequence[str], assumed: Sequence[str], reading: dict[str, str]) -> str:
-    """Which assumed input explains a difference involving `rule_ids`."""
-    for rule_id in rule_ids:
+    """Which assumed inputs explain a difference involving `rule_ids`.
+
+    Empty unless **every** rule that differs is accounted for by something the
+    caller declared it had to assume. Settling for "some rule here reads an
+    assumed input" was the first version and it was too generous in exactly
+    the direction that matters: a verdict whose hits differed by both a
+    budget rule and a history rule was excused as "the budget", and a real
+    difference hid behind an acknowledged one.
+
+    `rule_ids` are the rules that actually differ, not every rule either
+    verdict mentions. A rule present on both sides is not part of the
+    difference and cannot explain it.
+    """
+    if not rule_ids:
+        return ""
+    causes: list[str] = []
+    for rule_id in sorted(set(rule_ids)):
         depends = SYNTHETIC_DEPENDS_ON.get(rule_id) or reading.get(rule_id)
-        if depends and depends in assumed:
-            return depends
-    return ""
+        if depends is None or depends not in assumed:
+            return ""
+        if depends not in causes:
+            causes.append(depends)
+    return ", ".join(sorted(causes))
 
 
 def replay_verdict(
@@ -329,9 +354,13 @@ def replay_verdict(
     relevant = set(reading.values()) | always_matters
     assumed = tuple(name for name in assumed if name in relevant)
 
-    # Every rule named by either side, so a hit that appeared and one that
-    # vanished are both attributable.
-    touched = sorted({h.rule_id for h in recorded.hits} | {h.rule_id for h in replayed.hits})
+    # The rules that actually differ: present on one side only, or present on
+    # both with a different mode. A rule both verdicts agree on explains
+    # nothing, so including it would only ever excuse a difference it had no
+    # part in.
+    was = {hit.rule_id: hit.mode for hit in recorded.hits}
+    now = {hit.rule_id: hit.mode for hit in replayed.hits}
+    touched = sorted({rule_id for rule_id in was | now if was.get(rule_id) is not now.get(rule_id)})
 
     differences: list[Difference] = []
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final, cast
@@ -37,6 +37,7 @@ from qed.core.budget import charge_for, newly_exhausted
 from qed.core.clock import assess_clock
 from qed.core.evidence.hashing import principal_hash
 from qed.core.evidence.retention import PurgePlan, plan_purge
+from qed.core.history import window_for
 from qed.core.mandates import MandateError, verify_mandate
 from qed.core.policy.engine import evaluate
 from qed.core.policy.loader import LoadResult, baseline_pack_dir, load_bundle
@@ -117,6 +118,17 @@ class Session:
     writer: ChainWriter
     bundle: PolicyBundle
     findings: list[LintFinding]
+    #: ``(principal_hash, window_end) -> (calls, blocks)`` for this process.
+    #:
+    #: Keyed by the window's *end* rather than by a wall-clock deadline, which
+    #: is what makes this a cadence and not a TTL cache: every decision in one
+    #: bucket asks for the same key, so the query runs once, and nothing is
+    #: ever asked about a bucket that has passed. Entries for an old window
+    #: are dropped the first time a new one is seen, so the cache holds at
+    #: most one window's distinct principals.
+    history_cache: dict[tuple[str, datetime], tuple[int, int]] = field(
+        default_factory=dict, repr=False
+    )
 
     @property
     def public_keys_dir(self) -> Path:
@@ -526,6 +538,42 @@ def verify_session_mandate(session: Session, mandate: Mandate) -> None:
     verify_mandate(mandate, dict(load_public_keys(session.public_keys_dir)))
 
 
+def collect_history(session: Session, principal_hash: str | None, now: datetime) -> HistoryDerived:
+    """The counters for one principal as of `now`, from the chain.
+
+    Returns zeros without touching the store in the two cases where a query
+    would buy nothing: no active rule reads `derived.history.*`, so nothing
+    can look at the answer; or the proposal has no human principal, so there
+    is no identity to count against (see `qed/core/history.py`).
+
+    Otherwise the answer comes from one indexed query per principal per
+    window, which is what `history.refresh_seconds` is for.
+    """
+    if principal_hash is None or not session.bundle.reads_history:
+        return HistoryDerived()
+
+    start, end = window_for(now, session.config.history.refresh_seconds)
+    key = (principal_hash, end)
+    cached = session.history_cache.get(key)
+    if cached is None:
+        if session.history_cache and next(iter(session.history_cache))[1] != end:
+            # The window moved. Nothing will ask about the old one again.
+            session.history_cache.clear()
+        try:
+            cached = session.store.history_counts(
+                principal_hash=principal_hash, start=start, end=end
+            )
+        except Exception as exc:
+            # Never fatal. A counter that cannot be read must not stop the
+            # kernel deciding: the two rules that use it are shadow rules
+            # about a usage pattern, and refusing an action because a COUNT
+            # query failed would be the worst possible trade.
+            logger.warning("could not read the history counters, using zeros: %s", exc)
+            return HistoryDerived()
+        session.history_cache[key] = cached
+    return HistoryDerived(calls_24h=cached[0], blocks_24h=cached[1])
+
+
 def check_proposal(
     session: Session,
     proposal: ActionProposal,
@@ -558,8 +606,17 @@ def check_proposal(
         # an unverified mandate must not reach `evaluate`.
         verify_session_mandate(session, mandate)
 
+    # An explicit `history` overrides the chain, the way an explicit `budget`
+    # overrides the ledger: the golden cases pin one, and `qed replay` passes
+    # the numbers it recomputed for the recorded window.
     ctx = EvalContext(
-        now=stamp, mandate=mandate, history=history if history is not None else HistoryDerived()
+        now=stamp,
+        mandate=mandate,
+        history=(
+            history
+            if history is not None
+            else collect_history(session, proposal.principal.human_hash, stamp)
+        ),
     )
 
     records: list[Appended] = []

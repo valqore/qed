@@ -9,10 +9,12 @@ never sees an unlinted bundle, so the guarantee holds either way.
 
 from __future__ import annotations
 
+from functools import cached_property
 from typing import Final, Literal
 
 from pydantic import ConfigDict, Field
 
+from qed.core.policy.predicates import predicate_fields
 from qed.core.schemas import (
     ActionKind,
     ComplianceRef,
@@ -110,6 +112,28 @@ class PolicyBundle(Frozen):
 
     def active_rules(self) -> list[Rule]:
         return [r for r in self.rules if not r.disabled]
+
+    def reads(self, prefix: str) -> bool:
+        """Whether any **active** rule's predicate reads a path under `prefix`.
+
+        The decision path uses this to avoid collecting an input nothing can
+        look at: the 24-hour history counters cost a store query, and a bundle
+        with no rule reading `derived.history.*` must not pay for them
+        (SPEC §21). Active only -- a disabled rule cannot fire, so it cannot
+        justify the query either.
+        """
+        for rule in self.active_rules():
+            if rule.when is None:
+                continue
+            for path in predicate_fields(rule.when):
+                if path == prefix or path.startswith(prefix + "."):
+                    return True
+        return False
+
+    @cached_property
+    def reads_history(self) -> bool:
+        """Cached: asked once per decision and the bundle is frozen."""
+        return self.reads("derived.history")
 
     def by_id(self, rule_id: str) -> Rule | None:
         return next((r for r in self.rules if r.rule_id == rule_id), None)
