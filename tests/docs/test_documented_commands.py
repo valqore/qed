@@ -78,51 +78,59 @@ def _command_lines(text: str) -> list[str]:
     return out
 
 
-#: Matches a long option wherever it appears in a help screen.
-_FLAG = re.compile(r"--[a-z][a-z0-9-]*")
+def _flags_of(command: object) -> set[str]:
+    """Every long option a command accepts, from its parameter definitions.
 
+    **Not parsed out of `--help`.** The first version of this file did exactly
+    that, on the reasoning that the help screen is what a reader sees and so
+    is the right thing to hold a page to. It passed here and failed every CI
+    job: Typer renders options in a Rich table, Rich falls back to 80 columns
+    when stdout is not a terminal, and `--dir` came back as `--di`. The test
+    was coupled to terminal width, and the aesthetic argument for reading the
+    help text was worth less than the breakage.
 
-def _flags_from_help(*path: str) -> set[str]:
-    """The long options `qed <path> --help` shows a reader.
-
-    Read out of the help screen rather than off the Typer callback, and the
-    reason is the subject of this file: the help text is what a reader sees,
-    so it is the right thing to hold a document to. Introspecting the
-    callback would check the documents against the code's intent and miss a
-    flag that exists but is never shown.
-
-    `COLUMNS` is set wide because Typer renders options in a Rich table and a
-    narrow terminal wraps `--instance-id` onto two lines, which would make it
-    look absent and the assertion below fail for a reason that has nothing to
-    do with the documents.
+    Duck-typed because Typer no longer builds on `click.Group`: as of this
+    version `typer.main.get_command` returns a `typer._click.core.Command`,
+    which has the same `params` / `list_commands` / `get_command` surface and
+    fails `isinstance(..., click.Group)`.
     """
-    result = runner.invoke(app, [*path, "--help"], env={"COLUMNS": "400"})
-    assert result.exit_code == 0, f"`qed {' '.join(path)} --help` failed"
-    return set(_FLAG.findall(result.output))
+    names: set[str] = {"--help"}
+    for param in getattr(command, "params", []):
+        for attribute in ("opts", "secondary_opts"):
+            names.update(opt for opt in getattr(param, attribute, []) or [] if opt.startswith("--"))
+    return names
 
 
 def _cli_commands() -> dict[str, set[str]]:
-    """``{"adapters add": {"--dir", …}}`` for every command the CLI has.
+    """``{"adapters add": {"--dir", …}}`` for every command the CLI has."""
+    import typer.main
 
-    The command inventory comes from the same place
-    `tests/cli/test_command_set.py` reads it, so the two cannot disagree
-    about what exists.
-    """
+    root = typer.main.get_command(app)
     found: dict[str, set[str]] = {}
-    for info in app.registered_commands:
-        name = info.name or (info.callback.__name__.replace("_", "-") if info.callback else "")
-        if name:
-            found[name] = _flags_from_help(name)
-    for group in app.registered_groups:
-        assert group.name is not None
-        found[group.name] = _flags_from_help(group.name)
-        for info in group.typer_instance.registered_commands:
-            sub_name = info.name or (
-                info.callback.__name__.replace("_", "-") if info.callback else ""
-            )
-            if sub_name:
-                found[f"{group.name} {sub_name}"] = _flags_from_help(group.name, sub_name)
+
+    def walk(command: object, prefix: str = "") -> None:
+        names = getattr(command, "list_commands", None)
+        if names is None:
+            return
+        context = _context(command)
+        for name in names(context):
+            child = command.get_command(context, name)  # type: ignore[attr-defined]
+            if child is None:  # pragma: no cover - list_commands is the source
+                continue
+            path = f"{prefix}{name}"
+            found[path] = _flags_of(child)
+            if hasattr(child, "list_commands"):
+                walk(child, f"{path} ")
+
+    walk(root)
     return found
+
+
+def _context(command: object) -> object:
+    """A context object `list_commands` / `get_command` will accept."""
+    import click
+
+    return click.Context(command)  # type: ignore[arg-type]
 
 
 COMMANDS = _cli_commands()
