@@ -698,6 +698,8 @@ Rate limits: per adapter 100 proposals/s default; per principal 20/s. 429 with `
 
 `replay <proposal_id>` was built on 2026-10-15, and **the inventory above is now the whole of §14** -- nothing specified here is unbuilt.
 
+**`--version` is the one global option**, added 2026-10-17: it prints `VERSION` (§25.6) together with whether this is the single-file binary or a wheel, and the interpreter it is running on. It is a flag and not a command, so the inventory above is unchanged. It is eager -- it answers before any state directory is resolved, because the person most likely to type it has just downloaded a binary and has no `qed.yaml`. `doctor` reports the same number as its first line: `VERSION` is `ENGINE_VERSION`, stamped into every verdict record, so "which engine decided this?" and "which engine am I holding?" must have the same answer available.
+
 `replay` decides a recorded proposal again and reports whether the record follows from the policy it says it was decided under. This is the question `verify` cannot answer: every check the verifier makes is self-referential, so a chain an operator rewrote and re-signed passes it completely (`THREAT_MODEL.md`, chain-rewrite row). Deciding the proposal again is what notices, and `tests/cli/test_replay.py` proves it on a re-signed chain that `qed verify` returns 0 for.
 
 What the chain can and cannot give it is the whole design:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import sys
 import textwrap
@@ -70,6 +71,7 @@ from qed.runtime import (
     rotate_signing_key,
     settle,
 )
+from qed.version import VERSION
 
 if TYPE_CHECKING:  # `qed mcp` imports the MCP SDK lazily: it is an
     # adapters-only dependency (SPEC 20.3) and `qed check` should not pay for
@@ -143,6 +145,52 @@ app.add_typer(policy_app, name="policy")
 app.add_typer(packs_app, name="packs")
 app.add_typer(mandate_app, name="mandate")
 app.add_typer(adapters_app, name="adapters")
+
+
+def _show_version(value: bool) -> None:
+    """`qed --version`, eager so it answers before anything is opened.
+
+    Twelve weeks and twenty-two commands went by without a way to ask this
+    binary what it is. It matters more here than in most tools: `VERSION` is
+    `ENGINE_VERSION`, it is stamped into **every verdict record**, and the
+    record is immutable -- so "which engine decided this?" is a question an
+    operator has to be able to answer about the thing in their hand, not just
+    about the thing in the chain.
+
+    The interpreter and platform come too, because the single-file binary
+    freezes the interpreter it was built on and a bug report that omits which
+    one is a bug report that cannot be reproduced. `sys.frozen` is what tells
+    a binary apart from a wheel, and the difference has already produced one
+    defect: a frozen build telling a user with no Python to run `pip install`.
+
+    Eagerness is the load-bearing part. A `--version` that first resolved a
+    state directory would fail for the person most likely to type it: someone
+    who has just downloaded a binary and has no `qed.yaml` yet.
+    """
+    if not value:
+        return
+    build = "single-file binary" if getattr(sys, "frozen", False) else "wheel"
+    typer.echo(f"qed {VERSION} ({build}, python {platform.python_version()}, {sys.platform})")
+    raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_show_version,
+            is_eager=True,
+            help="Print the version and exit.",
+        ),
+    ] = False,
+) -> None:
+    # No docstring: `typer.Typer(help=...)` above owns the top-level help text,
+    # and the Homebrew formula's test block greps it for "Policy and evidence
+    # kernel". A docstring here is how that would quietly stop matching.
+    return
+
 
 DirOption = Annotated[Path, typer.Option("--dir", help="qed state directory (keys and chain).")]
 
@@ -1916,7 +1964,11 @@ def doctor(
     from qed.infra.secrets.resolver import CredentialResolver, SecretResolutionError
     from qed.infra.upstreams import load_upstreams
 
-    report: dict[str, object] = {}
+    # First key, and first line of the human output. `doctor` output is what
+    # goes into a support ticket, and the version is the one field that makes
+    # the rest of it interpretable -- it is also `ENGINE_VERSION`, the value
+    # stamped into every verdict this instance writes.
+    report: dict[str, object] = {"version": VERSION}
     session = open_session(directory=directory, config_path=config, strict_policy=False)
     try:
         report["instance_id"] = session.config.instance_id
@@ -2011,6 +2063,12 @@ def doctor(
         typer.echo(json.dumps(report, indent=2))
         return
 
+    # Both renderings, deliberately. The comment on `report["clock"]` above
+    # says why: this command builds a dict and then prints it by hand, so a
+    # field added to one and not the other is a field that is silently absent
+    # from whichever an operator happens to read. The JSON had `version` first
+    # and this block did not, for exactly as long as it took to run it.
+    typer.echo(f"version    : {report['version']}")
     typer.echo(f"instance   : {report['instance_id']}  (mode {report['mode']})")
     typer.echo(f"signing key: {report['signing_key']}")
     typer.echo(f"policy     : {report['policy_rules']} rules")

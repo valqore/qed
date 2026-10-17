@@ -6,6 +6,39 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `qed --version`, which `v1.0.0` shipped without
+
+```
+$ qed --version
+qed 1.0.0 (wheel, python 3.13.14, win32)
+```
+
+There was no way to ask this binary what it was. Not `--version`, not a
+`version` command, and not `doctor` — the command whose entire job is posture.
+Twenty-two commands and twelve weeks.
+
+It matters more here than in most tools, because `VERSION` **is**
+`ENGINE_VERSION`, the value stamped into every verdict record, and the record
+is immutable. This project already has the scar: `ENGINE_VERSION` sat at
+`0.1.0` through seven releases, so an auditor asking "which engine decided
+this?" got an answer wrong by six versions that nothing could correct
+afterwards. "Which engine am I holding?" is the same question one step earlier.
+
+The flag is **eager**: it answers before any state directory is resolved,
+because whoever types it has most likely just downloaded a binary and has no
+`qed.yaml`, no keys and no chain. It reports whether it is the single-file
+binary or a wheel, since the binary freezes the interpreter it was built on and
+a bug report that omits which is one that cannot be reproduced. It is a flag
+rather than a command, so SPEC §14's inventory of 22 stays 22.
+
+`doctor` now reports the same number as its first line — and adding it there
+reproduced a known trap on the spot. `doctor` builds a dict and then prints it
+by hand, which its own source warns about on the line above ("this has to be
+added in both places, which is how the first version of this silently printed
+nothing"). The JSON had `version` and the human output did not, for as long as
+it took to run the command once. There is now one test per rendering, and the
+human one was confirmed to fail while the JSON one passed.
+
 ### Changed — the names are reserved, and that made the documentation wrong
 
 PyPI and npm both hold `valqore-qed`, `qed-verify` and `valqore`, each as a

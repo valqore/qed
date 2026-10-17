@@ -35,6 +35,7 @@ several replicas starting at the same moment.
 | A byte-pinned fixture written with CRLF on Windows | the pin matched on the machine that made it |
 | **`qed-verify` printing `OK` over a check it had skipped** | every test supplied `--instance-id`, so no test ever saw the output an auditor following the README would get |
 | A repository about to publish a defect list for the commercial product | no test reads a document the way an outsider would |
+| **`v1.0.0` shipped with no way to ask it its version** | nothing in the suite asks the binary what it is, and the Homebrew formula's test block avoids `--version` on purpose -- correct reasoning about the *test*, mistaken for a reason the flag need not exist |
 
 Each is now guarded, and the guards are the point of the list: it is not that
 these bugs existed, it is that the *class* keeps recurring.
