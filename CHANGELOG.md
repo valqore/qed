@@ -8,12 +8,23 @@ independently (SPEC §25.6).
 
 ### Changed — the names are reserved, and that made the documentation wrong
 
-PyPI `valqore-qed`, `qed-verify` and `valqore` are held, each as a `0.0.0`
-placeholder whose README says in its first line that it installs nothing.
-`brew tap valqore/tap` resolves to `valqore/homebrew-tap`, which now exists,
-is **private**, and holds the real formula rendered from
-`deploy/homebrew/qed.rb.template`. Two of SPEC §24.1's reservations are done;
-npm, a public `ghcr.io/valqore/qed` and the EUIPO/USPTO filings are not.
+PyPI and npm both hold `valqore-qed`, `qed-verify` and `valqore`, each as a
+`0.0.0` placeholder whose README says in its first line that it installs
+nothing. `brew tap valqore/tap` resolves to `valqore/homebrew-tap`, which now
+exists, is **private**, and holds the real formula rendered from
+`deploy/homebrew/qed.rb.template`. Three of SPEC §24.1's reservations are done;
+a public `ghcr.io/valqore/qed` and the EUIPO/USPTO filings are not.
+
+npm served a surprise worth recording. The account's 2FA is a security key with
+no authenticator app, so there was no six-digit code to pass as `--otp`, and a
+plain publish returned `403 Two-factor authentication or granular access token
+with bypass 2fa enabled is required`. What resolved it was npm's **staged
+publishing**: the registry accepted the publish into a staging queue, and for a
+name that does not exist yet it publishes a placeholder of its own at
+`0.0.0-stage` while keeping the submitted contents private until a maintainer
+approves them. So the names are held, `npm install valqore-qed` resolves, and
+what it serves is npm's holding version rather than ours until the queue is
+approved — which needs the 2FA that staging did not.
 
 The interesting part is what reserving a name broke. Three documents said the
 names were unreserved and that the install commands therefore failed —
