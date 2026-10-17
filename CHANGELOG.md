@@ -6,6 +6,56 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Changed — the names are reserved, and that made the documentation wrong
+
+PyPI `valqore-qed`, `qed-verify` and `valqore` are held, each as a `0.0.0`
+placeholder whose README says in its first line that it installs nothing.
+`brew tap valqore/tap` resolves to `valqore/homebrew-tap`, which now exists,
+is **private**, and holds the real formula rendered from
+`deploy/homebrew/qed.rb.template`. Two of SPEC §24.1's reservations are done;
+npm, a public `ghcr.io/valqore/qed` and the EUIPO/USPTO filings are not.
+
+The interesting part is what reserving a name broke. Three documents said the
+names were unreserved and that the install commands therefore failed —
+`README.md`, `landing/index.html` and `landing/README.md` — and a test
+docstring explained the pre-launch notice on exactly that basis. **All four
+were true in the morning and false by the afternoon**, and in the direction
+that matters: `pip install valqore-qed` used to fail, which is self-explaining,
+and now exits 0 having installed a package containing one README. A reader who
+tried it would have had every reason to believe QED was installed. The notice
+is doing more work than it was, not less, and all four now say so.
+
+This is the third time a state claim has died at a launch step (see the
+`v1.0.0` entry and `docs/validation.md` #49). The claims that survived were,
+again, the ones about mechanism rather than about today.
+
+### Added — a renderer for the Homebrew formula, because the one-liner was wrong
+
+`deploy/homebrew/render.sh <version> [sums-dir]` fills the template's version
+and three checksums from a release's own `.sha256` files and prints the formula
+the tap carries.
+
+It exists because the obvious `sed 's/VERSION/1.0.0/g'` was used once, by
+hand, to produce the tap's first formula, and the template's header prose
+contains the word `VERSION`: the formula below came out correct and the
+documentation above it came out as "`1.0.0`, and the three SHA256 values, come
+from the release". Right answer, wrong file, nobody looking. So substitution
+now skips comment lines, the result is refused if a placeholder survives in a
+line Homebrew will read, and the rendered header names the command that made
+it so the claim is checkable by running it.
+
+Six tests, and one of them earns its keep: no comment in the real template
+contains a placeholder, so rendering the real template passes whether comments
+are substituted or not. `test_the_prose_survives_substitution` renders a
+*modified* template with a planted comment instead, and it was confirmed to
+fail against the blanket-substitution version before being kept — which is the
+discipline `docs/validation.md` #60b was written about.
+
+A seventh bug found while writing them: the script's `EXIT` trap ended in
+`[ -n "$tmp" ] && rm -rf "$tmp"`, false whenever no temporary directory was
+made, and a trap's final status becomes the script's exit status. It printed a
+perfect formula and exited 1.
+
 ### Added — `gcs-retention`, a second anchor whose refusal has been measured
 
 The GCP twin of `s3-object-lock`, and the fifth checkpoint publisher. A GCS

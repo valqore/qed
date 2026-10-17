@@ -52,7 +52,9 @@ ALLOWED_ABSENT = {
     # Written by the operator, not shipped.
     "qed.yaml",
     "upstreams.yaml",
-    # The tap is a separate repository and is not published (SPEC §24.1).
+    # The rendered formula lives in `valqore/homebrew-tap` (reserved
+    # 2026-10-17, private until the flip), not here. Here there is only the
+    # template it is rendered from, by `deploy/homebrew/render.sh`.
     "deploy/homebrew/qed.rb",
     # `docs/validation.md` names this one precisely *because* it does not
     # exist: the row records that `README.md` cited it for eight weeks while

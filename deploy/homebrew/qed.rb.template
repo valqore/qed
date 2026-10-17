@@ -2,23 +2,27 @@
 #
 # ## This is a template, and it is not published
 #
-# The formula lives in a **separate tap repository**, `valqore/tap`, which does
-# not exist yet: SPEC §24 lists reserving the Homebrew tap among the names that
-# must be registered before the first public push, and publishing is the
-# irreversible step. So this file is the thing that will be copied there, kept
-# here so that the binary and the formula that installs it change together.
+# The formula lives in a **separate tap repository**: `brew tap valqore/tap`
+# resolves to `github.com/valqore/homebrew-tap`, which was reserved on
+# 2026-10-17 and is **private**, because every release URL in the rendered
+# formula points at an asset of a repository that is still private too. A
+# public tap whose only formula 404s is worse than no tap. Both go public in
+# the same step.
 #
-# ## Filling it in
+# This file stays here, placeholders and all, so that the binary and the
+# formula that installs it change together, and so that there is exactly one
+# source of truth. The copy in the tap is generated from it and must never be
+# hand-edited.
 #
-# `VERSION`, and the four `SHA256` values, come from the release. Every build
-# writes a `.sha256` beside its binary:
+# ## Rendering it
 #
-#     gh release download v0.9.0 --pattern 'qed-*.sha256' --dir /tmp/qed
-#     cat /tmp/qed/*.sha256
+# `./render.sh <version>` fills in the version and the three `SHA256` values
+# from that release's own `.sha256` files and writes the formula to stdout.
 #
-# Do not compute them locally from a binary you built. The point of the
-# checksum is that the file Homebrew downloads is the file CI produced; a
-# locally-computed hash proves only that you hashed your own build.
+# It reads them from the release rather than computing them, and that is the
+# whole point of the checksum: it proves the file Homebrew downloads is the
+# file CI produced. A locally computed hash proves only that you hashed your
+# own build.
 #
 # ## Why a binary rather than a Python formula
 #

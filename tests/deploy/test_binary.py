@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -102,9 +103,11 @@ class TestTheHomebrewFormula:
         assert self.FORMULA.exists()
 
     def test_it_is_a_template_and_says_so(self) -> None:
-        """Publishing is the irreversible step and the tap is not reserved yet
-        (SPEC 24). A file that looked ready to publish would be an invitation
-        to publish it."""
+        """The tap repository was reserved on 2026-10-17 and is private, so
+        the reason this file keeps its placeholders has changed: it is no
+        longer that there is nowhere to put a rendered formula, it is that
+        there must be exactly one source of truth for it. The tap's copy is
+        `render.sh`'s output; a filled-in formula here would be a second."""
         text = self.formula()
         assert self.FORMULA.suffix == ".template"
         assert "not published" in text
@@ -132,6 +135,134 @@ class TestTheHomebrewFormula:
         text = self.formula()
         assert "policy lint" in text
         assert "qed verify" in text
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="render.sh needs bash")
+class TestRenderingTheFormula:
+    """`render.sh` turns the template into the file that goes in the tap.
+
+    It exists because the obvious alternative -- `sed 's/VERSION/1.0.0/g'` --
+    was used once, by hand, to produce the tap's first formula, and it rewrote
+    the template's own documentation into nonsense ("`1.0.0`, and the three
+    SHA256 values, come from the release") while leaving the formula below it
+    correct. The formula was right and the file was wrong, which is the shape
+    of mistake nobody checks for.
+
+    These tests feed it checksums from a directory instead of a release, which
+    is why they need no network and no `gh`.
+    """
+
+    RENDER = ROOT / "deploy" / "homebrew" / "render.sh"
+
+    PLATFORMS: ClassVar[dict[str, str]] = {
+        "macos-arm64": "a" * 64,
+        "macos-x86_64": "b" * 64,
+        "linux-x86_64": "c" * 64,
+    }
+
+    def sums(self, directory: Path, platforms: dict[str, str] | None = None) -> str:
+        """Write `.sha256` files shaped like the ones the release carries."""
+        for platform, digest in (platforms or self.PLATFORMS).items():
+            name = f"qed-9.9.9-{platform}"
+            (directory / f"{name}.sha256").write_text(f"{digest}  {name}\n", encoding="utf-8")
+        return str(directory).replace("\\", "/")
+
+    def render(self, directory: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(self.RENDER), "9.9.9", self.sums(directory, **kwargs)],  # type: ignore[arg-type]
+            capture_output=True,
+            text=True,
+        )
+
+    def test_it_exists(self) -> None:
+        assert self.RENDER.exists()
+
+    def test_it_renders_a_formula_with_nothing_left_to_fill_in(self, tmp_path: Path) -> None:
+        """A rendered formula still carrying `SHA256_LINUX_X86_64` is a
+        `brew install` that dies on a checksum mismatch, and the only place to
+        notice is the user's terminal."""
+        done = self.render(tmp_path)
+        assert done.returncode == 0, done.stderr
+
+        body = [line for line in done.stdout.splitlines() if not line.lstrip().startswith("#")]
+        assert body, "no formula came out"
+        for line in body:
+            assert "SHA256_" not in line
+            assert "VERSION" not in line
+
+        assert 'version "9.9.9"' in done.stdout
+        for digest in self.PLATFORMS.values():
+            assert f'sha256 "{digest}"' in done.stdout
+
+    def test_each_platform_gets_its_own_checksum(self, tmp_path: Path) -> None:
+        """Three URLs and three hashes, paired by platform. Pasting one hash
+        into all three slots passes every check Homebrew makes at *build* time
+        and fails for two thirds of users."""
+        out = self.render(tmp_path).stdout
+        for platform, digest in self.PLATFORMS.items():
+            url = next(line for line in out.splitlines() if f"qed-9.9.9-{platform}" in line)
+            following = out.splitlines()[out.splitlines().index(url) + 1]
+            assert digest in following, f"{platform} is paired with the wrong checksum"
+
+    def test_it_refuses_when_a_platform_has_no_checksum(self, tmp_path: Path) -> None:
+        """The release matrix gaining a platform must fail here rather than
+        ship a formula that quietly ignores it -- which is the same argument
+        `test_it_names_every_asset_the_release_builds` makes in reverse."""
+        done = self.render(tmp_path, platforms={"linux-x86_64": "c" * 64})
+        assert done.returncode != 0
+        assert "SHA256_MACOS_ARM64" in done.stderr
+
+    def test_it_succeeds_quietly(self, tmp_path: Path) -> None:
+        """A script that prints the right answer and exits 1 is a red CI run
+        with nothing wrong in it. This one did: its `EXIT` trap ended in
+        `[ -n "$tmp" ] && rm -rf "$tmp"`, which is false whenever no temporary
+        directory was made, and a trap's last status becomes the exit status."""
+        done = self.render(tmp_path)
+        assert done.returncode == 0
+        assert done.stderr == ""
+
+    def test_it_names_the_command_that_produced_it(self, tmp_path: Path) -> None:
+        """A generated file that says so without saying how is not checkable.
+        Naming `render.sh` means a reader can run it and diff."""
+        comments = [
+            line
+            for line in self.render(tmp_path).stdout.splitlines()
+            if line.lstrip().startswith("#")
+        ]
+        assert comments, "the rendered formula has no header"
+        assert any("render.sh" in line for line in comments)
+
+    def test_the_prose_survives_substitution(self, tmp_path: Path) -> None:
+        """The bug this script was written for, and the reason this test goes
+        to the trouble of rendering a *modified* template.
+
+        No comment in the real template happens to contain `VERSION` below the
+        header, so a test that renders the real one passes whether comments are
+        substituted or not -- it asserts something true on both sides of the
+        change, which is a test this project has written before and does not
+        want again. So: plant a comment that a blanket `sed` would mangle, and
+        check it comes out intact.
+        """
+        work = tmp_path / "render"
+        work.mkdir()
+        shutil.copy(self.RENDER, work / "render.sh")
+
+        planted = "  # VERSION and the SHA256_LINUX_X86_64 slot are filled by render.sh."
+        template = (ROOT / "deploy" / "homebrew" / "qed.rb.template").read_text(encoding="utf-8")
+        template = template.replace("class Qed < Formula", f"class Qed < Formula\n{planted}")
+        (work / "qed.rb.template").write_text(template, encoding="utf-8")
+
+        sums = tmp_path / "sums"
+        sums.mkdir()
+        done = subprocess.run(
+            ["bash", str(work / "render.sh"), "9.9.9", self.sums(sums)],
+            capture_output=True,
+            text=True,
+        )
+        assert done.returncode == 0, done.stderr
+        assert planted in done.stdout.splitlines(), (
+            "a comment mentioning a placeholder was rewritten; substitution must skip comment lines"
+        )
 
 
 # --------------------------------------------------------------------------

@@ -24,9 +24,13 @@ hardware, including air-gapped.
 > still appears in `docs/adr/`, `CHANGELOG.md` and two superseded spec
 > literals, and nowhere else.
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
-> **Nothing is released yet:** `valqore-qed` is on no index — no PyPI
-> package, no npm package, no GHCR image, no Homebrew tap. Install from a
-> clone, as the quick start below does. `.github/workflows/release.yml` holds
+> **Nothing is released yet:** `pip install valqore-qed` resolves, and what it
+> installs is a `0.0.0` placeholder whose own description says it installs
+> nothing — the name was reserved on 2026-10-17 so that nobody else could take
+> it, and a reserved name is not a release. There is no npm package, no public
+> GHCR image, and the `valqore/tap` Homebrew tap is reserved but private, so
+> `brew tap` fails. Install from a clone, as the quick start below does.
+> `.github/workflows/release.yml` holds
 > both publishing steps behind the `PUBLISH_PYPI` and `PUBLISH_GHCR` repository
 > variables, and what turns them on is SPEC §24.1's reservations: those names,
 > the domain, the EUIPO/USPTO filings. Distribution is the step that cannot be

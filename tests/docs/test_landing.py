@@ -219,11 +219,17 @@ class TestTheDenyList:
 
 class TestThePrelaunchNotice:
     def test_it_is_present(self, visible: str) -> None:
-        """While the names are unreserved, `pip install valqore-qed` fails.
+        """`pip install valqore-qed` now *succeeds*, which is why this notice
+        matters more than it did.
 
-        The page shows the command because that is what it will be; it carries
-        the notice because today it is not. `landing/README.md` says to remove
-        the notice in the same commit that sets `PUBLISH_PYPI=true`.
+        Until 2026-10-17 the command failed, and a failure is self-explaining.
+        The names are reserved now, so pip resolves and installs a `0.0.0`
+        placeholder that contains nothing but a README. A reader who tried the
+        command and got a clean exit would have every reason to think QED was
+        installed. The page shows the command because that is what it will be;
+        it carries the notice because what is behind the name today is not the
+        product. `landing/README.md` says to remove the notice in the same
+        commit that sets `PUBLISH_PYPI=true`.
         """
         assert "Not published yet" in visible
         assert "do not work yet" in visible

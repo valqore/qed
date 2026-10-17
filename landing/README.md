@@ -44,8 +44,13 @@ compliance percentages) has appeared.
 
 In order. Each line is a thing that is false until it is done.
 
-1. Reserve the names: PyPI `valqore-qed` and `qed-verify`, the `valqore/tap`
-   Homebrew tap, `ghcr.io/valqore/qed`, and file the trademark (SPEC §25.1).
+1. Reserve the names. **Done 2026-10-17** for PyPI (`valqore-qed`,
+   `qed-verify` and `valqore`, each a `0.0.0` placeholder that installs
+   nothing) and for the Homebrew tap (`valqore/homebrew-tap`, private, holding
+   the rendered formula). Still to do: npm, making `ghcr.io/valqore/qed`
+   public, and filing the trademark (SPEC §25.1). Note what reserving changed:
+   `pip install valqore-qed` used to fail and now succeeds, so the pre-launch
+   notice in `index.html` is doing more work than before, not less.
 2. Enable GitHub private vulnerability reporting. `SECURITY.md` points at
    `tunc@valqore.io`, which is a deliberate choice for launch and not an
    oversight: a maintainer address that is read beats a role alias that
