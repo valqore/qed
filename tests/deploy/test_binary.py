@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 
@@ -137,7 +137,45 @@ class TestTheHomebrewFormula:
         assert "qed verify" in text
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="render.sh needs bash")
+def working_bash() -> str | None:
+    """A `bash` that is actually bash, or `None`.
+
+    `shutil.which("bash")` is not the question, and answering it broke `main`.
+    On a GitHub `windows-latest` runner it returns
+    `C:\\Windows\\System32\\bash.exe` -- the WSL launcher, with no distribution
+    installed. It prints a UTF-16 message about `wsl --install -d <Distro>` and
+    exits 1, so the skip never fired and four tests failed on a `bash` that
+    exists and is not one.
+
+    Git for Windows is on those runners as well and its bash works, so this
+    prefers finding a working one over skipping: Windows runs these tests
+    rather than pretending it cannot. Running `echo` is the only way to tell
+    the difference, and it is cheap.
+    """
+    candidates = [
+        "bash",
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved is None:
+            continue
+        try:
+            done = subprocess.run(
+                [resolved, "-c", "echo qed"], capture_output=True, text=True, timeout=60
+            )
+        except (OSError, subprocess.SubprocessError):  # pragma: no cover - platform
+            continue
+        if done.returncode == 0 and done.stdout.strip() == "qed":
+            return resolved
+    return None
+
+
+BASH = working_bash()
+
+
+@pytest.mark.skipif(BASH is None, reason="no working bash (a WSL stub does not count)")
 class TestRenderingTheFormula:
     """`render.sh` turns the template into the file that goes in the tap.
 
@@ -169,7 +207,7 @@ class TestRenderingTheFormula:
 
     def render(self, directory: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["bash", str(self.RENDER), "9.9.9", self.sums(directory, **kwargs)],  # type: ignore[arg-type]
+            [cast("str", BASH), str(self.RENDER), "9.9.9", self.sums(directory, **kwargs)],  # type: ignore[arg-type]
             capture_output=True,
             text=True,
         )
@@ -255,7 +293,7 @@ class TestRenderingTheFormula:
         sums = tmp_path / "sums"
         sums.mkdir()
         done = subprocess.run(
-            ["bash", str(work / "render.sh"), "9.9.9", self.sums(sums)],
+            [cast("str", BASH), str(work / "render.sh"), "9.9.9", self.sums(sums)],
             capture_output=True,
             text=True,
         )
