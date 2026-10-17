@@ -48,10 +48,8 @@ In order. Each line is a thing that is false until it is done.
    `qed-verify` and `valqore`, each a `0.0.0` placeholder that installs
    nothing) and for the Homebrew tap (`valqore/homebrew-tap`, private, holding
    the rendered formula). **npm done the same day** — `valqore-qed`,
-   `qed-verify` and `valqore`, each currently serving the `0.0.0-stage`
-   placeholder npm publishes for a staged name; approving the staged `0.0.0`
-   in npm's Staged Packages tab replaces it with ours and is cosmetic, because
-   the name is held either way. Still to do: making `ghcr.io/valqore/qed`
+   `qed-verify` and `valqore`, staged and then approved, so each serves the
+   `0.0.0` placeholder at `latest`. Still to do: making `ghcr.io/valqore/qed`
    public, and filing the trademark (SPEC §25.1). Note what reserving changed:
    `pip install valqore-qed` and `npm install valqore-qed` both used to fail
    and now succeed, so the pre-launch notice in `index.html` is doing more work

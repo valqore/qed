@@ -28,11 +28,10 @@ hardware, including air-gapped.
 > installs is a `0.0.0` placeholder whose own description says it installs
 > nothing — the name was reserved on 2026-10-17 so that nobody else could take
 > it, and a reserved name is not a release. `npm install valqore-qed` resolves
-> too, to a `0.0.0-stage` placeholder npm itself publishes when a name is
-> staged — QED is a Python program and there has never been a JavaScript
-> client. There is no public GHCR image, and the `valqore/tap` Homebrew tap is
-> reserved but private, so `brew tap` fails. Install from a clone, as the
-> quick start below does.
+> to the same kind of placeholder — QED is a Python program and there has never
+> been a JavaScript client. There is no public GHCR image, and the
+> `valqore/tap` Homebrew tap is reserved but private, so `brew tap` fails.
+> Install from a clone, as the quick start below does.
 > `.github/workflows/release.yml` holds
 > both publishing steps behind the `PUBLISH_PYPI` and `PUBLISH_GHCR` repository
 > variables, and what turns them on is SPEC §24.1's reservations: those names,

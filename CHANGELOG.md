@@ -22,9 +22,18 @@ with bypass 2fa enabled is required`. What resolved it was npm's **staged
 publishing**: the registry accepted the publish into a staging queue, and for a
 name that does not exist yet it publishes a placeholder of its own at
 `0.0.0-stage` while keeping the submitted contents private until a maintainer
-approves them. So the names are held, `npm install valqore-qed` resolves, and
-what it serves is npm's holding version rather than ours until the queue is
-approved — which needs the 2FA that staging did not.
+approves them. Approving needs the 2FA that staging did not, and npm's website
+takes a security key for it where the CLI could not. All three were approved
+the same day, so `latest` is now `0.0.0` and `npm install valqore-qed` serves
+the stub rather than npm's holding version; `0.0.0-stage` stays in each
+package's version list as the artefact of how it got there.
+
+That sequence falsified this entry's own first draft within the hour: it had
+said npm serves the holding version, which stopped being true the moment the
+queue was approved. **Fifth time in two days, and the pattern held again** —
+the one claim that survived every one of those five is `landing/index.html`'s,
+which says what the placeholder *does* ("installs nothing") rather than which
+version string is in front of it.
 
 The interesting part is what reserving a name broke. Three documents said the
 names were unreserved and that the install commands therefore failed —
