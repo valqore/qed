@@ -39,6 +39,28 @@ nothing"). The JSON had `version` and the human output did not, for as long as
 it took to run the command once. There is now one test per rendering, and the
 human one was confirmed to fail while the JSON one passed.
 
+### Changed — a caveat that stopped being true without becoming right
+
+Four pages told a reader `pip install valqore-qed` was "not on PyPI yet", and
+the guard written for finding #48 enforced that exact phrase. Reserving the
+name made all five wrong at once, and in the direction that costs a reader
+something: they would run the command, see a clean exit, and conclude the page
+had merely been pessimistic.
+
+So `docs/index.md`, `docs/deployment.md`, `docs/onboarding-shadow-to-enforce.md`
+and `docs/ci.md` now say what the command *does* — it installs a `0.0.0`
+package holding one README — and `INSTALL_COMMANDS` in `tests/docs/test_claims.py`
+matches on that instead of on the state of an index. Same guard, same strength,
+a marker that does not expire the moment a name is taken.
+
+Removed while there: an `or "not on pypi yet" in text` fallback in that guard,
+which let a page's PyPI warning satisfy the requirement for a Docker command on
+the same page.
+
+`README.md`'s quick start now opens with `qed --version`, so the flag is one of
+the commands `tests/docs/test_documented_commands.py` executes — which is how
+finding #27 was caught.
+
 ### Changed — the names are reserved, and that made the documentation wrong
 
 PyPI and npm both hold `valqore-qed`, `qed-verify` and `valqore`, each as a

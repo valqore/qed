@@ -104,8 +104,14 @@ including the ones that are less flattering.
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]" -e packages/qed-verify
 
+qed --version                                     # confirms what you installed
 qed demo
 ```
+
+`qed --version` prints the version, whether it is a wheel or the single-file
+binary, and the interpreter — which is what a bug report needs and what tells
+you whether `pip install valqore-qed` has shadowed a clone. The number is also
+`ENGINE_VERSION`, stamped into every verdict this instance writes.
 
 One command, no configuration: it generates a key, writes a `qed.yaml`, decides
 five proposals — a read, a destructive migration, an open security group, an

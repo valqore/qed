@@ -71,11 +71,12 @@ protecting you, which is the only useful direction for a posture command.
 Before anything is in front of anything, confirm the kernel works and the chain
 verifies. Five minutes, no integration.
 
-!!! warning "`valqore-qed` is not on PyPI yet"
-    The name reservations in SPEC §24.1 are the publication gate, and
-    publishing is the irreversible step. Until that is done, install from
-    the repository: `git clone https://github.com/valqore/qed && cd qed &&
-    pip install -e .`
+!!! warning "`pip install valqore-qed` installs a placeholder, not QED"
+    The name is reserved; QED is not released. What PyPI serves today is a
+    `0.0.0` package containing one README and no code, so the command below
+    exits cleanly and installs nothing usable. Install from the repository
+    instead: `git clone https://github.com/valqore/qed && cd qed &&
+    pip install -e .`, and run `qed --version` to see which you have.
 
 ```bash
 pip install valqore-qed

@@ -159,8 +159,20 @@ RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 # Markers are matched case-insensitively: one of these pages carries the
 # caveat as a YAML comment inside a workflow sample, where a sentence starts
 # with a capital.
+#: Each unavailable install command, the phrase a page must carry if it tells
+#: a reader to run it, and the repository variable still gating that publish.
+#:
+#: The pip marker used to be "not on pypi yet", and that sentence **became
+#: false on 2026-10-17** without becoming true: the name was reserved, so
+#: `pip install valqore-qed` resolves and installs a `0.0.0` package holding
+#: one README. A page saying "not on PyPI yet" was then wrong in the one
+#: direction that costs a reader something -- they would run it, see a clean
+#: exit, and believe the page had been pessimistic. So the marker names what
+#: the command *does* rather than what the index contains, which is the shape
+#: of claim that survived five launch steps in two days while every
+#: state-of-the-world sentence around it died.
 INSTALL_COMMANDS = {
-    "pip install valqore-qed": ("not on pypi yet", "PUBLISH_PYPI"),
+    "pip install valqore-qed": ("installs a placeholder", "PUBLISH_PYPI"),
     "docker run ghcr.io/valqore/qed": ("not on ghcr yet", "PUBLISH_GHCR"),
 }
 
@@ -271,7 +283,10 @@ def test_an_install_command_that_cannot_work_says_so_where_it_is_written() -> No
     offenders: list[str] = []
     for page, command, marker in pages_telling_a_reader_to_install():
         text = page.read_text(encoding="utf-8").lower()
-        if marker not in text and "not on pypi yet" not in text:
+        # Each command's own marker, and nothing else. There used to be an
+        # `or "not on pypi yet" in text` here, which meant a page warning
+        # about PyPI satisfied the guard for a Docker command it also carried.
+        if marker not in text:
             offenders.append(f"{page.relative_to(ROOT).as_posix()} says `{command}`")
     assert not offenders, (
         "these pages tell a reader to run a command that cannot work and do not "
