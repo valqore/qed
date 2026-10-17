@@ -8,12 +8,12 @@ in the export would say so.
 
 Publishing is what closes that. The root goes somewhere outside the instance's
 control and is timestamped by something other than the instance: an S3 bucket
-with object-lock, a signed git tag in a repository somebody else can read, a
-file on a volume with a different retention policy. An auditor then compares
-the root in the export against the root that was published, and a rewritten
-chain fails that comparison.
+with object-lock, a GCS bucket with a locked retention policy, a signed git tag
+in a repository somebody else can read, a file on a volume with a different
+retention policy. An auditor then compares the root in the export against the
+root that was published, and a rewritten chain fails that comparison.
 
-Three rules that all four implementations follow.
+Three rules that all five implementations follow.
 
 **A failed publication never stops the chain.** A bucket that is unreachable
 must not make `qed` stop deciding, so every publisher returns a
@@ -60,11 +60,13 @@ def build_publishers(specs: list[dict[str, object]]) -> list[Publisher]:
     """Construct the configured publishers (SPEC §16's `evidence.checkpoint`).
 
     Imported lazily and by name, so an instance with no S3 publisher never
-    imports boto3 and an instance with no git publisher never shells out. An
-    unknown type raises: a silently ignored publisher is an anchor the operator
-    believes exists.
+    imports boto3, an instance with no GCS publisher never imports
+    google-cloud-storage, and an instance with no git publisher never shells
+    out. An unknown type raises: a silently ignored publisher is an anchor the
+    operator believes exists.
     """
     from qed.infra.publishers.file import FilePublisher
+    from qed.infra.publishers.gcs import GcsRetentionPublisher
     from qed.infra.publishers.git import GitTagPublisher
     from qed.infra.publishers.s3 import S3ObjectLockPublisher
     from qed.remote.anchor import AnchorPublisher
@@ -72,6 +74,9 @@ def build_publishers(specs: list[dict[str, object]]) -> list[Publisher]:
     builders: dict[str, Callable[[dict[str, object]], Publisher]] = {
         "file": FilePublisher.from_config,
         "s3-object-lock": S3ObjectLockPublisher.from_config,
+        # The GCP twin of the one above: a locked GCS retention policy is the
+        # analogue of object-lock COMPLIANCE. See `publishers/gcs.py`.
+        "gcs-retention": GcsRetentionPublisher.from_config,
         "git-tag": GitTagPublisher.from_config,
         # The only publisher that sends anything to a third party, and the only
         # one that does not copy the whole record. See `qed/remote/anchor.py`.

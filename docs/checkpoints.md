@@ -21,6 +21,12 @@ evidence:
       - { type: file, path: /mnt/anchors }
 ```
 
+Five are available: `s3-object-lock` and `gcs-retention` are the two whose
+refusal to be deleted has been measured against a real server, `git-tag` and
+`file` put the root somewhere else without that guarantee, and `qed-anchor`
+sends a root to a third party. Configure more than one if you like — they are
+independent, and the point of two is that one of them working is useful.
+
 `qed doctor` says, in a line, whether any of this is configured — because a
 Merkle root that lives only in the chain it summarises is the default, and the
 default is the weak case.
@@ -140,6 +146,99 @@ One assertion is AWS-only and marked as such (`QED_TEST_S3_AWS=1`): real S3
 refuses `ObjectLockMode` on a bucket that has no object-lock configuration,
 where LocalStack accepts it and stores no lock. Those two divergent behaviours
 are the same argument — ask the bucket, do not infer a lock from a success.
+
+### `gcs-retention`
+
+```yaml
+- { type: gcs-retention, bucket: acme-qed-anchors, prefix: checkpoints/, require_locked: true }
+```
+
+Needs `valqore-qed[gcs]`. The GCP twin of the publisher above, and the other
+anchor that actually anchors: a bucket with a **locked** retention policy
+refuses to delete or overwrite an object until its retention expires, and the
+policy can never afterwards be shortened or removed — not by the uploader, not
+by a project owner, not by anybody.
+
+Three differences from S3 that change how you configure it:
+
+* **Retention belongs to the bucket, not the upload.** There is no per-object
+  lock request to get right; every object inherits the bucket's policy. So
+  this publisher asks nothing and instead *reads the policy back* and reports
+  what it found.
+* **It never sets or locks a policy, deliberately.** The protection is worth
+  something precisely because the bucket is outside this instance's control.
+  A publisher that could lock a bucket could unlock one it had just created,
+  and the operator who can rewrite the chain is the one running this process.
+  Create and lock the bucket yourself, with Terraform or `gcloud`.
+* **There are three states here, not two**, and the middle one misleads. A
+  bucket with no policy protects nothing. An **unlocked** policy really does
+  refuse deletes — so it reads like protection — but an administrator can
+  remove it and then delete, which makes it the exact analogue of S3's
+  `GOVERNANCE` mode. Only a **locked** policy is the analogue of
+  `COMPLIANCE`. `require_locked` defaults to true, so anything less is a
+  caveat written into the receipt and into the chain rather than a success.
+
+Writes are create-only (`if_generation_match=0`). On a bucket with no policy
+that is the only thing that turns a silent overwrite into a visible failure,
+and two different anchors for one checkpoint sequence is something you need to
+hear about. Re-publishing the same checkpoint stays idempotent: a precondition
+failure is checked against the stored bytes before it is called a collision.
+
+Credentials come from Application Default Credentials, the way every Google
+tool takes them, and never from `qed.yaml`. `project` is optional — bucket
+names are global, and an anchor bucket usually lives in a *different* project
+from the instance, which is the topology that makes it an anchor. A
+least-privilege writer needs only `roles/storage.objectCreator`; grant
+`storage.buckets.get` as well if you want the receipt to record the retention
+state, since without it the publisher reports no protection rather than
+claiming one it could not confirm.
+
+Making a bucket to point this at:
+
+```bash
+gcloud storage buckets create gs://acme-qed-anchors \
+  --location=us-central1 --uniform-bucket-level-access --retention-period=2555d
+gcloud storage buckets update gs://acme-qed-anchors --lock-retention-period
+```
+
+The second command cannot be undone, which is the entire point of it. A locked
+policy can never be shortened or removed, and the bucket survives until every
+object's retention has expired.
+
+#### What is actually tested
+
+`tests/evidence/test_gcs_retention_live.py` runs this publisher against real
+Google Cloud Storage — `QED_TEST_GCS_BUCKET` and `QED_TEST_GCS_PLAIN_BUCKET` —
+and asserts the refusals rather than the requests. Measured, on
+2026-10-16, against a bucket with a 1-hour retention policy:
+
+* a delete issued by a **project owner** is refused with
+  `403 … is subject to bucket's retention policy`;
+* an overwrite is refused the same way, which matters more than the delete —
+  the attack is an anchor *replaced* by one computed over a rewritten chain;
+* `blob.retention_expiration_time` comes back populated, which is the server
+  confirming the policy binds that object rather than the publisher restating
+  its own request;
+* removing an **unlocked** policy and then deleting the anchor succeeds, which
+  is why `require_locked` defaults to true;
+* a bucket with no policy accepts the upload, reports the caveat, and the
+  object is deletable.
+
+**What is not measured, stated plainly:** that a *locked* policy cannot be
+removed. Locking is irreversible, so no throwaway bucket was locked to check
+it; `test_a_locked_policy_cannot_be_removed` exists and skips until
+`QED_TEST_GCS_BUCKET` names a locked bucket. That claim is Google's documented
+guarantee about Bucket Lock, and this publisher only reads and reports it —
+but a skipped test proves nothing, and the distinction belongs here rather than
+in a footnote.
+
+These tests are **not** in CI. There is no free, locally runnable GCS that
+enforces retention: `fsouza/fake-gcs-server` accepts `retention_period`, reads
+it back as `None`, accepts the delete and the object is gone. A publisher
+tested only against that would have shipped an anchor whose central claim had
+never been observed to hold anywhere, so it was left unbuilt for a day until a
+real bucket was available. The S3 publisher's `anchors` job stays the
+continuously verified one.
 
 ### `git-tag`
 

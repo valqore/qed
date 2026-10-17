@@ -641,10 +641,10 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install, with the s3 extra
+      - name: Install, with the s3 and gcs extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,s3]" -e packages/qed-verify
+          pip install -e ".[dev,s3,gcs]" -e packages/qed-verify
 
       # A test that skips itself proves nothing, and an endpoint variable that
       # stops reaching the tests is exactly the wiring that fails silently.
@@ -660,11 +660,25 @@ jobs:
             exit 1
           fi
 
-      # The publisher's other half: the fake-client tests still have to pass
-      # with boto3 installed, because `botocore` present changes which
-      # exceptions the module sees.
-      - name: The publisher's unit tests, with boto3 importable
+      # The publishers' other half: the fake-client tests still have to pass
+      # with boto3 and google-cloud-storage installed, because which exceptions
+      # a module sees depends on what is importable. That is not hypothetical
+      # for GCS -- `google.cloud` is a namespace package, so whether the extra
+      # is present decides whether a missing library raises `ImportError` or
+      # `ModuleNotFoundError`, and the first version of that publisher caught
+      # only the narrower one. The `check` jobs run these same tests with
+      # neither extra installed, which is the other side of the same question.
+      - name: The publishers' unit tests, with boto3 and google-cloud-storage importable
         run: pytest tests/evidence/test_publishers.py -q
+
+      # Deliberately NOT running tests/evidence/test_gcs_retention_live.py.
+      # There is no free, locally runnable GCS that enforces retention --
+      # fake-gcs-server accepts `retention_period`, reads it back as None, and
+      # lets the delete through -- and the real service needs a billing
+      # account, so those tests were run by hand against real GCS instead. See
+      # docs/checkpoints.md for what was measured and the one claim that was
+      # not. This comment exists so that nobody reads the `anchors` job as
+      # covering both anchors.
 
   # SPEC 26's docs site. A separate job because it is the one artifact a reader
   # consumes directly, and because `--strict` turns a dead cross-reference into

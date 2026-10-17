@@ -6,6 +6,79 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `gcs-retention`, a second anchor whose refusal has been measured
+
+The GCP twin of `s3-object-lock`, and the fifth checkpoint publisher. A GCS
+bucket with a **locked** retention policy refuses to delete or overwrite an
+object until its retention expires, and the policy can never afterwards be
+shortened or removed — which is the same claim object-lock COMPLIANCE makes,
+reached by a different mechanism.
+
+```yaml
+evidence:
+  checkpoint:
+    publishers:
+      - { type: gcs-retention, bucket: acme-qed-anchors, require_locked: true }
+```
+
+Needs `valqore-qed[gcs]`. Three design calls are worth stating, because each
+is a difference from the S3 publisher rather than a port of it.
+
+**Retention belongs to the bucket, not the upload**, so this publisher asks
+for nothing and instead reads the policy back and reports which of **three**
+states it found. That middle state is the one that misleads: an *unlocked*
+policy really does refuse deletes, so it reads like protection, and an
+administrator can remove it and then delete — the exact analogue of S3's
+`GOVERNANCE` mode. `require_locked` defaults to true so anything less becomes
+a caveat in the receipt and therefore in the chain, rather than a success an
+operator reads as one.
+
+**It never sets or locks a policy, deliberately.** The protection is worth
+something precisely because the bucket is outside this instance's control; a
+publisher that could lock a bucket could unlock one it had just created. The
+bucket is platform configuration that the kernel asserts and never manages.
+
+**Writes are create-only** (`if_generation_match=0`), which on a bucket with
+no policy is the only thing that turns a silent overwrite into a visible
+failure. Re-publishing the same checkpoint stays idempotent: a precondition
+failure is compared against the stored bytes before it is called a collision.
+
+**Why this shipped a day late.** It was designed, and then deliberately left
+unbuilt, because the only local option — `fsouza/fake-gcs-server` — turned out
+not to implement retention at all: it accepts `retention_period`, reads it
+back as `None`, accepts the delete, and the object is gone. Shipping against
+that would have meant an anchor whose central claim had never been observed to
+hold anywhere. Measured against real GCS instead, on 2026-10-16: a delete and
+an overwrite both refused for a **project owner** with
+`403 … is subject to bucket's retention policy`; `retention_expiration_time`
+returned populated, which is the server confirming the policy binds that
+object; and removing an *unlocked* policy and then deleting the anchor
+succeeding, which is why the default is what it is.
+
+Two measurements changed the code. `retentionPolicy.isLocked` is **absent**
+from the JSON for an unlocked policy, so the client surfaces `None` and not
+`False` — an `is True` test would have read every unlocked policy as a state
+the code had never heard of. And reading bucket metadata needs
+`storage.buckets.get`, which a least-privilege writer holding only
+`roles/storage.objectCreator` does not have; that now degrades to publishing
+the object and claiming no protection, instead of failing the publication.
+
+**What is not measured, on the record:** that a *locked* policy cannot be
+removed. Locking is irreversible, so no bucket was locked to check it.
+`test_a_locked_policy_cannot_be_removed` exists and skips until
+`QED_TEST_GCS_BUCKET` names a locked bucket. These tests are not in CI, for
+the fake-gcs-server reason above; `docs/checkpoints.md` and `THREAT_MODEL.md`
+both say which claims are continuously verified and which are not.
+
+### Fixed — SPEC §10.4 listed an `email` checkpoint publisher that has never existed
+
+Alongside the four real ones. No such publisher is in `build_publishers`, in
+`qed/infra/publishers/`, or anywhere else in the tree. An operator who
+configured it would have got the "unknown checkpoint publisher" error, which is
+the right behaviour for a typo and the wrong one for a type the normative spec
+told them to use. The same class as the command inventory in §14 being wrong in
+both directions: a list in prose that nothing executes.
+
 ### Fixed — the 24-hour history counters are collected, so two rules can fire
 
 `AG-BUD-007` ("High call rate in the last day", `calls_24h >= 500`) and

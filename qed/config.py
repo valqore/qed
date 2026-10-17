@@ -58,6 +58,7 @@ class CheckpointConfig(Frozen):
         every_seconds: 3600
         publishers:
           - { type: s3-object-lock, bucket: acme-qed-anchors }
+          - { type: gcs-retention, bucket: acme-qed-anchors }
           - { type: file, path: /data/anchors }
     ```
 

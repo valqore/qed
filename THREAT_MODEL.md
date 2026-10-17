@@ -190,6 +190,18 @@ change it (`evidence.checkpoint.publishers`). An instance with none configured
 has no answer to this threat, which is why `qed doctor` says so in yellow
 rather than reporting "anchors: none" as a neutral fact.
 
+Two of the five publishers have had that refusal measured against a real
+server rather than a fake. `s3-object-lock` in compliance mode is the stronger
+of the two: `tests/evidence/test_s3_object_lock_live.py` runs in CI and the job
+fails if those tests skip. `gcs-retention` was measured by hand against real
+GCS (`tests/evidence/test_gcs_retention_live.py`) — a delete and an overwrite
+both refused for a project owner — but against an **unlocked** retention
+policy, and it is only a *locked* policy that an administrator cannot remove.
+That last link is Google's documented guarantee rather than something measured
+here; `docs/checkpoints.md` says so in the same words. The other three
+publishers move the root somewhere else without a server that refuses to give
+it back, which is weaker and worth knowing when you pick one.
+
 `qed replay <proposal_id>` narrows it, and the distinction is worth being
 precise about. It decides a recorded proposal again against the bundle whose
 hash the record names, so a rewritten verdict that no longer follows from that

@@ -44,6 +44,11 @@ from qed.infra.publishers import (
     publish_checkpoint,
 )
 from qed.infra.publishers.file import FilePublisher
+from qed.infra.publishers.gcs import (
+    NO_POLICY,
+    UNLOCKED_POLICY,
+    GcsRetentionPublisher,
+)
 from qed.infra.publishers.git import GitTagPublisher
 from qed.infra.publishers.s3 import DEFAULT_RETAIN_DAYS, S3ObjectLockPublisher
 
@@ -374,6 +379,304 @@ class TestTheGitPublisher:
 
 
 # --------------------------------------------------------------------------
+# GCS retention
+# --------------------------------------------------------------------------
+
+
+class FakeGcsBlob:
+    def __init__(self, store: FakeGcsBucket, key: str) -> None:
+        self._store = store
+        self.key = key
+        self.generation: int | None = None
+        self.etag = ""
+        self.md5_hash = ""
+        self.crc32c = ""
+        self.retention_expiration_time: datetime | None = None
+
+    def upload_from_string(
+        self, data: bytes, content_type: str = "", if_generation_match: int | None = None
+    ) -> None:
+        self._store.uploads.append(
+            {
+                "key": self.key,
+                "data": data,
+                "content_type": content_type,
+                "if_generation_match": if_generation_match,
+            }
+        )
+        if self._store.upload_error is not None:
+            raise self._store.upload_error
+        if if_generation_match == 0 and self.key in self._store.objects:
+            raise FakePrecondition("412 object already exists")
+        self._store.objects[self.key] = data
+        self._hydrate()
+
+    def _hydrate(self) -> None:
+        import base64
+        import hashlib
+
+        data = self._store.objects[self.key]
+        self.generation = 1792199925131168
+        self.etag = "etag-abc"
+        self.md5_hash = base64.b64encode(hashlib.md5(data, usedforsecurity=False).digest()).decode()
+        self.crc32c = "R98Qnw=="
+        if self._store.retention_period:
+            self.retention_expiration_time = utcnow() + timedelta(
+                seconds=self._store.retention_period
+            )
+
+    def reload(self) -> None:
+        self._hydrate()
+
+    def delete(self) -> None:  # pragma: no cover - not exercised by the publisher
+        raise AssertionError("the publisher must never delete an anchor")
+
+
+class FakePrecondition(Exception):
+    """Stands in for `google.api_core.exceptions.PreconditionFailed`.
+
+    Matched by class *name* and by a `code` of 412, the way the publisher
+    does, so that this fake does not have to import google-cloud-storage to
+    exercise the branch.
+    """
+
+    code = 412
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+
+
+FakePrecondition.__name__ = "PreconditionFailed"
+
+
+class FakeGcsBucket:
+    """Models the three retention states and the create-only precondition.
+
+    A fake, with a fake's limits: it can show that the publisher asks for
+    `if_generation_match=0` and that it maps a bucket's state to the right
+    caveat, and it cannot show that any server refuses a delete. That is
+    `tests/evidence/test_gcs_retention_live.py`, which runs against real GCS.
+    """
+
+    def __init__(
+        self,
+        *,
+        retention_period: int | None = None,
+        locked: bool | None = None,
+        reload_error: Exception | None = None,
+        upload_error: Exception | None = None,
+    ) -> None:
+        self.retention_period = retention_period
+        # `None` and not `False` for an unlocked policy, which is what the
+        # real client surfaces -- the JSON API omits `isLocked` entirely.
+        self.retention_policy_locked = locked
+        self.reload_error = reload_error
+        self.upload_error = upload_error
+        self.objects: dict[str, bytes] = {}
+        self.uploads: list[dict[str, Any]] = []
+
+    def reload(self) -> None:
+        if self.reload_error is not None:
+            raise self.reload_error
+
+    def blob(self, key: str) -> FakeGcsBlob:
+        return FakeGcsBlob(self, key)
+
+    def get_blob(self, key: str) -> FakeGcsBlob | None:
+        if key not in self.objects:
+            return None
+        blob = FakeGcsBlob(self, key)
+        blob._hydrate()
+        return blob
+
+
+class FakeGcsClient:
+    def __init__(self, bucket: FakeGcsBucket) -> None:
+        self._bucket = bucket
+
+    def bucket(self, name: str) -> FakeGcsBucket:
+        return self._bucket
+
+
+def gcs(bucket: FakeGcsBucket, **options: Any) -> GcsRetentionPublisher:
+    publisher = GcsRetentionPublisher.from_config({"bucket": "anchors", **options})
+    publisher._client = FakeGcsClient(bucket)
+    return publisher
+
+
+class TestTheGcsPublisher:
+    def test_the_write_is_create_only(self) -> None:
+        """On a locked bucket retention refuses an overwrite anyway; on a
+        bucket with no policy this precondition is the only thing that turns a
+        silent overwrite into a visible failure."""
+        bucket = FakeGcsBucket(retention_period=3600, locked=True)
+        receipt = gcs(bucket).publish(checkpoint())
+
+        assert receipt.ok, receipt.error
+        assert bucket.uploads[0]["if_generation_match"] == 0
+        assert bucket.uploads[0]["content_type"] == "application/json"
+
+    def test_the_published_bytes_are_the_canonical_record(self) -> None:
+        bucket = FakeGcsBucket(retention_period=3600, locked=True)
+        record = checkpoint()
+        gcs(bucket).publish(record)
+
+        key = f"checkpoints/{checkpoint_name(record)}"
+        assert bucket.objects[key] == checkpoint_bytes(record)
+
+    def test_a_locked_policy_carries_no_caveat(self) -> None:
+        receipt = gcs(FakeGcsBucket(retention_period=3600, locked=True)).publish(checkpoint())
+
+        assert receipt.ok
+        assert receipt.error == ""
+        assert receipt.proof["retention_locked"] is True
+        assert receipt.proof["retention_period_seconds"] == 3600
+        assert receipt.proof["retention_expires"]
+
+    def test_an_unlocked_policy_is_reported_as_the_downgrade_it_is(self) -> None:
+        """The middle state, which is the one that misleads: it refuses
+        deletes, so it reads like protection, and an administrator can remove
+        it and then delete. The analogue of object-lock GOVERNANCE."""
+        receipt = gcs(FakeGcsBucket(retention_period=3600, locked=None)).publish(checkpoint())
+
+        assert receipt.ok, "the copy landed"
+        assert receipt.error == UNLOCKED_POLICY
+        assert receipt.proof["retention_locked"] is False
+
+    def test_no_policy_at_all_is_reported_too(self) -> None:
+        receipt = gcs(FakeGcsBucket()).publish(checkpoint())
+
+        assert receipt.ok
+        assert receipt.error == NO_POLICY
+        assert receipt.proof["retention_locked"] is False
+        assert "retention_expires" not in receipt.proof
+        assert "retention_period_seconds" not in receipt.proof
+
+    def test_an_unlocked_policy_can_be_accepted_on_purpose(self) -> None:
+        receipt = gcs(
+            FakeGcsBucket(retention_period=3600, locked=None), require_locked=False
+        ).publish(checkpoint())
+
+        assert receipt.ok
+        assert receipt.error == ""
+
+    def test_a_bucket_with_no_policy_is_a_caveat_even_when_unlocked_is_accepted(self) -> None:
+        """`require_locked: false` waives the lock, not the policy. A bucket
+        with no retention at all provides nothing, and saying so is not
+        something an operator can switch off by accident."""
+        receipt = gcs(FakeGcsBucket(), require_locked=False).publish(checkpoint())
+
+        assert receipt.ok
+        assert receipt.error == NO_POLICY
+
+    def test_republishing_the_same_checkpoint_is_idempotent(self) -> None:
+        bucket = FakeGcsBucket(retention_period=3600, locked=True)
+        record = checkpoint()
+        first = gcs(bucket).publish(record)
+        second = gcs(bucket).publish(record)
+
+        assert first.ok and second.ok, second.error
+        assert second.proof["generation"] == first.proof["generation"]
+
+    def test_a_different_object_at_the_key_is_a_failure_and_is_not_overwritten(self) -> None:
+        """Two different anchors for one checkpoint sequence should be
+        impossible. If it happens, the operator hears about it."""
+        bucket = FakeGcsBucket(retention_period=3600, locked=True)
+        record = checkpoint()
+        key = f"checkpoints/{checkpoint_name(record)}"
+        bucket.objects[key] = b'{"not":"ours"}'
+
+        receipt = gcs(bucket).publish(record)
+
+        assert not receipt.ok
+        assert "a different object is already published" in receipt.error
+        assert bucket.objects[key] == b'{"not":"ours"}'
+
+    def test_a_bucket_whose_metadata_cannot_be_read_still_publishes(self) -> None:
+        """A least-privilege anchor writer holds `roles/storage.objectCreator`
+        and cannot call `storage.buckets.get`. The object must still land, and
+        the receipt must claim no protection it could not confirm."""
+        bucket = FakeGcsBucket(
+            retention_period=3600, locked=True, reload_error=RuntimeError("403 forbidden")
+        )
+        receipt = gcs(bucket).publish(checkpoint())
+
+        assert receipt.ok
+        assert receipt.proof["retention_locked"] is False
+        assert receipt.error == NO_POLICY
+
+    def test_an_upload_that_fails_is_a_receipt_and_not_an_exception(self) -> None:
+        """A bucket that is unreachable must not stop the chain."""
+        bucket = FakeGcsBucket(
+            retention_period=3600, locked=True, upload_error=RuntimeError("no route to host")
+        )
+        receipt = gcs(bucket).publish(checkpoint())
+
+        assert not receipt.ok
+        assert "no route to host" in receipt.error
+
+    def test_it_needs_a_bucket(self) -> None:
+        with pytest.raises(PublicationError, match="needs a `bucket`"):
+            GcsRetentionPublisher.from_config({})
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("false", False), ("no", False), ("0", False), ("off", False), ("true", True)],
+    )
+    def test_require_locked_reads_yaml_strings(self, value: str, expected: bool) -> None:
+        """A quoted `require_locked: "false"` must not read as true, which is
+        what `bool("false")` would have done."""
+        built = GcsRetentionPublisher.from_config({"bucket": "a", "require_locked": value})
+        assert built.require_locked is expected
+
+    def test_describe_carries_no_credential(self) -> None:
+        built = GcsRetentionPublisher.from_config({"bucket": "anchors", "project": "acme"})
+        described = built.describe()
+        assert "gs://anchors/checkpoints/" in described
+        assert "locked retention required" in described
+
+    def test_the_install_hint_survives_a_namespace_package(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without the `gcs` extra, the operator must be told what to install.
+
+        The reason this is a test and not a one-liner: `google.cloud` is a
+        **namespace package**, so with google-cloud-storage absent but any
+        other `google-*` distribution present -- `google-api-core` comes with
+        half of them -- `from google.cloud import storage` raises
+        `ImportError` and not `ModuleNotFoundError`. The first version of this
+        publisher caught the narrower class, copied from the S3 publisher
+        where boto3 makes it correct, and an operator without the extra got
+        `cannot import name 'storage' from 'google.cloud'` in a receipt
+        instead of an install hint.
+
+        The stub below reproduces exactly that: a `google.cloud` that exists
+        and has no `storage` in it.
+        """
+        import sys
+        import types
+
+        monkeypatch.setitem(sys.modules, "google.cloud", types.ModuleType("google.cloud"))
+        built = GcsRetentionPublisher.from_config({"bucket": "anchors"})
+
+        with pytest.raises(PublicationError, match=r"valqore-qed\[gcs\]"):
+            built.client
+
+    def test_a_missing_extra_is_a_receipt_with_the_hint_in_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """And it reaches the chain as a failed receipt, not an exception."""
+        import sys
+        import types
+
+        monkeypatch.setitem(sys.modules, "google.cloud", types.ModuleType("google.cloud"))
+        receipt = GcsRetentionPublisher.from_config({"bucket": "anchors"}).publish(checkpoint())
+
+        assert not receipt.ok
+        assert "valqore-qed[gcs]" in receipt.error
+
+
+# --------------------------------------------------------------------------
 # Building them, and publishing to several
 # --------------------------------------------------------------------------
 
@@ -384,9 +687,14 @@ class TestBuildingFromConfig:
             [
                 {"type": "file", "path": str(tmp_path)},
                 {"type": "s3-object-lock", "bucket": "anchors"},
+                {"type": "gcs-retention", "bucket": "anchors"},
             ]
         )
-        assert [publisher.kind for publisher in built] == ["file", "s3-object-lock"]
+        assert [publisher.kind for publisher in built] == [
+            "file",
+            "s3-object-lock",
+            "gcs-retention",
+        ]
 
     def test_an_unknown_type_is_refused(self) -> None:
         """A publisher that was ignored because nobody recognised its name
@@ -397,7 +705,7 @@ class TestBuildingFromConfig:
     def test_the_message_lists_what_is_available(self) -> None:
         with pytest.raises(PublicationError) as caught:
             build_publishers([{"type": "nope"}])
-        for kind in ("file", "s3-object-lock", "git-tag"):
+        for kind in ("file", "s3-object-lock", "gcs-retention", "git-tag"):
             assert kind in str(caught.value)
 
     def test_nothing_configured_builds_nothing(self) -> None:
