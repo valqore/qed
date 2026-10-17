@@ -244,4 +244,34 @@ class TestThePrelaunchNotice:
     def test_the_launch_checklist_exists(self) -> None:
         readme = (ROOT / "landing" / "README.md").read_text(encoding="utf-8")
         assert "Launch checklist" in readme
-        assert "security@valqore.io" in readme, "the unowned alias is a launch blocker"
+
+    def test_the_disclosure_address_is_one_the_checklist_knows_about(self) -> None:
+        """`SECURITY.md`'s address and the launch checklist must agree.
+
+        This replaced an assertion that `security@valqore.io` appeared in the
+        checklist as "the unowned alias is a launch blocker". That alias is
+        deliberately *not* being created for launch -- a maintainer address
+        that is read beats a role alias that forwards nowhere, and
+        `GOVERNANCE.md` declares one maintainer -- so the old assertion was
+        pinning a decision that has since been made the other way.
+
+        What is still worth enforcing is the coupling. Whichever address
+        `SECURITY.md` publishes, the checklist has to be talking about that
+        one, so moving to a `security@` alias cannot happen in a commit that
+        leaves the checklist describing the old arrangement. A disclosure
+        address nobody reads is the failure this guards against, in either
+        direction.
+        """
+        import re
+
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        found = re.findall(r"[\w.+-]+@valqore\.io", security)
+        assert found, "SECURITY.md publishes no disclosure address"
+
+        readme = (ROOT / "landing" / "README.md").read_text(encoding="utf-8")
+        for address in set(found):
+            assert address in readme, (
+                f"SECURITY.md tells people to email {address}, and the launch "
+                "checklist in landing/README.md does not mention it. One of the two "
+                "has moved without the other."
+            )

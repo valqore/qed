@@ -42,7 +42,18 @@
 
 site_name: Valqore QED
 site_description: Policy and evidence kernel for AI-agent actions
-site_url: https://valqore.github.io/qed/
+# `qed.valqore.io` and not `valqore.github.io/qed/`, decided 2026-10-17. The
+# deciding argument is not branding: the RFC 9457 problem types that *frozen*
+# evidence 1.0 points at already live under `https://valqore.io/qed/problems/`,
+# and the OSCAL namespace UUID in `qed/core/evidence/export/oscal.py` is
+# derived from `oscal.qed.valqore.io`. Those identifiers cannot be changed
+# without breaking a format that is promised never to change, so the docs
+# belong on the same domain as them rather than splitting the product's
+# identity across two hosts. A `github.io` URL would also pin every published
+# link to the GitHub org name, which a rename or a move off Pages would break.
+# `docs/CNAME` carries this for GitHub Pages; DNS needs a CNAME record for
+# `qed` pointing at `valqore.github.io`.
+site_url: https://qed.valqore.io/
 repo_url: https://github.com/valqore/qed
 repo_name: valqore/qed
 edit_uri: edit/main/docs/

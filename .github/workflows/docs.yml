@@ -1,0 +1,101 @@
+# Publishing the docs site to qed.valqore.io (SPEC §26).
+#
+# `ci.yml`'s `docs` job already builds the site with `--strict` on every push
+# and pull request, and that is the job that catches a dead cross-reference.
+# This one exists only to *deploy* what that job proves builds, and it is
+# separate for one reason: deploying is the irreversible, outward-facing half,
+# so it is gated the same way `release.yml` gates pushing a wheel or an image.
+#
+#   PUBLISH_DOCS=true   -> build and deploy to GitHub Pages
+#
+# Settings -> Secrets and variables -> Actions -> Variables.
+#
+# Two things have to be true before setting it, and neither is in this file:
+#
+#   1. GitHub Pages must be available and set to "GitHub Actions" as its
+#      source. Pages on a *private* repository needs a paid plan, so on the
+#      free plan this waits for the public flip.
+#   2. DNS must have a CNAME record for `qed` pointing at `valqore.github.io`.
+#      `docs/CNAME` tells Pages which host to answer for; it cannot create the
+#      record.
+#
+# Until the variable is set this workflow runs, builds, uploads the artifact
+# and skips only the deploy -- so the thing that would fail at the flip is
+# exercised before the flip, which is the same reasoning as release.yml's.
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, and a newer commit supersedes an older one rather than
+# queueing behind it: the site has no history worth preserving mid-queue.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      # Both are needed by the deploy step: `pages` to publish and `id-token`
+      # for the OIDC exchange `deploy-pages` uses instead of a token.
+      pages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # `--strict` again rather than trusting the ci.yml run: this workflow
+      # deploys, and a deploy must never publish a site that this job did not
+      # itself build clean.
+      - name: Build the site
+        run: python -m mkdocs build --strict
+
+      # The CNAME is what makes Pages answer for qed.valqore.io. mkdocs copies
+      # `docs/CNAME` into `site/` as an ordinary asset; this check is here
+      # because losing it would silently drop the custom domain and leave the
+      # site answering on github.io -- which is the exact outcome the domain
+      # decision in mkdocs.yml exists to avoid.
+      - name: The custom domain survived the build
+        run: |
+          set -euo pipefail
+          test -f site/CNAME
+          grep -qx "qed.valqore.io" site/CNAME
+
+      - uses: actions/configure-pages@v5
+        if: vars.PUBLISH_DOCS == 'true'
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy
+        id: deployment
+        if: vars.PUBLISH_DOCS == 'true'
+        uses: actions/deploy-pages@v4
+
+      - name: Not deployed, and why
+        if: vars.PUBLISH_DOCS != 'true'
+        run: |
+          echo "Built and uploaded, not deployed: PUBLISH_DOCS is not 'true'."
+          echo "Set it once Pages is enabled with source 'GitHub Actions' and"
+          echo "DNS has a CNAME for qed -> valqore.github.io."

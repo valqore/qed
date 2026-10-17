@@ -46,8 +46,13 @@ In order. Each line is a thing that is false until it is done.
 
 1. Reserve the names: PyPI `valqore-qed` and `qed-verify`, the `valqore/tap`
    Homebrew tap, `ghcr.io/valqore/qed`, and file the trademark (SPEC §25.1).
-2. Create `security@valqore.io` and enable GitHub private vulnerability
-   reporting. `SECURITY.md` currently points at a personal address.
+2. Enable GitHub private vulnerability reporting. `SECURITY.md` points at
+   `tunc@valqore.io`, which is a deliberate choice for launch and not an
+   oversight: a maintainer address that is read beats a role alias that
+   forwards nowhere, and `GOVERNANCE.md` already says there is one maintainer.
+   Move to a `security@` alias when there is a second person to receive it —
+   and change `SECURITY.md` in the same commit, because a disclosure address
+   that bounces is worse than a personal one.
 3. Flip the repository public. The banner on `valqore.io` links here, so it
    cannot go up before this.
 4. Set `PUBLISH_GHCR=true` and `PUBLISH_PYPI=true`, tag `v1.0.0`, and check the
