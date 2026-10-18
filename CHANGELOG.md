@@ -6,6 +6,42 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — a CI job that died on one registry's quota, twice
+
+The `postgres` job pulled its service container from
+`public.ecr.aws/docker/library/postgres:17`, and on 2026-10-17 ECR Public
+answered `toomanyrequests: Data limit exceeded`. The job died before its first
+step, with a log that reads like a broken test suite.
+
+That mirror was chosen *because* Docker Hub does this. One mirror is not a
+fallback; it is a different single point of failure. `BUILDER_MIRRORS` solved
+exactly this for the builder image on 2026-10-15, with the reason written down
+— the quota is per source address and runners share addresses, so the answer
+is another registry rather than another attempt — and the fix was applied to
+the builder and not here. **Second recurrence of finding #58: a fix landing on
+one of the two places that needed it.**
+
+A `services:` block takes exactly one `image:` and GitHub pulls it before any
+step runs, so it cannot have a list. The job now pulls in a step, over
+`POSTGRES_MIRRORS` (ECR → `mirror.gcr.io` → Docker Hub), starts the container
+itself and waits on `pg_isready` with the budget the health check had.
+
+Verified by running the extracted step locally: the happy path, the fallback
+with a bogus first registry, and `tests/evidence/test_cross_backend.py` (23
+passed) against the container it started.
+
+`test_ci_pulls_postgres_from_more_than_one_registry_too` is the guard, and it
+took three attempts, which is the part worth recording. The first sliced the
+job out of the YAML by looking for the next two-space-indented line — which is
+every key inside `steps:` — and read a fragment. The second parsed the YAML
+and then hunted the shell script with a regex, where it matched the words
+`no registry served postgres:17` **inside an error message** and concluded
+Docker Hub was a fallback: it passed with one registry configured. That is
+finding #48 again, prose answering a question asked of configuration. The list
+is a variable now and the test reads the variable, plus asserts the script
+actually uses it — #60's lesson, that a plumbed value nothing reads is
+invisible.
+
 ### Added — `qed --version`, which `v1.0.0` shipped without
 
 ```

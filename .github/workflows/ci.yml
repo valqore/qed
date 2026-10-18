@@ -484,31 +484,85 @@ jobs:
   # matrix that needs explaining.
   postgres:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # AWS's public mirror of the same official image. Docker Hub's
-        # unauthenticated pull limit is per runner IP and shared across every
-        # repository on it, so `postgres:17` fails several times a day with
-        # `toomanyrequests` -- a failure that looks like ours and is not.
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_PASSWORD: qed-ci
-          POSTGRES_DB: qed_test
-        ports:
-          - 5432:5432
-        # Without the health check the job races the server's startup, and the
-        # first connection fails on a cold image pull.
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
+    # No `services:` block, deliberately. A service container takes exactly
+    # one `image:`, and GitHub pulls it before the first step runs -- so when
+    # that one registry refuses, the job dies before anything of ours
+    # executes, and the log reads like a broken test suite.
+    #
+    # It refused. `public.ecr.aws` answered `toomanyrequests: Data limit
+    # exceeded` on 2026-10-17, and it was named here in the first place
+    # *because* Docker Hub does the same thing. One mirror is not a fallback;
+    # it is a different single point of failure.
+    #
+    # `BUILDER_MIRRORS` in `tests/deploy/test_container.py` already solved
+    # this for the builder image, with the reason written down: the quota is
+    # per source address and these runners share addresses, so the answer is
+    # another registry rather than another attempt. That fix was applied to
+    # the builder and not here -- which is finding #58 exactly, a fix landing
+    # on one of the two places that needed it.
+    #
+    # The cost of moving the pull into a step is that the health check becomes
+    # ours. It is the loop at the bottom, with the same budget the
+    # `--health-retries 20 --health-interval 5s` it replaced had.
     env:
       QED_TEST_POSTGRES_DSN: postgresql://postgres:qed-ci@127.0.0.1:5432/qed_test
+      # Independent registries serving the same official image, in order of
+      # preference. A variable and not a list inside the script below, because
+      # `test_ci_pulls_postgres_from_more_than_one_registry_too` reads it:
+      # the first version of that test scanned the shell script with a regex
+      # and was satisfied by the words "no registry served postgres:17" in an
+      # error message, which is finding #48 -- prose answering a question
+      # asked of configuration.
+      POSTGRES_MIRRORS: >-
+        public.ecr.aws/docker/library/postgres:17
+        mirror.gcr.io/library/postgres:17
+        postgres:17
 
     steps:
       - uses: actions/checkout@v7
+
+      - name: Start Postgres, from whichever registry answers
+        run: |
+          set -euo pipefail
+          for image in $POSTGRES_MIRRORS; do
+            echo "::group::docker pull $image"
+            if docker pull -q "$image"; then
+              echo "::endgroup::"
+              pulled="$image"
+              break
+            fi
+            echo "::endgroup::"
+            echo "$image did not serve it; trying the next registry" >&2
+          done
+          if [ -z "${pulled:-}" ]; then
+            echo "no registry in POSTGRES_MIRRORS served the image" >&2
+            exit 1
+          fi
+          echo "started from $pulled"
+          # A GitHub-hosted runner is a fresh VM, so this is a no-op there.
+          # It is here so the step can be run twice -- on a self-hosted
+          # runner, on a re-run, or by a person reproducing CI locally, which
+          # is the thing this repository's release history says to do before
+          # trusting a pipeline change.
+          docker rm -f qed-postgres >/dev/null 2>&1 || true
+          docker run -d --name qed-postgres \
+            -e POSTGRES_PASSWORD=qed-ci \
+            -e POSTGRES_DB=qed_test \
+            -p 5432:5432 \
+            "$pulled"
+
+          # The wait the service container used to do for us. Without it the
+          # job races the server's startup and the first connection fails on a
+          # cold pull -- which is what the health check was there for.
+          for _ in $(seq 20); do
+            if docker exec qed-postgres pg_isready -U postgres -d qed_test; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "postgres never became ready" >&2
+          docker logs qed-postgres >&2 || true
+          exit 1
 
       - uses: actions/setup-python@v7
         with:

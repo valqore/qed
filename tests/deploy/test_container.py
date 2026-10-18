@@ -172,6 +172,62 @@ class TestWhereTheBaseImageComesFrom:
         }
         assert len(hosts) == len(BUILDER_MIRRORS), f"not independent registries: {hosts}"
 
+    def test_ci_pulls_postgres_from_more_than_one_registry_too(self) -> None:
+        """The same argument, applied to the place it was not applied.
+
+        The builder image got a mirror list on 2026-10-15 and the Postgres
+        service container did not, because a `services:` block takes exactly
+        one `image:` and cannot have a list. On 2026-10-17 `public.ecr.aws`
+        refused again and the `postgres` job died before its first step --
+        the identical outage, in the half that had not been fixed, which is
+        finding #58's shape and the second time it has recurred.
+
+        So that job now pulls in a step and starts the container itself. This
+        test is what stops it going back: it reads the workflow rather than
+        trusting the comment there, because a comment explaining why
+        something is safe is exactly where this project has twice found
+        something unsafe.
+
+        Two earlier versions of this test were wrong, and both in ways worth
+        leaving on the record. The first sliced the job out of the file by
+        looking for the next two-space-indented line -- which is every key
+        inside `steps:` as well -- so it read a fragment. The second parsed
+        the YAML properly and then hunted the shell script with a regex,
+        where it matched the words `no registry served postgres:17` inside an
+        error message and concluded Docker Hub was a fallback. It passed with
+        one registry configured. That is finding #48 again: prose answering a
+        question that was asked of configuration.
+
+        So the list is a variable now, and this reads the variable.
+        """
+        import yaml as pyyaml
+
+        workflow = pyyaml.safe_load(
+            (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
+        job = workflow["jobs"]["postgres"]
+
+        assert "services" not in job, (
+            "the postgres job is back on a service container, which can name "
+            "only one registry and therefore has no fallback"
+        )
+
+        images = job["env"]["POSTGRES_MIRRORS"].split()
+        hosts = {
+            image.split("/")[0] if "." in image.split("/")[0] else "docker.io" for image in images
+        }
+        assert len(hosts) == len(images), f"not independent registries: {hosts}"
+        assert len(images) >= 2, f"postgres is pulled from one registry only: {images}"
+
+        # A list nothing reads is a list that is not doing anything -- the
+        # shape of #60, where a plumbed parameter with a plausible default was
+        # invisible for twelve weeks.
+        runs = "\n".join(step["run"] for step in job["steps"] if "run" in step)
+        assert "$POSTGRES_MIRRORS" in runs, (
+            "POSTGRES_MIRRORS is set and never used, so the job pulls from "
+            "wherever the script happens to name"
+        )
+
     def test_every_mirror_names_the_same_interpreter(self) -> None:
         """The whole point of the list is that it does not matter which one
         answers. The runtime stage copies the builder's Python, so a mirror
