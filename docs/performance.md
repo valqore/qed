@@ -176,5 +176,29 @@ pass.
 
 The thresholds are deliberately loose: a floor of 80 decisions/s against a
 measured 250, and p95 against 50 ms with a measured 4.5. A test that fails at
-45 ms would be a test somebody disables, which protects nothing; one that fires
-at 50 ms when the real number is 4.5 ms only fires on a genuine regression.
+45 ms would be a test somebody disables, which protects nothing.
+
+**A loose threshold was not enough, and this page used to say it was.** The
+sentence that stood here claimed a gate firing at 50 ms against a real 4.5 ms
+"only fires on a genuine regression". On 2026-10-18 it fired on a commit whose
+median was 4.91 ms — p95 of 62 ms and p99 of 175 ms, out of 300 samples of
+which nearly all fell between 4.8 and 5.2 ms. The same commit measured 3.77 ms
+and 8.71 ms either side of that run: a 16x spread on identical code. The
+decision floor has done it too, measured once at 71.7/s against its 80/s
+floor.
+
+A stall is distinguishable from a regression, which is what makes this
+fixable rather than a matter of taste. On the red run the median got *faster*
+while the tail went up sevenfold, and the chain append stalled in the same run
+on an unrelated code path. A slower machine raises the median and the tail
+together; only a stalled host splits them.
+
+So each gate measures up to three independent windows and passes if any one
+of them meets the budget (`tests/perf/windowed.py`). The budget and the floor
+are unchanged — 50 ms is SPEC §18's number and the kernel meets it with an
+order of magnitude to spare, so raising it would weaken a published claim to
+work around one nobody made. What the change gives up is an intermittent
+regression: one slow run in three now passes. That is the cheaper loss,
+because a gate that cries wolf teaches people to re-run a red build without
+reading it, and the habit does not stay confined to this test. Every window
+is printed either way, so a tolerated stall stays visible in the log.
