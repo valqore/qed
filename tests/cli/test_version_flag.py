@@ -57,16 +57,36 @@ class TestTheVersionFlag:
         assert result.exit_code == 0
         assert VERSION in result.output
 
+    def test_the_flag_is_registered_on_the_group(self) -> None:
+        """Asked of the command object, not of rendered help.
+
+        The first version of this grepped `qed --help` for `--version`, and it
+        passed locally and failed on both Ubuntu runners: Typer renders that
+        help through Rich, so what the string contains depends on the terminal
+        width the runner reports. **That is finding #65** -- a test coupled to
+        terminal width, breaking CI -- reproduced by the person who wrote the
+        finding up. Whether an option exists is a question about the command,
+        and there is an object that answers it.
+        """
+        from typer.main import get_command
+
+        options = {name for param in get_command(app).params for name in param.opts}
+        assert "--version" in options
+
     def test_the_top_level_help_still_describes_the_product(self) -> None:
         """Guard on how the flag was added. A `@app.callback()` carrying a
         docstring can take over the group's help text, and the Homebrew
         formula's test block greps `qed --help` for this phrase -- so the
         failure would have surfaced as a broken `brew test` on a machine
-        nobody here has."""
-        result = runner.invoke(app, ["--help"])
+        nobody here has.
+
+        `COLUMNS` is pinned because this one has to read the rendered output:
+        the formula greps the rendered output too. Pinning it is the
+        difference between asserting on a layout and asserting on a sentence.
+        """
+        result = runner.invoke(app, ["--help"], env={"COLUMNS": "200"})
         assert result.exit_code == 0
         assert "Policy and evidence kernel" in result.output
-        assert "--version" in result.output
 
 
 class TestDoctorReportsIt:
