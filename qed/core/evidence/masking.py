@@ -36,6 +36,7 @@ outcome this whole package exists to prevent.
 
 from __future__ import annotations
 
+import time
 from typing import Literal
 
 import regex
@@ -144,7 +145,7 @@ def _looks_like_a_card(digits: str) -> bool:
     return _luhn_ok(digits)
 
 
-def _mask_cards(text: str) -> str:
+def _mask_cards(text: str, deadline: float) -> str:
     def repl(m: regex.Match[str]) -> str:
         # str() throughout: the `regex` module ships no type information, so
         # without it every return here is Any and mypy --strict stops checking.
@@ -153,7 +154,20 @@ def _mask_cards(text: str) -> str:
             return "[masked:card]"
         return str(m.group(0))
 
-    return str(_CARD.sub(repl, text, timeout=_TIMEOUT))
+    return str(_CARD.sub(repl, text, timeout=_remaining(deadline)))
+
+
+def _remaining(deadline: float) -> float:
+    """What is left of this call's budget, as a positive number.
+
+    Raises rather than returning zero: ``regex`` treats a non-positive timeout
+    as *no* timeout, so handing it the exhausted budget would remove the guard
+    at the exact moment it is needed.
+    """
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("masking budget spent")
+    return left
 
 
 #: Keys whose value the *kernel* writes: digests, sequence numbers, key ids,
@@ -215,13 +229,26 @@ def _is_structural(key: object, value: object) -> bool:
 
 
 def mask_text(text: str, profile: MaskingProfile = "default") -> str:
-    """Mask secrets and personal data in a single string."""
+    """Mask secrets and personal data in a single string.
+
+    :data:`_TIMEOUT` is a deadline for this call, not an allowance each pattern
+    draws fresh. It used to be the latter, which made the budget a lie about
+    the thing it is read as bounding: sixteen patterns with 100 ms each is a
+    1.6 s worst case for one string, so the number in the source was never the
+    number a caller got. Worse, it scales -- widening the budget to survive a
+    loaded host multiplied the worst case by the same factor, and that showed
+    up as `test_concurrency_does_not_collapse_throughput` halving on four
+    sessions while one session stayed normal. A deadline makes the constant
+    mean what it says and bounds a string at :data:`_TIMEOUT` however many
+    patterns are added later.
+    """
     rules = _RULES + _STRICT_RULES if profile == "strict" else _RULES
+    deadline = time.monotonic() + _TIMEOUT
     try:
         out = text
         for pattern, replacement in rules:
-            out = pattern.sub(replacement, out, timeout=_TIMEOUT)
-        return _mask_cards(out)
+            out = pattern.sub(replacement, out, timeout=_remaining(deadline))
+        return _mask_cards(out, deadline)
     except TimeoutError:
         return "[masked:timeout]"
 

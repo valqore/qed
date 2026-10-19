@@ -7,6 +7,8 @@ makes the evidence useless.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from qed.core.evidence.masking import mask_payload, mask_text
@@ -265,3 +267,57 @@ class TestTheBudgetIsNotAClock:
             "host. Two numbers that are meant to be one is how masking kept the "
             "100 ms that ADR-0016 had already found too narrow to survive CI."
         )
+
+    def test_the_budget_bounds_the_call_and_not_each_pattern(self) -> None:
+        """One string cannot cost the budget once per pattern.
+
+        The constant is read as "the most masking can spend on a string". It
+        was not: every pattern drew the full amount fresh, so the real worst
+        case was the constant times the rule count -- 1.6 s where the source
+        said 100 ms, and 16 s once the budget was widened to survive a loaded
+        host. That is what halved four-session throughput while one session
+        stayed normal.
+
+        This does use the clock, in the one direction where that is safe. The
+        slices below are tenths of a second against scheduling noise measured
+        in microseconds, and a *slower* host makes the deadline bind sooner,
+        so load can only strengthen the assertion. A floor would be the
+        unsafe direction; this is a bound.
+        """
+        import qed.core.evidence.masking as m
+
+        slice_seconds = m._TIMEOUT / 5
+        handed: list[float] = []
+        deadline = m.time.monotonic() + m._TIMEOUT
+
+        def spend_a_slice() -> None:
+            handed.append(m._remaining(deadline))
+            time.sleep(slice_seconds)
+
+        with pytest.raises(TimeoutError):
+            for _ in range(len(m._RULES)):
+                spend_a_slice()
+
+        assert len(handed) < len(m._RULES), (
+            f"all {len(m._RULES)} patterns ran while each spent {slice_seconds:.1f}s of a "
+            f"{m._TIMEOUT}s budget, so they are not sharing one deadline -- the number in "
+            "the source is then not the number a caller gets, and it scales with the rule "
+            "count every time a pattern is added"
+        )
+        assert handed == sorted(handed, reverse=True), (
+            "each pattern should see less budget than the one before it, because they are "
+            "drawing down one deadline rather than each starting a new clock"
+        )
+
+    def test_a_spent_deadline_is_never_handed_to_regex_as_no_deadline(self) -> None:
+        """``regex`` reads a non-positive timeout as *unbounded*.
+
+        So returning the exhausted budget rather than raising would drop the
+        guard at the one moment it is doing something -- the failure would be
+        a hang, not a mask.
+        """
+        import qed.core.evidence.masking as m
+
+        with pytest.raises(TimeoutError):
+            m._remaining(m.time.monotonic() - 1.0)
+        assert m._remaining(m.time.monotonic() + 5.0) > 0
