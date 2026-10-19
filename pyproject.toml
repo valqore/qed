@@ -107,7 +107,7 @@ s3 = [
 # retention policy can never be shortened or removed by anybody. An instance
 # with no such publisher configured never imports google-cloud-storage.
 gcs = [
-    "google-cloud-storage>=2.18",
+    "google-cloud-storage>=3.17.1",
 ]
 
 [project.scripts]
