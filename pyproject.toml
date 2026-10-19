@@ -61,7 +61,7 @@ dev = [
     # Week 10. SPEC 17 asks for "fuzz on parsers" and 20.3 already lists
     # `hypothesis` in the dev/test set, so this is not a new dependency so much
     # as the one that was reserved for it. `tests/test_fuzz_parsers.py`.
-    "hypothesis>=6.170.0",
+    "hypothesis>=6.170.1",
     # Week 10. SPEC 24.1 names PyInstaller as the mechanism for the Homebrew
     # single-file binary; 20.3 is amended to list it, per 23's "no new
     # dependency without a spec update". Dev/test only -- it is never imported
