@@ -6,6 +6,7 @@ A self-hosted policy and evidence kernel for AI-agent actions.
 [![License](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](pyproject.toml)
 [![Evidence format](https://img.shields.io/badge/evidence%20format-1.0%20frozen-brightgreen)](docs/evidence-format.md)
+[![Docs](https://img.shields.io/badge/docs-qed.valqore.io-blue)](https://qed.valqore.io)
 
 An agent proposes an action. `qed` decides **ALLOW / BLOCK / REQUIRE_APPROVAL**
 with deterministic rules. Every step is written to one Ed25519-signed,
@@ -324,7 +325,8 @@ including the ones that are less flattering.
 
 ## Documentation
 
-The site is built from `docs/` with mkdocs-material and published from CI
+**[qed.valqore.io](https://qed.valqore.io)** — built from `docs/` with
+mkdocs-material and deployed from CI on every push to `main`
 (`mkdocs serve` to read it locally). **New here?**
 [`docs/onboarding-shadow-to-enforce.md`](docs/onboarding-shadow-to-enforce.md)
 is the install path, in the order that keeps you able to roll back at every
