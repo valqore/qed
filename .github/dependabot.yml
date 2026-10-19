@@ -28,8 +28,18 @@ updates:
       # `cryptography` is the one dependency that can change what a signature
       # means. Majors are read by hand, against the changelog, before the bump
       # is proposed -- never merged because CI went green.
+      #
+      # This rule said `update-types: ["version-update:semver-major"]` until
+      # 2026-10-19, and it did not hold: Dependabot opened a pull request
+      # raising the verifier's floor from `cryptography>=42` to `>=50.0.2` --
+      # eight majors at once -- described as "to permit the latest version".
+      # A lower bound has no single current version to classify, so the
+      # semver-major filter never applied to the requirement form of the
+      # update, only to the version form. Ignoring the dependency outright is
+      # what the comment above always meant. It costs nothing: `pip-audit` in
+      # CI is what reports a vulnerability in this package, and this file is
+      # only the half that proposes a bump.
       - dependency-name: cryptography
-        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /packages/qed-verify
@@ -40,8 +50,18 @@ updates:
     commit-message:
       prefix: "deps(qed-verify)"
     ignore:
+      #
+      # This rule said `update-types: ["version-update:semver-major"]` until
+      # 2026-10-19, and it did not hold: Dependabot opened a pull request
+      # raising the verifier's floor from `cryptography>=42` to `>=50.0.2` --
+      # eight majors at once -- described as "to permit the latest version".
+      # A lower bound has no single current version to classify, so the
+      # semver-major filter never applied to the requirement form of the
+      # update, only to the version form. Ignoring the dependency outright is
+      # what the comment above always meant. It costs nothing: `pip-audit` in
+      # CI is what reports a vulnerability in this package, and this file is
+      # only the half that proposes a bump.
       - dependency-name: cryptography
-        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
