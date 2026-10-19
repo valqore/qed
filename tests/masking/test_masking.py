@@ -7,8 +7,6 @@ makes the evidence useless.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from qed.core.evidence.masking import mask_payload, mask_text
