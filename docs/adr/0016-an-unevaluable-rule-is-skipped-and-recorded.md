@@ -62,6 +62,17 @@ recorded in the verdict.
 - `AG-PRD-001` in a chain is an operator defect, not an agent's behaviour. It
   belongs in the same category as `qed_ungated_windows_total`: a report that
   governance was thinner than configured for a known interval.
+- **This decision was applied to one of the two places that needed it.** The
+  reasoning above is about the `regex` module's budget being wall clock, which
+  is true of every caller of it, and `core/evidence/masking.py` had the same
+  100 ms. It was missed, and four days later the same runner masked
+  `mcp-proxy/0.1.0` as `[masked:timeout]` inside an evidence record. The
+  masking failure is the worse of the two: a skipped rule is recorded as
+  `AG-PRD-001` and an auditor can see it, whereas masking runs before
+  `payload_hash`, so a substituted payload hashes and verifies correctly and
+  is indistinguishable from a deliberate redaction forever. Both budgets are
+  now 1 s and a test pins them to each other, because the lesson was never
+  about predicates -- it was about the clock.
 
 ## Alternatives rejected
 

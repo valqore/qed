@@ -23,6 +23,15 @@ record written under an earlier pattern set still verifies.
 Patterns run through the ``regex`` module with an evaluation timeout (SPEC §17).
 If a pattern times out the whole string is replaced rather than passed through:
 failing closed is the only safe direction for a redactor.
+
+That substitution is the quietest failure in this module, which is why the
+budget below is wide. It happens *before* ``payload_hash``, so a record whose
+content was replaced by ``[masked:timeout]`` hashes correctly, verifies
+correctly, and reads as a deliberate redaction forever. There is no second
+chance at it: nothing re-runs masking, and the original string was never
+written anywhere. A budget that machine load can spend therefore does not
+degrade gracefully -- it silently substitutes evidence, which is the one
+outcome this whole package exists to prevent.
 """
 
 from __future__ import annotations
@@ -35,7 +44,21 @@ __all__ = ["MaskingProfile", "mask_payload", "mask_text"]
 
 MaskingProfile = Literal["default", "strict"]
 
-_TIMEOUT = 0.1
+# One second, and it is the same number as `REGEX_TIMEOUT` in
+# `core/policy/predicates.py` for the same reason -- see ADR-0016, which found
+# it there first. The `regex` module's budget is wall clock, not work: a
+# legitimate pattern finishes this rule set in about five microseconds, so
+# 100 ms was never 100 ms of matching, it was 100 ms of a shared machine, and a
+# loaded runner spends it by descheduling the thread mid-`sub`. ADR-0016 raised
+# the predicate side in October 2026 and left this one at 100 ms; four days
+# later the same runner masked `mcp-proxy/0.1.0` -- fifteen characters -- as
+# `[masked:timeout]` in an evidence record, and CI caught it only because a
+# round-trip test compared the chain against what went into it.
+#
+# The budget exists to bound catastrophic backtracking, which is a property of
+# the pattern and the input, not of the host. A pattern that needs a second on
+# fifteen characters is a lint problem, not a runtime one.
+_TIMEOUT = 1.0
 
 
 def _p(pattern: str) -> regex.Pattern[str]:

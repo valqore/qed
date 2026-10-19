@@ -233,3 +233,35 @@ def test_absurdly_nested_payloads_are_refused() -> None:
         value = {"k": value}
     with pytest.raises(ValueError, match="nested"):
         mask_payload(value)
+
+
+class TestTheBudgetIsNotAClock:
+    """The masking budget, asserted as a number rather than left to a comment.
+
+    `REGEX_TIMEOUT` on the predicate side was raised from 100 ms to 1 s in
+    ADR-0016, because the `regex` module's budget is wall clock: a loaded
+    runner spends it by descheduling the matching thread, so a pattern that
+    matches in microseconds times out anyway. Masking was left on the old
+    100 ms and failed the same way four days later, on the same runner --
+    `mcp-proxy/0.1.0`, fifteen characters, came back `[masked:timeout]`.
+
+    The two budgets guard the same hazard on the same machine, so they are
+    pinned to each other here. Changing one alone is the bug this file exists
+    to stop happening a third time.
+    """
+
+    def test_the_masking_budget_is_wide_enough_to_survive_a_busy_machine(self) -> None:
+        from qed.core.evidence.masking import _TIMEOUT
+
+        assert _TIMEOUT >= 1.0
+
+    def test_masking_and_predicates_share_one_budget(self) -> None:
+        from qed.core.evidence.masking import _TIMEOUT
+        from qed.core.policy.predicates import REGEX_TIMEOUT
+
+        assert _TIMEOUT == REGEX_TIMEOUT, (
+            "the evidence redactor and the policy engine bound the same hazard -- a "
+            "pattern that will not finish -- under the same wall clock on the same "
+            "host. Two numbers that are meant to be one is how masking kept the "
+            "100 ms that ADR-0016 had already found too narrow to survive CI."
+        )
