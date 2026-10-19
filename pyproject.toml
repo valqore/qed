@@ -28,7 +28,7 @@ dependencies = [
     "typer>=0.12",
     "pyyaml>=6",
     "python-ulid>=2",
-    "regex>=2024.0.0",
+    "regex>=2026.9.29",
     # Week 2. All four are in SPEC 20.3's allowed set for the kernel wheel.
     # `mcp` is pinned to 2.x: the 2.0 SDK replaced the decorator-based
     # low-level server with the `on_*` callbacks qed/adapters/mcp/proxy.py
