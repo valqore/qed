@@ -7,6 +7,8 @@ makes the evidence useless.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from qed.core.evidence.masking import mask_payload, mask_text
@@ -233,3 +235,89 @@ def test_absurdly_nested_payloads_are_refused() -> None:
         value = {"k": value}
     with pytest.raises(ValueError, match="nested"):
         mask_payload(value)
+
+
+class TestTheBudgetIsNotAClock:
+    """The masking budget, asserted as a number rather than left to a comment.
+
+    `REGEX_TIMEOUT` on the predicate side was raised from 100 ms to 1 s in
+    ADR-0016, because the `regex` module's budget is wall clock: a loaded
+    runner spends it by descheduling the matching thread, so a pattern that
+    matches in microseconds times out anyway. Masking was left on the old
+    100 ms and failed the same way four days later, on the same runner --
+    `mcp-proxy/0.1.0`, fifteen characters, came back `[masked:timeout]`.
+
+    The two budgets guard the same hazard on the same machine, so they are
+    pinned to each other here. Changing one alone is the bug this file exists
+    to stop happening a third time.
+    """
+
+    def test_the_masking_budget_is_wide_enough_to_survive_a_busy_machine(self) -> None:
+        from qed.core.evidence.masking import _TIMEOUT
+
+        assert _TIMEOUT >= 1.0
+
+    def test_masking_and_predicates_share_one_budget(self) -> None:
+        from qed.core.evidence.masking import _TIMEOUT
+        from qed.core.policy.predicates import REGEX_TIMEOUT
+
+        assert _TIMEOUT == REGEX_TIMEOUT, (
+            "the evidence redactor and the policy engine bound the same hazard -- a "
+            "pattern that will not finish -- under the same wall clock on the same "
+            "host. Two numbers that are meant to be one is how masking kept the "
+            "100 ms that ADR-0016 had already found too narrow to survive CI."
+        )
+
+    def test_the_budget_bounds_the_call_and_not_each_pattern(self) -> None:
+        """One string cannot cost the budget once per pattern.
+
+        The constant is read as "the most masking can spend on a string". It
+        was not: every pattern drew the full amount fresh, so the real worst
+        case was the constant times the rule count -- 1.6 s where the source
+        said 100 ms, and 16 s once the budget was widened to survive a loaded
+        host. That is what halved four-session throughput while one session
+        stayed normal.
+
+        This does use the clock, in the one direction where that is safe. The
+        slices below are tenths of a second against scheduling noise measured
+        in microseconds, and a *slower* host makes the deadline bind sooner,
+        so load can only strengthen the assertion. A floor would be the
+        unsafe direction; this is a bound.
+        """
+        import qed.core.evidence.masking as m
+
+        slice_seconds = m._TIMEOUT / 5
+        handed: list[float] = []
+        deadline = m.time.monotonic() + m._TIMEOUT
+
+        def spend_a_slice() -> None:
+            handed.append(m._remaining(deadline))
+            time.sleep(slice_seconds)
+
+        with pytest.raises(TimeoutError):
+            for _ in range(len(m._RULES)):
+                spend_a_slice()
+
+        assert len(handed) < len(m._RULES), (
+            f"all {len(m._RULES)} patterns ran while each spent {slice_seconds:.1f}s of a "
+            f"{m._TIMEOUT}s budget, so they are not sharing one deadline -- the number in "
+            "the source is then not the number a caller gets, and it scales with the rule "
+            "count every time a pattern is added"
+        )
+        assert handed == sorted(handed, reverse=True), (
+            "each pattern should see less budget than the one before it, because they are "
+            "drawing down one deadline rather than each starting a new clock"
+        )
+
+    def test_a_spent_deadline_is_never_handed_to_regex_as_no_deadline(self) -> None:
+        """``regex`` reads a non-positive timeout as *unbounded*.
+
+        So returning the exhausted budget rather than raising would drop the
+        guard at the one moment it is doing something -- the failure would be
+        a hang, not a mask.
+        """
+        import qed.core.evidence.masking as m
+
+        with pytest.raises(TimeoutError):
+            m._remaining(m.time.monotonic() - 1.0)
+        assert m._remaining(m.time.monotonic() + 5.0) > 0

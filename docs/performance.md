@@ -154,7 +154,13 @@ history-dependent rule inconclusive forever.
   verified on its own — and `qed-verify` checking one record at a time is the
   whole shape of the thing.
 * **Masking runs on every payload** before hashing. It is regex work with a
-  100 ms timeout, and it is the reason a payload can be written down at all.
+  1 s timeout, and it is the reason a payload can be written down at all. The
+  budget looks absurd next to the five microseconds the rule set actually
+  spends on a short string, and that gap is the point: the `regex` module's
+  timeout is wall clock, so a narrow budget is spent by a loaded host rather
+  than by a slow pattern. It was 100 ms until a CI runner spent it on a
+  fifteen-character string and wrote `[masked:timeout]` into a record in place
+  of the content (ADR-0016 found the same thing on the policy side first).
 * **The policy bundle is evaluated in full.** 46 rules against one proposal,
   no short-circuit on the first BLOCK, because the verdict carries every rule
   that fired and an auditor reading "blocked by AG-BLR-003" should also see
