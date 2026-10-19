@@ -20,6 +20,7 @@ from typing import Final
 import regex
 
 from qed.core.policy.fields import is_known_path
+from qed.core.regex_budget import BUDGET, Remaining, under_budget
 
 #: How deep a `when` tree may nest. One constant, because the evaluator
 #: refuses past it, the linter refuses past it, and `predicate_fields`
@@ -39,19 +40,12 @@ __all__ = [
     "validate_predicate",
 ]
 
-# One second, not the 100 ms this started with. A legitimate pattern matches in
-# microseconds -- the one that failed CI took 219 of them -- so the old budget
-# was not 100 ms of regex engine, it was 100 ms of wall clock on a shared
-# machine, and a loaded runner spent it by descheduling the thread mid-match.
-# That turned machine load into `PredicateError`, which is a rule failing to
-# evaluate: not an allow and not a block. The engine skips such a rule and
-# records it as `AG-PRD-001` (ADR-0016), so the budget being spent is now
-# visible rather than silent -- but it is still a rule that did not run, which
-# is why the budget is wide. The budget exists to bound
-# catastrophic backtracking, not to be a latency target -- SPEC 18's 50 ms p95
-# is enforced elsewhere and a pattern that needs a second is a lint problem,
-# not a runtime one.
-REGEX_TIMEOUT: Final = 1.0
+# Re-exported from `qed.core.regex_budget`, which holds the number and the
+# retry for both callers of `regex` in this kernel. It was a local 1.0 here and
+# a local 0.1 in the evidence redactor, which is how ADR-0016's reasoning --
+# about the library's wall clock, so true of every caller -- came to be applied
+# to one of the two places it governed.
+REGEX_TIMEOUT: Final = BUDGET
 
 
 class _Missing:
@@ -148,10 +142,17 @@ def _glob(value: object, operand: object) -> bool:
 def _regex(value: object, operand: object) -> bool:
     if not isinstance(operand, str):
         raise PredicateError("regex operand must be a string")
+    text = str(value)
+
+    def once(remaining: Remaining) -> bool:
+        return regex.search(operand, text, timeout=remaining()) is not None
+
     try:
-        return regex.search(operand, str(value), timeout=REGEX_TIMEOUT) is not None
+        return under_budget(once)
     except TimeoutError:
-        # A pattern that cannot be evaluated in budget must not silently pass.
+        # Every attempt timed out, so this is the pattern and not the host. A
+        # predicate that cannot be evaluated must not silently pass; the engine
+        # skips its rule and records `AG-PRD-001` (ADR-0016).
         raise PredicateError(f"regex evaluation timed out: {operand!r}") from None
 
 

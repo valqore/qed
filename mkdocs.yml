@@ -171,3 +171,4 @@ nav:
       - ADR-0014 QED governs its own admin operations: adr/0014-qed-governs-its-own-admin-operations.md
       - ADR-0015 The evidence format is frozen against a fixture: adr/0015-the-evidence-format-is-frozen-against-a-fixture-not-a-promise.md
       - ADR-0016 An unevaluable rule is skipped and recorded: adr/0016-an-unevaluable-rule-is-skipped-and-recorded.md
+      - ADR-0017 A regex timeout is retried before it is believed: adr/0017-a-regex-timeout-is-retried-before-it-is-believed.md
