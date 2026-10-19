@@ -13,14 +13,6 @@ between the two means something.
 
 ## Thirty seconds
 
-!!! warning "`pip install valqore-qed` installs a placeholder, not QED"
-    The name is reserved; QED is not released. What PyPI serves today is a
-    `0.0.0` package containing one README and no code — the reservation
-    exists so that nobody else can take the name, and publishing the real
-    thing is the irreversible step still ahead. Install from the repository
-    instead: `git clone https://github.com/valqore/qed && cd qed &&
-    pip install -e .`, and run `qed --version` to see which you have.
-
 ```bash
 pip install valqore-qed
 qed --version

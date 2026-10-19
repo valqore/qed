@@ -112,12 +112,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # This installs a placeholder, not QED: the name is reserved and the
-      # real package is not published, so PyPI serves a 0.0.0 holding one
-      # README. Until it is released, the step is
-      # `pip install git+https://github.com/valqore/qed`.
+      # Pin it. A gate that silently changes which rules it enforces
+      # between one deploy and the next is not a gate, and `qed check`'s
+      # exit codes are what this job branches on.
       - name: Install qed
-        run: pip install valqore-qed
+        run: pip install valqore-qed==1.0.0
 
       - name: Ask QED whether this may deploy
         env:
