@@ -9,6 +9,21 @@ version: 2
 updates:
   - package-ecosystem: pip
     directory: /
+    # Only change a requirement when the new version falls OUTSIDE it.
+    #
+    # The default for pip without a lockfile is `increase`, which raises a
+    # lower bound every time anything ships -- and for a `>=` floor that is
+    # definitionally unnecessary, because the floor already permits the new
+    # version. On 2026-10-19 it produced a pull request raising
+    # `hypothesis>=6.170.0` to `>=6.170.1`, opened within the hour of the
+    # previous raise being merged, carrying no information and costing a
+    # 16-minute CI round plus a staleness cascade across every other open
+    # branch.
+    #
+    # A security fix still arrives: a vulnerability that requires a version
+    # outside the declared range is outside it, which is the condition this
+    # strategy acts on.
+    versioning-strategy: increase-if-necessary
     schedule:
       interval: weekly
       day: monday
@@ -43,6 +58,21 @@ updates:
 
   - package-ecosystem: pip
     directory: /packages/qed-verify
+    # Only change a requirement when the new version falls OUTSIDE it.
+    #
+    # The default for pip without a lockfile is `increase`, which raises a
+    # lower bound every time anything ships -- and for a `>=` floor that is
+    # definitionally unnecessary, because the floor already permits the new
+    # version. On 2026-10-19 it produced a pull request raising
+    # `hypothesis>=6.170.0` to `>=6.170.1`, opened within the hour of the
+    # previous raise being merged, carrying no information and costing a
+    # 16-minute CI round plus a staleness cascade across every other open
+    # branch.
+    #
+    # A security fix still arrives: a vulnerability that requires a version
+    # outside the declared range is outside it, which is the condition this
+    # strategy acts on.
+    versioning-strategy: increase-if-necessary
     schedule:
       interval: weekly
       day: monday
@@ -71,6 +101,12 @@ updates:
     labels: [dependencies, ci]
     commit-message:
       prefix: "ci"
+    groups:
+      # Five separate pull requests for five action bumps in one week, each
+      # needing its own run of a pipeline that does not exercise the actions
+      # it changed. One pull request is the same review, read once.
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /deploy
