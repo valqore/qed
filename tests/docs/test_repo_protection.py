@@ -11,8 +11,9 @@ green.
 So the rules are files (`.github/rulesets/`), and these tests hold the files to
 the two documents that describe them: `ci.yml`, which says what must pass, and
 `GOVERNANCE.md`, which says who may merge. Nothing here talks to GitHub -- the
-rules are not installed yet, because rulesets are refused on a private
-repository on this plan, and `apply.sh` is what installs them at publication.
+files are the source and `apply.sh` installs them, which it did when the
+repository went public on 2026-10-19 (rulesets are refused on a private
+repository on this plan, which is why it waited).
 """
 
 from __future__ import annotations
