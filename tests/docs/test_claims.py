@@ -159,18 +159,25 @@ RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 # Markers are matched case-insensitively: one of these pages carries the
 # caveat as a YAML comment inside a workflow sample, where a sentence starts
 # with a capital.
-#: Each unavailable install command, the phrase a page must carry if it tells
-#: a reader to run it, and the repository variable still gating that publish.
+#: Each install command that now works, the caveat a page must **no longer**
+#: carry about it, and the repository variable that gates that publish.
 #:
-#: The pip marker used to be "not on pypi yet", and that sentence **became
-#: false on 2026-10-17** without becoming true: the name was reserved, so
-#: `pip install valqore-qed` resolves and installs a `0.0.0` package holding
-#: one README. A page saying "not on PyPI yet" was then wrong in the one
-#: direction that costs a reader something -- they would run it, see a clean
-#: exit, and believe the page had been pessimistic. So the marker names what
-#: the command *does* rather than what the index contains, which is the shape
-#: of claim that survived five launch steps in two days while every
-#: state-of-the-world sentence around it died.
+#: This mapping has been inverted once already and inverted again on
+#: 2026-10-19. First the marker was "not on pypi yet", which became false when
+#: the name was reserved -- `pip install valqore-qed` then resolved and
+#: installed a `0.0.0` placeholder, so the page was pessimistic in the one
+#: direction that costs a reader something. The marker was changed to name what
+#: the command *did* ("installs a placeholder") on the reasoning that a claim
+#: about mechanism outlives a claim about state.
+#:
+#: It did not. On 2026-10-19 both projects published 1.0.0, and
+#: "installs a placeholder" became the false statement -- in the same costly
+#: direction, since a reader is told to clone a repository to get something one
+#: command now installs. So the guard no longer demands a caveat. It forbids
+#: the two that are spent, which is the only form of this assertion that does
+#: not need rewriting the next time the world moves: a sentence that was true
+#: and is now false can be named, while the sentence that is true today cannot
+#: be known from inside the repository at all.
 INSTALL_COMMANDS = {
     "pip install valqore-qed": ("installs a placeholder", "PUBLISH_PYPI"),
     "docker run ghcr.io/valqore/qed": ("not on ghcr yet", "PUBLISH_GHCR"),
@@ -255,23 +262,34 @@ def test_the_pages_that_say_to_install_are_found() -> None:
 
 
 @pytest.mark.parametrize(("command", "gate"), [(c, g) for c, (_, g) in INSTALL_COMMANDS.items()])
-def test_the_publication_gate_is_still_closed(command: str, gate: str) -> None:
-    """The condition the test below depends on.
+def test_the_publication_gate_still_exists(command: str, gate: str) -> None:
+    """The gate survives publication, and this is why it is not the trigger.
 
-    When the name is reserved and `release.yml` stops gating that publish, this
-    fails -- and the warnings the other test demands become false statements to
-    delete. That is the point: a caveat nobody removes is the next overclaim,
-    just pointing the other way.
+    This test used to be called `..._is_still_closed` and was written as the
+    self-destruct for the caveats: when `release.yml` stopped gating a publish
+    it would fail, and the warnings would be deleted in the same commit.
+
+    **It did not fire.** Publishing v1.0.0 on 2026-10-19 did not touch
+    `release.yml` -- it set the repository *variable* `PUBLISH_PYPI` to true.
+    The gate is still in the file, so the assertion still passed, while four
+    pages went on telling readers that `pip install valqore-qed` installs a
+    placeholder. A guard keyed on the mechanism cannot see a change of state,
+    and `vars.X` in a workflow is the mechanism; the value of X is not in the
+    repository at all.
+
+    So the trigger moved to the pages themselves, below. What is left here is
+    worth keeping for its own sake: the gate must not be *deleted*, because
+    without it every future tag publishes whether or not anybody meant it to.
     """
     workflow = RELEASE.read_text(encoding="utf-8")
-    assert f"vars.{gate}" in workflow or f"{gate}=true" in workflow, (
-        f"release.yml no longer gates {gate}, so `{command}` may now work: "
-        "delete the 'not yet published' warnings the docs carry and this test"
+    assert f"vars.{gate}" in workflow, (
+        f"release.yml no longer gates {gate}, so every `v*` tag would publish "
+        f"`{command}` whether or not that was intended"
     )
 
 
-def test_an_install_command_that_cannot_work_says_so_where_it_is_written() -> None:
-    """Not 140 lines further down, which is where it said so before.
+def test_a_spent_caveat_is_not_still_on_the_page() -> None:
+    """The caveats are spent, and a spent caveat is the next overclaim.
 
     `docs/deployment.md` explained the publication gate under "Releasing", at
     the bottom of the page, while the two commands at the top told a reader to
@@ -283,12 +301,15 @@ def test_an_install_command_that_cannot_work_says_so_where_it_is_written() -> No
     offenders: list[str] = []
     for page, command, marker in pages_telling_a_reader_to_install():
         text = page.read_text(encoding="utf-8").lower()
-        # Each command's own marker, and nothing else. There used to be an
+        # Each command's own caveat, and nothing else. There used to be an
         # `or "not on pypi yet" in text` here, which meant a page warning
         # about PyPI satisfied the guard for a Docker command it also carried.
-        if marker not in text:
-            offenders.append(f"{page.relative_to(ROOT).as_posix()} says `{command}`")
+        if marker in text:
+            offenders.append(
+                f"{page.relative_to(ROOT).as_posix()} says `{command}` and still claims {marker!r}"
+            )
     assert not offenders, (
-        "these pages tell a reader to run a command that cannot work and do not "
-        "say so on the page: " + "; ".join(offenders)
+        "v1.0.0 is on PyPI and GHCR, so these pages carry a caveat that is now "
+        "false in the direction that costs a reader something -- they are told to "
+        "clone a repository to get what one command installs: " + "; ".join(offenders)
     )

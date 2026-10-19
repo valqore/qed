@@ -37,13 +37,6 @@ can drain.
 
 ## A process
 
-!!! warning "`pip install valqore-qed` installs a placeholder, not QED"
-    The name is reserved; QED is not released. What PyPI serves today is a
-    `0.0.0` package containing one README and no code, so the command below
-    exits cleanly and installs nothing usable. Install from the repository
-    instead: `git clone https://github.com/valqore/qed && cd qed &&
-    pip install -e .`, and run `qed --version` to see which you have.
-
 ```bash
 pip install valqore-qed
 qed keys init --dir /var/lib/qed
@@ -55,11 +48,18 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
 
 ## The container
 
-!!! warning "The image is not on GHCR yet"
-    `release.yml` builds it, starts it on both architectures and attaches it to
-    the GitHub Release, but pushing is behind `PUBLISH_GHCR` until SPEC §24.1's
-    reservations are done. Until then, build it: `docker build -t qed -f
-    deploy/Dockerfile .`
+!!! note "The image is signed, so check it rather than trusting the tag"
+    `ghcr.io/valqore/qed:1.0.0` is published for `linux/amd64` and
+    `linux/arm64` and signed in CI with keyless cosign, which records the
+    workflow that built it rather than a key somebody holds:
+
+    ```bash
+    cosign verify ghcr.io/valqore/qed:1.0.0       --certificate-identity-regexp '^https://github.com/valqore/qed/'       --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    ```
+
+    A tag can be moved; a signature over a digest cannot. `docker build -t qed
+    -f deploy/Dockerfile .` still builds it from source if you would rather not
+    pull anything.
 
 ```bash
 docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.0.0 \
