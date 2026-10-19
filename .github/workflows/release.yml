@@ -194,7 +194,7 @@ jobs:
       - name: Build and load, for a tag that publishes nothing
         id: local
         if: vars.PUBLISH_GHCR != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
@@ -208,7 +208,7 @@ jobs:
       - name: Build and push by digest
         id: build
         if: vars.PUBLISH_GHCR == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
