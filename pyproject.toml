@@ -77,8 +77,8 @@ dev = [
     # says 2.0 removes the plugin system, rewrites theming, offers no migration
     # path and is currently unlicensed. An uncapped range would turn that into a
     # surprise failure on an unrelated commit.
-    "mkdocs>=1.6,<2",
-    "mkdocs-material>=9.5,<10",
+    "mkdocs>=1.6.1,<2",
+    "mkdocs-material>=9.7.7,<10",
 ]
 # SPEC 19, 20.4. The web pages are AGPL-3.0 and ship as their own wheel from
 # their own repository, so that a third party cannot offer a hosted
