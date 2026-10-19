@@ -34,14 +34,19 @@ literals, and nowhere else.
 </details>
 
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
-> **Nothing is released yet:** `pip install valqore-qed` resolves, and what it
-> installs is a `0.0.0` placeholder whose own description says it installs
-> nothing — the name was reserved on 2026-10-17 so that nobody else could take
-> it, and a reserved name is not a release. `npm install valqore-qed` resolves
-> to the same kind of placeholder — QED is a Python program and there has never
-> been a JavaScript client. There is no public GHCR image, and the
-> `valqore/tap` Homebrew tap is reserved but private, so `brew tap` fails.
-> Install from a clone, as the quick start below does.
+> **One install channel is live; the rest are reservations.**
+> `brew install valqore/tap/qed` works — the tap is public and carries
+> v1.0.0's three binaries, whose checksums match the assets CI built. The
+> binaries are **not code-signed or notarised**, so macOS may refuse to run
+> one until you clear it; `deploy/qed.spec` keeps UPX off so that signing
+> stays possible, but no release step signs anything yet.
+> `pip install valqore-qed` resolves, and what it installs is a `0.0.0`
+> placeholder whose own description says it installs nothing — the name was
+> reserved on 2026-10-17 so that nobody else could take it, and a reserved
+> name is not a release. `npm install valqore-qed` resolves to the same kind
+> of placeholder — QED is a Python program and there has never been a
+> JavaScript client. There is no public GHCR image. For the Python package,
+> install from a clone, as the quick start below does.
 > `.github/workflows/release.yml` holds
 > both publishing steps behind the `PUBLISH_PYPI` and `PUBLISH_GHCR` repository
 > variables, and what turns them on is SPEC §24.1's reservations: those names,
