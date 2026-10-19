@@ -418,7 +418,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: digests-*
@@ -515,12 +515,12 @@ jobs:
       # per project, so a single call carrying both projects' files is
       # rejected -- and a rejection halfway through is a release where one of
       # the two is public and the other is not.
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: dist-qed
           path: dist-qed
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: dist-qed-verify
           path: dist-qed-verify
@@ -559,7 +559,7 @@ jobs:
       # files that were never going to be attached to it. The pattern also
       # means a new artifact somewhere else in the pipeline cannot silently
       # become a release asset.
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: "{dist-*,chart,binary-*}"
