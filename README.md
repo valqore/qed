@@ -2,6 +2,12 @@
 
 A self-hosted policy and evidence kernel for AI-agent actions.
 
+[![CI](https://github.com/valqore/qed/actions/workflows/ci.yml/badge.svg)](https://github.com/valqore/qed/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](pyproject.toml)
+[![Evidence format](https://img.shields.io/badge/evidence%20format-1.0%20frozen-brightgreen)](docs/evidence-format.md)
+[![Docs](https://img.shields.io/badge/docs-qed.valqore.io-blue)](https://qed.valqore.io)
+
 An agent proposes an action. `qed` decides **ALLOW / BLOCK / REQUIRE_APPROVAL**
 with deterministic rules. Every step is written to one Ed25519-signed,
 hash-chained evidence ledger that a third party can verify without trusting the
@@ -10,19 +16,23 @@ instance that produced it.
 No LLM in the decision path. No network in the kernel. Runs on your own
 hardware, including air-gapped.
 
-> **Name:** the product is **Valqore QED** — *quod erat demonstrandum*, which
-> is the claim: a third party can verify what happened here without trusting
-> the instance that recorded it. `qed` is the command, the import package and
-> the repository.
->
-> It was called `gate` until 2026-10-08. The name changed because "gate" is
-> already a commercial product in this exact category, is not registrable for
-> the thing it describes, and named the half of the product every competitor
-> ships rather than the half that is hard to copy. The rename cost one commit
-> and invalidated no evidence, because ADR-0006 had already taken the product
-> name out of the hash domain separators in week 1 — which is why `gate`
-> still appears in `docs/adr/`, `CHANGELOG.md` and two superseded spec
-> literals, and nowhere else.
+**Valqore QED** — *quod erat demonstrandum*, which is the claim: a third
+party can verify what happened here without trusting the instance that
+recorded it. `qed` is the command, the import package and the repository.
+
+<details>
+<summary>It was called <code>gate</code> until 2026-10-08 — why the name changed</summary>
+
+The name changed because "gate" is
+already a commercial product in this exact category, is not registrable for
+the thing it describes, and named the half of the product every competitor
+ships rather than the half that is hard to copy. The rename cost one commit
+and invalidated no evidence, because ADR-0006 had already taken the product
+name out of the hash domain separators in week 1 — which is why `gate`
+still appears in `docs/adr/`, `CHANGELOG.md` and two superseded spec
+literals, and nowhere else.
+</details>
+
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
 > **Nothing is released yet:** `pip install valqore-qed` resolves, and what it
 > installs is a `0.0.0` placeholder whose own description says it installs
@@ -40,63 +50,7 @@ hardware, including air-gapped.
 > of the build — and why the honest answer to "is it on PyPI?" comes from the
 > index rather than from this file.
 
-## Status
-
-**All twelve weeks of the §22 build order are code-complete.** The exit criteria that depend on people — two design partners in enforce mode, written auditor acceptance, 1,000 gated actions — are not met and are tracked separately; what follows is what the code does.
-
-**Evidence format 1.0 is frozen** (ADR-0015). A record written under `schema_version: "1.0"` verifies under every later verifier, and the repository carries the records that prove it: `tests/evidence/fixtures/evidence-format-1.0/` is a real export produced once and never regenerated, checked on every CI run. `docs/evidence-format.md` is the specification, with a conformance section for anyone writing a second verifier.
-
-What works today:
-
-| Capability | Entry point |
-|---|---|
-| Domain model (`ActionProposal`, `Verdict`, `EvidenceRecord`, mandates, budgets) | `qed/core/schemas.py` |
-| RFC 8785 (JCS) canonical JSON | `qed/core/jcs.py` |
-| Hash chain, Ed25519 signing, Merkle checkpoints | `qed/core/evidence/` |
-| Evidence ledger on **SQLite or PostgreSQL**, one implementation | `qed/infra/storage/` |
-| Policy loader, linter, predicates, engine | `qed/core/policy/` |
-| Deterministic blast-radius score (0–100) | `qed/core/policy/blast_radius.py` |
-| Baseline pack, 46 rules | `qed/core/policy/packs/agent-baseline/` |
-| Standalone verifier | `packages/qed-verify/` |
-| **MCP proxy** (stdio and Streamable HTTP), shadow mode | `qed/adapters/mcp/` |
-| **HTTP forward proxy** (`CONNECT` and plain HTTP) | `qed/adapters/http_proxy/` |
-| **Claude Code hook** + `qed install` | `qed/adapters/hooks/` |
-| **Python SDK** (`@guard`) | `qed/sdk/` |
-| **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
-| **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
-| **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
-| **Approvals**: Slack Block Kit (a click resolved to an identified person, not a workspace member), CLI `qed approve`, `POST /v1/approvals` with an OIDC bearer | `qed/infra/channels/slack.py`, `qed/api/human_auth.py` |
-| Web approval **pages** — in the separate AGPL `qed-ui` package, which is **not published**. This wheel contains no UI and `qed serve --ui` mounts what it cannot supply | `qed/api/ui.py` (the mount point, SPEC §19) |
-| **HA**: evidence outbox + one chain leader on Postgres | `qed/infra/chain_drain.py`, `qed/api/leader.py` |
-| **`qed check --server`** and `--evidence-out` for CI | `docs/ci.md` |
-| **Container**, distroless and non-root | `deploy/Dockerfile` |
-| **Single-file binary** for Homebrew, no Python needed | `deploy/qed.spec` |
-| **Helm chart** and a two-replica compose stack | `deploy/helm/qed`, `deploy/docker-compose.yml` |
-| **Key rotation** (`qed keys rotate`), verifiable across the change | `qed/infra/keys/rotation.py` |
-| **Retention and purge**, with purge-then-verify | `qed/core/evidence/retention.py` |
-| **Checkpoint anchors**: file, S3 object-lock, git tag | `qed/infra/publishers/` |
-| **Prometheus `/metrics`** and **OCSF SIEM** events | `qed/api/routers/metrics.py`, `qed/infra/siem.py` |
-| **Control catalogues** for 10 frameworks, with honest coverage | `qed/compliance/packs/`, `docs/compliance.md` |
-| **Signed catalogue import**, air-gap, recorded in the chain | `qed/remote/packs.py`, ADR-0012 |
-| **Transparency-log anchor client**, six values and no payload | `qed/remote/anchor.py`, ADR-0013 |
-| **Self-governance**: qed's own admin ops behind an approval | `qed/core/admin.py`, ADR-0014 |
-| **Frozen evidence format 1.0** + conformance fixture and cross-version test | `docs/evidence-format.md`, `tests/evidence/fixtures/`, ADR-0015 |
-| **Landing page**, one file, no external request | `landing/index.html` |
-| CLI: `demo`, `keys`, `adapters`, `check`, `policy`, `export`, `verify`, `replay`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
-
-Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
-`mode: mitm` for the HTTP proxy, the `remote.packs` **feed** (the air-gap
-import is built; fetching a bundle from a URL is the same verification with a
-download in front of it), the anchor **log** itself (the client is built; the
-log is `qed-cloud`'s, SPEC §24.2), and SPEC §19's live-stream and budget
-pages.
-
-**Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
-10.6 ms on PostgreSQL, against SPEC §18's 50 ms target — though that budget is
-a claim about the disk, not about Python, and slow storage can blow through it.
-Throughput is 250–400 decisions/s per replica, so SPEC §22's "1k rps" is
-several replicas rather than one. `docs/performance.md` has the numbers,
-including the ones that are less flattering.
+What it does today, capability by capability, is under [Status](#status).
 
 ## Quick start
 
@@ -311,9 +265,68 @@ alive after the job. Without an instance, `--evidence-out qed-evidence.jsonl`
 leaves the chain behind as an artifact anyone can check with the public key.
 `docs/ci.md` has the Actions workflow.
 
+## Status
+
+**All twelve weeks of the §22 build order are code-complete.** The exit criteria that depend on people — two design partners in enforce mode, written auditor acceptance, 1,000 gated actions — are not met and are tracked separately; what follows is what the code does.
+
+**Evidence format 1.0 is frozen** (ADR-0015). A record written under `schema_version: "1.0"` verifies under every later verifier, and the repository carries the records that prove it: `tests/evidence/fixtures/evidence-format-1.0/` is a real export produced once and never regenerated, checked on every CI run. `docs/evidence-format.md` is the specification, with a conformance section for anyone writing a second verifier.
+
+What works today:
+
+| Capability | Entry point |
+|---|---|
+| Domain model (`ActionProposal`, `Verdict`, `EvidenceRecord`, mandates, budgets) | `qed/core/schemas.py` |
+| RFC 8785 (JCS) canonical JSON | `qed/core/jcs.py` |
+| Hash chain, Ed25519 signing, Merkle checkpoints | `qed/core/evidence/` |
+| Evidence ledger on **SQLite or PostgreSQL**, one implementation | `qed/infra/storage/` |
+| Policy loader, linter, predicates, engine | `qed/core/policy/` |
+| Deterministic blast-radius score (0–100) | `qed/core/policy/blast_radius.py` |
+| Baseline pack, 46 rules | `qed/core/policy/packs/agent-baseline/` |
+| Standalone verifier | `packages/qed-verify/` |
+| **MCP proxy** (stdio and Streamable HTTP), shadow mode | `qed/adapters/mcp/` |
+| **HTTP forward proxy** (`CONNECT` and plain HTTP) | `qed/adapters/http_proxy/` |
+| **Claude Code hook** + `qed install` | `qed/adapters/hooks/` |
+| **Python SDK** (`@guard`) | `qed/sdk/` |
+| **Credential broker** (env, file, Vault) | `qed/core/broker/`, `qed/infra/secrets/` |
+| **HTTP API**: `/v1/proposals`, `/v1/evidence`, `/healthz`, `/readyz` | `qed/api/` |
+| **OSCAL 1.1.2 `assessment-results` export** | `qed/core/evidence/export/oscal.py` |
+| **Approvals**: Slack Block Kit (a click resolved to an identified person, not a workspace member), CLI `qed approve`, `POST /v1/approvals` with an OIDC bearer | `qed/infra/channels/slack.py`, `qed/api/human_auth.py` |
+| Web approval **pages** — in the separate AGPL `qed-ui` package, which is **not published**. This wheel contains no UI and `qed serve --ui` mounts what it cannot supply | `qed/api/ui.py` (the mount point, SPEC §19) |
+| **HA**: evidence outbox + one chain leader on Postgres | `qed/infra/chain_drain.py`, `qed/api/leader.py` |
+| **`qed check --server`** and `--evidence-out` for CI | `docs/ci.md` |
+| **Container**, distroless and non-root | `deploy/Dockerfile` |
+| **Single-file binary** for Homebrew, no Python needed | `deploy/qed.spec` |
+| **Helm chart** and a two-replica compose stack | `deploy/helm/qed`, `deploy/docker-compose.yml` |
+| **Key rotation** (`qed keys rotate`), verifiable across the change | `qed/infra/keys/rotation.py` |
+| **Retention and purge**, with purge-then-verify | `qed/core/evidence/retention.py` |
+| **Checkpoint anchors**: file, S3 object-lock, git tag | `qed/infra/publishers/` |
+| **Prometheus `/metrics`** and **OCSF SIEM** events | `qed/api/routers/metrics.py`, `qed/infra/siem.py` |
+| **Control catalogues** for 10 frameworks, with honest coverage | `qed/compliance/packs/`, `docs/compliance.md` |
+| **Signed catalogue import**, air-gap, recorded in the chain | `qed/remote/packs.py`, ADR-0012 |
+| **Transparency-log anchor client**, six values and no payload | `qed/remote/anchor.py`, ADR-0013 |
+| **Self-governance**: qed's own admin ops behind an approval | `qed/core/admin.py`, ADR-0014 |
+| **Frozen evidence format 1.0** + conformance fixture and cross-version test | `docs/evidence-format.md`, `tests/evidence/fixtures/`, ADR-0015 |
+| **Landing page**, one file, no external request | `landing/index.html` |
+| CLI: `demo`, `keys`, `adapters`, `check`, `policy`, `export`, `verify`, `replay`, `serve`, `mcp`, `proxy`, `hook`, `install`, `login`, `token`, `mandate`, `approve`, `approvals`, `doctor`, `status`, `checkpoint`, `packs` | `qed/cli.py` |
+
+Not built yet: the Codex hook (its API is unconfirmed, SPEC §12.2),
+`mode: mitm` for the HTTP proxy, the `remote.packs` **feed** (the air-gap
+import is built; fetching a bundle from a URL is the same verification with a
+download in front of it), the anchor **log** itself (the client is built; the
+log is `qed-cloud`'s, SPEC §24.2), and SPEC §19's live-stream and budget
+pages.
+
+**Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
+10.6 ms on PostgreSQL, against SPEC §18's 50 ms target — though that budget is
+a claim about the disk, not about Python, and slow storage can blow through it.
+Throughput is 250–400 decisions/s per replica, so SPEC §22's "1k rps" is
+several replicas rather than one. `docs/performance.md` has the numbers,
+including the ones that are less flattering.
+
 ## Documentation
 
-The site is built from `docs/` with mkdocs-material and published from CI
+**[qed.valqore.io](https://qed.valqore.io)** — built from `docs/` with
+mkdocs-material and deployed from CI on every push to `main`
 (`mkdocs serve` to read it locally). **New here?**
 [`docs/onboarding-shadow-to-enforce.md`](docs/onboarding-shadow-to-enforce.md)
 is the install path, in the order that keeps you able to roll back at every
@@ -384,3 +397,27 @@ ruff check . && ruff format --check .
 mypy
 pytest
 ```
+
+`pytest` runs the full suite; `-m "not slow and not perf"` is what CI's matrix
+runs on four cells, and the `perf` marker is separated because a timing
+assertion measures the host as well as the code (`docs/performance.md`).
+
+Every commit needs a `Signed-off-by` line — `git commit --signoff`. CI enforces
+it on every commit in a pull request, and a commit without it cannot merge.
+
+## The project
+
+| | |
+|---|---|
+| Contributing, and the DCO | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Who may merge, and what is in scope | [`GOVERNANCE.md`](GOVERNANCE.md) |
+| Reporting a vulnerability — **not** as an issue | [`SECURITY.md`](SECURITY.md) |
+| Twelve things qed does **not** protect against | [`THREAT_MODEL.md`](THREAT_MODEL.md) |
+| What a green test suite cannot see | [`docs/validation.md`](docs/validation.md) |
+| Code of conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+| Licence | [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) |
+
+Found a claim in this repository that overstates what the code does? There is
+an issue template for exactly that
+([`.github/ISSUE_TEMPLATE/overclaim.yml`](.github/ISSUE_TEMPLATE/overclaim.yml)),
+and it is the most useful issue you can open here.
