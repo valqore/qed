@@ -15,7 +15,7 @@ license-files = ["LICENSE", "NOTICE"]
 classifiers = ["Programming Language :: Python :: 3.12"]
 # One dependency, on purpose: an auditor must be able to install this on a
 # machine that is not allowed to reach the internet twice.
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=50.0.2"]
 
 [project.scripts]
 qed-verify = "qed_verify.cli:main"
