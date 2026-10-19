@@ -44,7 +44,7 @@ dependencies = [
     "joserfc>=1.0,<2",
     # Week 3. SPEC 20.3 allows it; the device-flow refresh token goes to the
     # OS keychain, and on a box without one to a 0600 file with a warning.
-    "keyring>=25",
+    "keyring>=25.7.0",
 ]
 
 [project.optional-dependencies]
