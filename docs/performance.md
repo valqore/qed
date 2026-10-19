@@ -161,6 +161,11 @@ history-dependent rule inconclusive forever.
   than by a slow pattern. It was 100 ms until a CI runner spent it on a
   fifteen-character string and wrote `[masked:timeout]` into a record in place
   of the content (ADR-0016 found the same thing on the policy side first).
+  A timeout is also retried twice before it is believed, since no budget can
+  tell a pathological pattern from a busy host and running it again can
+  (ADR-0017) -- so the worst case for a pattern that truly cannot be evaluated
+  is three seconds, paid once per string, and a payload of many strings
+  multiplies that.
 * **The policy bundle is evaluated in full.** 46 rules against one proposal,
   no short-circuit on the first BLOCK, because the verdict carries every rule
   that fired and an auditor reading "blocked by AG-BLR-003" should also see

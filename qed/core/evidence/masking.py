@@ -20,46 +20,39 @@ Old chains are unaffected by changes here. ``qed-verify`` recomputes
 ``payload_hash`` from the payload as stored, and never re-runs masking, so a
 record written under an earlier pattern set still verifies.
 
-Patterns run through the ``regex`` module with an evaluation timeout (SPEC §17).
-If a pattern times out the whole string is replaced rather than passed through:
-failing closed is the only safe direction for a redactor.
+Patterns run through the ``regex`` module with an evaluation timeout
+(:mod:`qed.core.regex_budget`, SPEC §17). If a pattern times out on every
+attempt the whole string is replaced rather than passed through: failing
+closed is the only safe direction for a redactor.
 
-That substitution is the quietest failure in this module, which is why the
-budget below is wide. It happens *before* ``payload_hash``, so a record whose
-content was replaced by ``[masked:timeout]`` hashes correctly, verifies
-correctly, and reads as a deliberate redaction forever. There is no second
-chance at it: nothing re-runs masking, and the original string was never
-written anywhere. A budget that machine load can spend therefore does not
-degrade gracefully -- it silently substitutes evidence, which is the one
-outcome this whole package exists to prevent.
+That substitution is the quietest failure in this module, which is why it
+takes more than one timeout to reach it. It happens *before* ``payload_hash``,
+so a record whose content was replaced hashes correctly, verifies correctly,
+and reads as a deliberate redaction forever. There is no second chance at it:
+nothing re-runs masking, and the original string was never written anywhere.
+A budget that machine load can spend therefore does not degrade gracefully --
+it silently substitutes evidence, which is the one outcome this whole package
+exists to prevent. The retry is what separates "this pattern cannot be
+evaluated" from "this machine was busy"; see that module for why no choice of
+budget can.
 """
 
 from __future__ import annotations
 
-import time
 from typing import Literal
 
 import regex
+
+from qed.core.regex_budget import BUDGET, Remaining, under_budget
 
 __all__ = ["MaskingProfile", "mask_payload", "mask_text"]
 
 MaskingProfile = Literal["default", "strict"]
 
-# One second, and it is the same number as `REGEX_TIMEOUT` in
-# `core/policy/predicates.py` for the same reason -- see ADR-0016, which found
-# it there first. The `regex` module's budget is wall clock, not work: a
-# legitimate pattern finishes this rule set in about five microseconds, so
-# 100 ms was never 100 ms of matching, it was 100 ms of a shared machine, and a
-# loaded runner spends it by descheduling the thread mid-`sub`. ADR-0016 raised
-# the predicate side in October 2026 and left this one at 100 ms; four days
-# later the same runner masked `mcp-proxy/0.1.0` -- fifteen characters -- as
-# `[masked:timeout]` in an evidence record, and CI caught it only because a
-# round-trip test compared the chain against what went into it.
-#
-# The budget exists to bound catastrophic backtracking, which is a property of
-# the pattern and the input, not of the host. A pattern that needs a second on
-# fifteen characters is a lint problem, not a runtime one.
-_TIMEOUT = 1.0
+#: Re-exported so this module's own budget cannot drift from the policy
+#: engine's again, which is how ADR-0016 came to be applied to one of the two
+#: callers it governed. The number, and the retry, live in one place now.
+_TIMEOUT = BUDGET
 
 
 def _p(pattern: str) -> regex.Pattern[str]:
@@ -145,7 +138,7 @@ def _looks_like_a_card(digits: str) -> bool:
     return _luhn_ok(digits)
 
 
-def _mask_cards(text: str, deadline: float) -> str:
+def _mask_cards(text: str, remaining: Remaining) -> str:
     def repl(m: regex.Match[str]) -> str:
         # str() throughout: the `regex` module ships no type information, so
         # without it every return here is Any and mypy --strict stops checking.
@@ -154,20 +147,7 @@ def _mask_cards(text: str, deadline: float) -> str:
             return "[masked:card]"
         return str(m.group(0))
 
-    return str(_CARD.sub(repl, text, timeout=_remaining(deadline)))
-
-
-def _remaining(deadline: float) -> float:
-    """What is left of this call's budget, as a positive number.
-
-    Raises rather than returning zero: ``regex`` treats a non-positive timeout
-    as *no* timeout, so handing it the exhausted budget would remove the guard
-    at the exact moment it is needed.
-    """
-    left = deadline - time.monotonic()
-    if left <= 0:
-        raise TimeoutError("masking budget spent")
-    return left
+    return str(_CARD.sub(repl, text, timeout=remaining()))
 
 
 #: Keys whose value the *kernel* writes: digests, sequence numbers, key ids,
@@ -231,24 +211,27 @@ def _is_structural(key: object, value: object) -> bool:
 def mask_text(text: str, profile: MaskingProfile = "default") -> str:
     """Mask secrets and personal data in a single string.
 
-    :data:`_TIMEOUT` is a deadline for this call, not an allowance each pattern
-    draws fresh. It used to be the latter, which made the budget a lie about
-    the thing it is read as bounding: sixteen patterns with 100 ms each is a
-    1.6 s worst case for one string, so the number in the source was never the
-    number a caller got. Worse, it scales -- widening the budget to survive a
-    loaded host multiplied the worst case by the same factor, and that showed
-    up as `test_concurrency_does_not_collapse_throughput` halving on four
-    sessions while one session stayed normal. A deadline makes the constant
-    mean what it says and bounds a string at :data:`_TIMEOUT` however many
-    patterns are added later.
+    The budget is a deadline for one attempt, not an allowance each pattern
+    draws fresh, and a timeout is retried before it is believed. Both of those
+    are :mod:`qed.core.regex_budget`'s doing and both were bugs here: the
+    per-pattern grant made sixteen patterns at 100 ms a 1.6 s worst case for
+    one string, so the number in the source was never the number a caller got,
+    and widening it to survive a loaded host multiplied the worst case and
+    halved four-session throughput.
+
+    Retrying is safe because this is pure: each attempt rebuilds the result
+    from ``text``, never from a half-masked intermediate.
     """
     rules = _RULES + _STRICT_RULES if profile == "strict" else _RULES
-    deadline = time.monotonic() + _TIMEOUT
-    try:
+
+    def once(remaining: Remaining) -> str:
         out = text
         for pattern, replacement in rules:
-            out = pattern.sub(replacement, out, timeout=_remaining(deadline))
-        return _mask_cards(out, deadline)
+            out = pattern.sub(replacement, out, timeout=remaining())
+        return _mask_cards(out, remaining)
+
+    try:
+        return under_budget(once)
     except TimeoutError:
         return "[masked:timeout]"
 
