@@ -91,7 +91,7 @@ jobs:
       - name: Deploy
         id: deployment
         if: vars.PUBLISH_DOCS == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Not deployed, and why
         if: vars.PUBLISH_DOCS != 'true'
