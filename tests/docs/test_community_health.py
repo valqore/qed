@@ -149,14 +149,38 @@ class TestDependabot:
 
     def test_a_cryptography_major_is_not_proposed_automatically(self) -> None:
         """The one dependency whose major version can change what a signature
-        means. Read by hand against the changelog, never merged on green CI."""
+        means. Read by hand against the changelog, never merged on green CI.
+
+        This test used to assert only that the name `cryptography` appeared
+        among the ignored dependencies, and it passed on 2026-10-19 while
+        Dependabot opened a pull request raising the verifier's floor from
+        `>=42` to `>=50.0.2`. The rule it was reading carried
+        `update-types: ["version-update:semver-major"]`, which does not apply
+        to the requirement form of an update -- so the name was present, the
+        rule was configured, and the bump was proposed anyway.
+
+        So the assertion is now about the *effect*: the entry must narrow to
+        nothing, because an entry that names the dependency and then excludes
+        all but one update kind is indistinguishable, from here, from one that
+        works.
+        """
         updates = dependabot()["updates"]
         assert isinstance(updates, list)
         pip = [u for u in updates if u["package-ecosystem"] == "pip"]
         assert pip
         for update in pip:
-            ignored = {str(entry["dependency-name"]) for entry in update.get("ignore", [])}
-            assert "cryptography" in ignored, f"{update['directory']} would bump it unattended"
+            entries = [
+                entry
+                for entry in update.get("ignore", [])
+                if str(entry["dependency-name"]) == "cryptography"
+            ]
+            assert entries, f"{update['directory']} would bump cryptography unattended"
+            for entry in entries:
+                assert "update-types" not in entry, (
+                    f"{update['directory']} ignores cryptography only for "
+                    f"{entry['update-types']}; a lower-bound bump is not one of "
+                    "those and will be proposed"
+                )
 
 
 def test_the_pull_request_template_asks_about_the_frozen_format() -> None:
