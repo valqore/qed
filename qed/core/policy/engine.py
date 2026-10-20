@@ -19,6 +19,7 @@ from typing import Final
 from qed.core.policy.derived import compute_derived
 from qed.core.policy.model import ApprovalSpec, PolicyBundle, Rule
 from qed.core.policy.predicates import PredicateError, evaluate_predicate
+from qed.core.regex_budget import pooled
 from qed.core.schemas import (
     ENGINE_VERSION,
     ActionProposal,
@@ -202,33 +203,48 @@ def _match(
     rule was read from or in what order the files were read.
 
     **A predicate that raises skips its rule** (ADR-0016). In practice that is a
-    regex spending its 1 s budget, since `qed policy lint` refuses every
-    structural error before a bundle ever loads. A rule that cannot be evaluated
-    is not a hit and not an absence of one, and the two alternatives are both
-    worse: counting the failure as a match turns machine load into a BLOCK,
-    and refusing the whole proposal hands one bad pattern in one rule the power
-    to stop every action the kernel governs. So the rule is left out of the
+    regex spending its budget, since `qed policy lint` refuses every structural
+    error before a bundle ever loads. A rule that cannot be evaluated is not a
+    hit and not an absence of one, and the two alternatives are both worse:
+    counting the failure as a match turns machine load into a BLOCK, and
+    refusing the whole proposal hands one bad pattern in one rule the power to
+    stop every action the kernel governs. So the rule is left out of the
     decision and the skip is reported in the verdict as ``AG-PRD-001`` -- the
     one thing that must not happen is the decision coming out as if the bundle
     had one fewer rule in it and nobody being told.
+
+    **Every regex here draws on one allowance** (ADR-0018), so a bundle cannot
+    cost its rule count times the per-pattern worst case. The consequence to
+    know about is that a rule can now be skipped because an *earlier* rule's
+    pattern spent the allowance, which makes which rules are skipped depend on
+    ``rule_id`` order. The decision itself does not depend on that order --
+    :func:`_max_decision` takes a maximum over the hits -- and the skip message
+    says which of the two happened, because they are different operator faults.
+    In a bundle with one bad pattern the allowance is never reached by the
+    rules behind it: they need microseconds each.
     """
     proposal_json = proposal.model_dump(mode="json")
     derived_json = derived.model_dump(mode="json")
     matched: list[Rule] = []
     skipped: list[tuple[str, str]] = []
-    for rule in sorted(bundle.active_rules(), key=lambda r: r.rule_id):
-        if not _applies(rule, proposal):
-            continue
-        if rule.when is None:
-            matched.append(rule)
-            continue
-        try:
-            fired = evaluate_predicate(rule.when, proposal_json, derived_json)
-        except PredicateError as exc:
-            skipped.append((rule.rule_id, str(exc)))
-            continue
-        if fired:
-            matched.append(rule)
+    # One allowance of regex time for the whole bundle (ADR-0018). Without it
+    # each rule starts a fresh one, so the cost of a decision is the rule count
+    # times the per-pattern worst case -- 46 rules at three attempts of a
+    # second is over two minutes in the request path.
+    with pooled():
+        for rule in sorted(bundle.active_rules(), key=lambda r: r.rule_id):
+            if not _applies(rule, proposal):
+                continue
+            if rule.when is None:
+                matched.append(rule)
+                continue
+            try:
+                fired = evaluate_predicate(rule.when, proposal_json, derived_json)
+            except PredicateError as exc:
+                skipped.append((rule.rule_id, str(exc)))
+                continue
+            if fired:
+                matched.append(rule)
     return matched, skipped
 
 

@@ -325,3 +325,121 @@ def test_explain_reports_the_rules_in_scope(tmp_path: Path, prod) -> None:
         "TT-BLK-001",
     }
     assert report["blast_radius_contributions"]
+
+
+class TestOneAllowanceOfRegexPerDecision:
+    """A bundle cannot cost its rule count times the per-pattern worst case.
+
+    Each rule used to start a fresh budget, so 46 unevaluable patterns was
+    `46 * ATTEMPTS * BUDGET` -- over two minutes, in the request path, from one
+    proposal. ADR-0018 gives the whole bundle one allowance.
+
+    Built from the same measured catastrophic pattern as
+    `TestARuleThatCannotBeEvaluated`, not a stub, because the thing being
+    bounded is real regex time.
+    """
+
+    PATTERN: Final = "(a|a)*$"
+
+    def _bundle(self, tmp_path: Path, count: int) -> PolicyBundle:
+        return bundle_of(
+            tmp_path,
+            *[
+                {
+                    "rule_id": f"TT-RDS-{n:03d}",
+                    "name": f"Unevaluable {n}",
+                    "message": "No.",
+                    "verdict": "BLOCK",
+                    "when": {"field": "action.name", "regex": self.PATTERN},
+                }
+                for n in range(1, count + 1)
+            ],
+        )
+
+    @pytest.fixture
+    def defeats_it(self) -> ActionProposal:
+        return make_proposal({"action": {"name": "a" * 30 + "b"}})
+
+    def _reasons(self, verdict: Verdict) -> str:
+        return next(h for h in verdict.hits if h.rule_id == PREDICATE_FAILED).message
+
+    def test_the_rules_behind_the_first_bad_pattern_are_refused_not_retried(
+        self, tmp_path: Path, defeats_it, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bound, asserted through the reason rather than through a clock.
+
+        A timing assertion is what #69 was about, and it would measure the
+        host. What is checkable without one is the mechanism: once the
+        allowance is gone the remaining rules are *refused*, and a refusal says
+        so in words that differ from a pattern that spent its own budget.
+
+        The allowance is shrunk so the test does not spend five seconds; the
+        number is not what is under test, the behaviour at its edge is.
+        """
+        import qed.core.regex_budget as rb
+
+        monkeypatch.setattr(rb, "POOL", rb.BUDGET * 1.5)
+        verdict = run(defeats_it, self._bundle(tmp_path, 6))
+        reasons = self._reasons(verdict)
+
+        for n in range(1, 7):
+            assert f"TT-RDS-{n:03d}" in reasons, (
+                f"TT-RDS-{n:03d} was neither evaluated nor reported -- a rule dropped "
+                "silently is the one outcome ADR-0016 exists to prevent"
+            )
+        assert "allowance" in reasons, (
+            "no rule was refused by the allowance, so six unevaluable patterns each got "
+            "their own full set of attempts and the bundle's cost still scales with its "
+            "rule count"
+        )
+
+    def test_the_rule_that_spent_the_allowance_is_not_blamed_on_the_allowance(
+        self, tmp_path: Path, defeats_it, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Attribution. The first rule's pattern really is at fault; the rest are not.
+
+        Reporting them identically would point an operator at the last rule in
+        the bundle instead of the one pattern that needs fixing.
+        """
+        import qed.core.regex_budget as rb
+
+        monkeypatch.setattr(rb, "POOL", rb.BUDGET * 1.5)
+        reasons = self._reasons(run(defeats_it, self._bundle(tmp_path, 6)))
+        first, rest = reasons.split("TT-RDS-002", 1)
+
+        assert "timed out" in first, (
+            "the first rule, which spent the allowance on its own attempts, was reported "
+            "as a victim of the allowance rather than as the pattern at fault"
+        )
+        assert "allowance" in rest
+
+    def test_one_bad_pattern_does_not_cost_the_rules_behind_it(
+        self, tmp_path: Path, defeats_it
+    ) -> None:
+        """The realistic case, at the real allowance: the bound never bites.
+
+        A bundle has one bad pattern, not forty-six. The rules behind it need
+        microseconds each, so they evaluate normally and still decide -- which
+        is what keeps this bound from being a denial of service on the bundle.
+        """
+        bundle = bundle_of(
+            tmp_path,
+            {
+                "rule_id": "TT-RDS-001",
+                "name": "Unevaluable",
+                "message": "No.",
+                "verdict": "BLOCK",
+                "when": {"field": "action.name", "regex": self.PATTERN},
+            },
+            BLOCKER,
+        )
+        proposal = make_proposal(
+            {"action": {"name": "a" * 30 + "b"}, "context": {"environment": "prod"}}
+        )
+        verdict = run(proposal, bundle)
+
+        assert verdict.decision is Decision.BLOCK, (
+            "the rule behind the bad pattern did not get to decide, so the allowance is "
+            "starving a working bundle rather than bounding a broken one"
+        )
+        assert "allowance" not in self._reasons(verdict)

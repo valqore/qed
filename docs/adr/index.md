@@ -48,3 +48,4 @@ they are the ones with teeth.
 | [0015](0015-the-evidence-format-is-frozen-against-a-fixture-not-a-promise.md) | The evidence format is frozen against a committed fixture, not a promise |
 | [0016](0016-an-unevaluable-rule-is-skipped-and-recorded.md) | A rule that cannot be evaluated is skipped, and the skip is recorded |
 | [0017](0017-a-regex-timeout-is-retried-before-it-is-believed.md) | A regex timeout is retried before it is believed, because the clock measures the host |
+| [0018](0018-one-allowance-of-regex-per-decision.md) | One allowance of regex per decision, so a bundle's cost stops scaling with its rule count |

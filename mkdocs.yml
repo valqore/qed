@@ -172,3 +172,4 @@ nav:
       - ADR-0015 The evidence format is frozen against a fixture: adr/0015-the-evidence-format-is-frozen-against-a-fixture-not-a-promise.md
       - ADR-0016 An unevaluable rule is skipped and recorded: adr/0016-an-unevaluable-rule-is-skipped-and-recorded.md
       - ADR-0017 A regex timeout is retried before it is believed: adr/0017-a-regex-timeout-is-retried-before-it-is-believed.md
+      - ADR-0018 One allowance of regex per decision: adr/0018-one-allowance-of-regex-per-decision.md

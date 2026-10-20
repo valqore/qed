@@ -20,7 +20,7 @@ from typing import Final
 import regex
 
 from qed.core.policy.fields import is_known_path
-from qed.core.regex_budget import BUDGET, Remaining, under_budget
+from qed.core.regex_budget import BUDGET, PoolSpent, Remaining, under_budget
 
 #: How deep a `when` tree may nest. One constant, because the evaluator
 #: refuses past it, the linter refuses past it, and `predicate_fields`
@@ -149,6 +149,14 @@ def _regex(value: object, operand: object) -> bool:
 
     try:
         return under_budget(once)
+    except PoolSpent:
+        # Never attempted: an earlier rule in this bundle spent the decision's
+        # regex allowance (ADR-0018). Worded differently from the case below on
+        # purpose -- this rule's pattern may be perfectly fine, and an operator
+        # told "timed out" about it would go and look at the wrong regex.
+        raise PredicateError(
+            "not evaluated: this decision's regex allowance was already spent"
+        ) from None
     except TimeoutError:
         # Every attempt timed out, so this is the pattern and not the host. A
         # predicate that cannot be evaluated must not silently pass; the engine
