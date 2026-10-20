@@ -165,7 +165,13 @@ history-dependent rule inconclusive forever.
   tell a pathological pattern from a busy host and running it again can
   (ADR-0017) -- so the worst case for a pattern that truly cannot be evaluated
   is three seconds, paid once per string, and a payload of many strings
-  multiplies that.
+  multiplies that. The redactor is per-string on purpose: a shared allowance
+  would let one stalled string spend what the fields after it need.
+* **The policy engine's regex is bounded per decision, not per rule.** Every
+  regex evaluated while deciding one proposal draws on one five-second
+  allowance (ADR-0018), so a bundle's worst case stops scaling with its rule
+  count -- 46 unevaluable patterns was 46 x 3 s before this. A bundle whose
+  patterns all work never approaches it, since they need microseconds each.
 * **The policy bundle is evaluated in full.** 46 rules against one proposal,
   no short-circuit on the first BLOCK, because the verdict carries every rule
   that fired and an auditor reading "blocked by AG-BLR-003" should also see
