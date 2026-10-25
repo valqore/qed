@@ -6,6 +6,57 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — the front page said three live install channels did not work
+
+v1.0.0 reached PyPI and GHCR on 2026-10-19 at 18:05 and 18:34 UTC. `README.md`
+went on saying that `pip install valqore-qed` installs "a `0.0.0` placeholder
+whose own description says it installs nothing", that "There is no public GHCR
+image", and that a reader should install from a clone instead. It said so for
+five days, on the first screen of the repository, in the direction that costs a
+reader something: told to clone something one command installs. `landing/
+index.html` carried the matching banner — "Not published yet… the install
+commands below do not work yet" — and its install block labelled the published
+commands "once the names are reserved".
+
+Both pages now say what each channel serves: PyPI for the kernel and the
+verifier, a cosign-signed container and chart on GHCR, a public Homebrew tap
+whose binaries are **not** notarised, and an npm name that holds a stub because
+QED is a Python program and a JavaScript client has never existed. The landing
+banner was re-pointed rather than deleted, onto what publication did not close:
+one maintainer, no design partner in enforce mode, no auditor acceptance.
+
+**Two guards were watching this and neither fired**, which is the part worth
+recording.
+
+`tests/docs/test_claims.py` had already been inverted for this exact moment
+four days earlier — it forbids a spent caveat rather than demanding a live
+one — and it still missed the README twice over. It selected pages by whether
+they carried *a line a reader would copy*, so the front page was never opened,
+because what the front page carried was a paragraph telling a reader **not** to
+copy one. And it looked for one literal phrase, "installs a placeholder", while
+the paragraph said "what it installs is a `0.0.0` placeholder". A guard for a
+false sentence cannot be keyed to the way its author happened to phrase the
+true one. Selection is now by mention, with the blockquote markers, the
+backticks and the line wrapping removed before matching — all three of which
+were separately enough to hide this — and claims are matched per sentence, so
+the true npm sentence sitting beside the false pip one is left alone. A bare
+negative naming no command at all ("no public ghcr image") is forbidden
+page-wide, since that is the shape that survived. The paragraph that got
+through is committed verbatim as a regression fixture.
+
+`tests/docs/test_landing.py` asserted the banner was *present*, paired with a
+check that `release.yml` still carried `vars.PUBLISH_PYPI == 'true'`, on the
+reasoning that publishing would delete the gate and fail the pair. Publishing
+did not touch the workflow: it set a repository variable, which no test can
+read. The gate stayed written, the pair stayed green. `landing/README.md`'s
+instruction had the same flaw — "remove the notice in the same commit that sets
+those variables to `true`" — and there was no such commit. That assertion is
+inverted too, and the gate is checked in one place now instead of two.
+
+This is the third recurrence of the class (`#49`, `#70`): a claim about
+**state** dies at a step that happens outside the repository, while a guard
+keyed on a **mechanism** cannot see it.
+
 ### Fixed — a timing gate that was measuring the runner, not the kernel
 
 `test_p95_on_postgres` failed on `main` with a p95 of 62.24 ms against the

@@ -190,11 +190,11 @@
 
 <div class="notice">
   <div class="wrap">
-    <strong>Not published yet.</strong> QED is finished code and an unreleased
-    package. The PyPI, npm and Homebrew names are now reserved, and what sits
-    on PyPI and npm today is a placeholder that installs nothing, so the
-    install commands below do not work yet. Run it from the repository in the
-    meantime.
+    <strong>Published, and not reviewed by anybody else.</strong> v1.0.0 is on
+    PyPI, on GHCR and in the Homebrew tap, and the macOS binaries are not
+    code-signed or notarised yet. One maintainer has read this code; no design
+    partner is in enforce mode and no auditor has accepted the evidence
+    format. Those are the claims this page cannot make.
   </div>
 </div>
 
@@ -376,15 +376,15 @@ purged    : 0 payload(s) removed under retention
 <section>
   <div class="wrap">
     <h2>Install</h2>
-<pre class="term"><span class="c"># from the repository, which works today</span>
-$ <b>git clone https://github.com/valqore/qed &amp;&amp; cd qed</b>
-$ <b>pip install -e .</b>
-$ <b>qed keys init &amp;&amp; qed doctor</b>
-
-<span class="c"># once the names are reserved -- see the notice at the top of this page</span>
+<pre class="term"><span class="c"># v1.0.0, published and cosign-signed on the container</span>
 $ <b>pip install valqore-qed</b>
 $ <b>brew install valqore/tap/qed</b>
-$ <b>docker run ghcr.io/valqore/qed:1.0.0 serve</b></pre>
+$ <b>docker run ghcr.io/valqore/qed:1.0.0 serve</b>
+
+<span class="c"># or from the repository, which is how it is developed</span>
+$ <b>git clone https://github.com/valqore/qed &amp;&amp; cd qed</b>
+$ <b>pip install -e .</b>
+$ <b>qed keys init &amp;&amp; qed doctor</b></pre>
     <p class="lede" style="margin-top:22px">
       Start in shadow mode, where QED decides and records and tells the agent to
       proceed regardless. The
