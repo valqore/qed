@@ -34,26 +34,25 @@ literals, and nowhere else.
 </details>
 
 > **Licence:** Apache-2.0. See `LICENSE` and `NOTICE`.
-> **One install channel is live; the rest are reservations.**
-> `brew install valqore/tap/qed` works — the tap is public and carries
-> v1.0.0's three binaries, whose checksums match the assets CI built. The
-> binaries are **not code-signed or notarised**, so macOS may refuse to run
-> one until you clear it; `deploy/qed.spec` keeps UPX off so that signing
-> stays possible, but no release step signs anything yet.
-> `pip install valqore-qed` resolves, and what it installs is a `0.0.0`
-> placeholder whose own description says it installs nothing — the name was
-> reserved on 2026-10-17 so that nobody else could take it, and a reserved
-> name is not a release. `npm install valqore-qed` resolves to the same kind
-> of placeholder — QED is a Python program and there has never been a
-> JavaScript client. There is no public GHCR image. For the Python package,
-> install from a clone, as the quick start below does.
-> `.github/workflows/release.yml` holds
-> both publishing steps behind the `PUBLISH_PYPI` and `PUBLISH_GHCR` repository
-> variables, and what turns them on is SPEC §24.1's reservations: those names,
-> the domain, the EUIPO/USPTO filings. Distribution is the step that cannot be
-> undone, which is why the gate sits in front of the publish and not in front
-> of the build — and why the honest answer to "is it on PyPI?" comes from the
-> index rather than from this file.
+> **What each channel serves, and what it does not.**
+> `pip install valqore-qed` installs the kernel, and `pip install qed-verify`
+> the standalone verifier that checks a chain without it.
+> `docker run ghcr.io/valqore/qed:1.0.0` and the Helm chart at
+> `oci://ghcr.io/valqore/charts/qed` are public and cosign-signed;
+> `docs/deployment.md` carries the `cosign verify` line to check that with.
+> `brew install valqore/tap/qed` works from a public tap holding three
+> binaries whose checksums match the assets CI built — but those binaries are
+> **not code-signed or notarised**, so macOS may refuse to run one until you
+> clear it. `deploy/qed.spec` keeps UPX off so that signing stays possible;
+> no release step signs anything yet.
+> `npm install valqore-qed` resolves to a `0.0.0` stub that holds the name and
+> nothing else: QED is a Python program and a JavaScript client has never
+> existed.
+> `.github/workflows/release.yml` still gates both publishing steps behind the
+> `PUBLISH_PYPI` and `PUBLISH_GHCR` repository variables. That gate is no
+> longer an embargo — it is what stops a `v*` tag from publishing because
+> somebody cut it to test the pipeline. Which version an index serves is a
+> question for the index, and never for this file.
 
 What it does today, capability by capability, is under [Status](#status).
 
@@ -190,7 +189,7 @@ evidence:
 ```
 
 ```bash
-pip install -e '.[postgres]'          # 'valqore-qed[postgres]' once it is on PyPI
+pip install 'valqore-qed[postgres]'   # or -e '.[postgres]' from a clone
 export QED_DATABASE_URL=postgresql://user:pass@host/qed
 qed keys init && qed serve
 ```

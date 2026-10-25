@@ -156,32 +156,73 @@ def test_the_invariant_tables_name_a_test_each() -> None:
 #: these commands fails today with "No matching distribution found".
 RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 
-# Markers are matched case-insensitively: one of these pages carries the
-# caveat as a YAML comment inside a workflow sample, where a sentence starts
-# with a capital.
-#: Each install command that now works, the caveat a page must **no longer**
-#: carry about it, and the repository variable that gates that publish.
+#: Each install command that now works, and the repository variable that gates
+#: that publish.
 #:
-#: This mapping has been inverted once already and inverted again on
-#: 2026-10-19. First the marker was "not on pypi yet", which became false when
-#: the name was reserved -- `pip install valqore-qed` then resolved and
-#: installed a `0.0.0` placeholder, so the page was pessimistic in the one
-#: direction that costs a reader something. The marker was changed to name what
-#: the command *did* ("installs a placeholder") on the reasoning that a claim
-#: about mechanism outlives a claim about state.
+#: The marker that used to live here has been inverted twice and then moved
+#: out of this mapping entirely, which is the history worth keeping.
 #:
-#: It did not. On 2026-10-19 both projects published 1.0.0, and
-#: "installs a placeholder" became the false statement -- in the same costly
-#: direction, since a reader is told to clone a repository to get something one
-#: command now installs. So the guard no longer demands a caveat. It forbids
-#: the two that are spent, which is the only form of this assertion that does
-#: not need rewriting the next time the world moves: a sentence that was true
-#: and is now false can be named, while the sentence that is true today cannot
-#: be known from inside the repository at all.
+#: First it was "not on pypi yet", which became false when the name was
+#: reserved -- `pip install valqore-qed` then resolved and installed a `0.0.0`
+#: placeholder, so the page was pessimistic in the one direction that costs a
+#: reader something. It was changed to name what the command *did* ("installs
+#: a placeholder") on the reasoning that a claim about mechanism outlives a
+#: claim about state. It did not: on 2026-10-19 both projects published 1.0.0
+#: and "installs a placeholder" became the false statement, in the same costly
+#: direction, since a reader was told to clone a repository to get something
+#: one command now installs.
+#:
+#: So the guard stopped demanding a caveat and started forbidding the spent
+#: ones -- and on 2026-10-25 **that still was not enough**, because a forbidden
+#: phrase is only looked for on a page the guard decided to read. See
+#: `SPENT_BESIDE_THE_COMMAND` below for what the third reading changed.
 INSTALL_COMMANDS = {
-    "pip install valqore-qed": ("installs a placeholder", "PUBLISH_PYPI"),
-    "docker run ghcr.io/valqore/qed": ("not on ghcr yet", "PUBLISH_GHCR"),
+    "pip install valqore-qed": "PUBLISH_PYPI",
+    "docker run ghcr.io/valqore/qed": "PUBLISH_GHCR",
 }
+
+#: Claims about a channel that is now published, keyed by the command they are
+#: attached to, matched case-insensitively inside the **sentence** that names
+#: that command.
+#:
+#: Sentence-scoped rather than page-scoped because these words are not false in
+#: themselves. `npm install valqore-qed` really does serve a `0.0.0` stub that
+#: holds a name and nothing else, and the README says so one sentence away from
+#: the pip line. A page-wide ban on "placeholder" would forbid the true
+#: sentence to catch the false one.
+SPENT_BESIDE_THE_COMMAND = {
+    "pip install valqore-qed": (
+        "placeholder",
+        "installs nothing",
+        "install from a clone",
+        "is not a release",
+        "not on pypi",
+        "once it is on pypi",
+        "does not work yet",
+    ),
+    "docker run ghcr.io/valqore/qed": (
+        "not on ghcr",
+        "no public ghcr image",
+        "does not work yet",
+    ),
+}
+
+#: Negative claims about the published state that are false whoever writes
+#: them, forbidden anywhere on a checked page.
+#:
+#: This list exists because of how the 2026-10-19 guard failed. It read only
+#: pages carrying a line a reader would copy, and the sentence that survived
+#: five hours past publication was `README.md`'s "There is no public GHCR
+#: image" -- prose in a blockquote, naming no command, telling a reader *not*
+#: to run one. A guard that finds a page by the instruction it gives cannot see
+#: the page that gives none.
+SPENT_ANYWHERE = (
+    "no public ghcr image",
+    "not on ghcr yet",
+    "not on pypi yet",
+    "nothing is released yet",
+    "nothing is published anywhere",
+)
 
 
 def install_command_on(line: str) -> str | None:
@@ -203,22 +244,49 @@ def install_command_on(line: str) -> str | None:
     return None
 
 
-def pages_telling_a_reader_to_install() -> list[tuple[Path, str, str]]:
-    """Every page where an unavailable install command is a line to be run.
+#: Every page a reader of this repository is pointed at. `QED_SPEC.md` and
+#: `CHANGELOG.md` stay out: both describe history on purpose, and a changelog
+#: entry recording that a name was once a placeholder is a fact about the past.
+CHECKED_PAGES = [*sorted((ROOT / "docs").rglob("*.md")), ROOT / "README.md"]
+
+
+def pages_telling_a_reader_to_install() -> list[tuple[Path, str]]:
+    """Every page where an install command is a line to be run.
 
     A line inside a fenced block, or a step's `run:` in a workflow sample --
     something a reader copies. An inline mention in prose is excluded:
     `docs/credential-broker.md` naming the `[vault]` extra is describing a
     package, not asking anybody to fetch one.
+
+    This is **no longer** what selects pages for the spent-claim check below,
+    which is the fix for how that check went blind. It still answers a
+    different question: which pages hand a reader a command at all.
     """
-    found: list[tuple[Path, str, str]] = []
-    for page in [*sorted((ROOT / "docs").rglob("*.md")), ROOT / "README.md"]:
+    found: list[tuple[Path, str]] = []
+    for page in CHECKED_PAGES:
         text = page.read_text(encoding="utf-8")
         for line in text.splitlines():
             command = install_command_on(line)
             if command is not None:
-                found.append((page, command, INSTALL_COMMANDS[command][0]))
+                found.append((page, command))
     return found
+
+
+def sentences_on(page: Path) -> list[str]:
+    """The page as lowercase sentences, with the markup that hid one removed.
+
+    Three things come out before splitting, each one a way the stale sentence
+    stayed invisible: the blockquote markers (it was inside a `>` block), the
+    backticks (it wrote the command as code), and the line wrapping (it ran
+    across three lines, so no single line held both the command and the claim).
+    """
+    text = page.read_text(encoding="utf-8").lower()
+    unquoted = re.sub(r"(?m)^\s*>\s?", "", text)
+    flat = re.sub(r"\s+", " ", unquoted.replace("`", "").replace("*", ""))
+    # Only a full stop ends a sentence here. Splitting on `:` and `;` as well
+    # would let `pip install valqore-qed resolves; it installs a placeholder`
+    # fall into two fragments and pass, which is the failure this guard is for.
+    return re.split(r"(?<=[.!?])\s+", flat)
 
 
 @pytest.mark.parametrize(
@@ -261,7 +329,7 @@ def test_the_pages_that_say_to_install_are_found() -> None:
     assert pages_telling_a_reader_to_install(), "no install commands found at all"
 
 
-@pytest.mark.parametrize(("command", "gate"), [(c, g) for c, (_, g) in INSTALL_COMMANDS.items()])
+@pytest.mark.parametrize(("command", "gate"), list(INSTALL_COMMANDS.items()))
 def test_the_publication_gate_still_exists(command: str, gate: str) -> None:
     """The gate survives publication, and this is why it is not the trigger.
 
@@ -288,6 +356,49 @@ def test_the_publication_gate_still_exists(command: str, gate: str) -> None:
     )
 
 
+#: The paragraph that stood on `README.md` for five days after v1.0.0 reached
+#: PyPI and GHCR. Kept verbatim because the guard below was written twice
+#: without it and passed both times; a guard tested only against text the
+#: author invented is tested against nothing.
+THE_PARAGRAPH_THAT_GOT_THROUGH = """\
+> `pip install valqore-qed` resolves, and what it installs is a `0.0.0`
+> placeholder whose own description says it installs nothing — the name was
+> reserved on 2026-10-17 so that nobody else could take it, and a reserved
+> name is not a release. `npm install valqore-qed` resolves to the same kind
+> of placeholder — QED is a Python program and there has never been a
+> JavaScript client. There is no public GHCR image. For the Python package,
+> install from a clone, as the quick start below does.
+"""
+
+
+def test_the_guard_catches_the_paragraph_that_defeated_it(tmp_path: Path) -> None:
+    """Both halves, on the real text: the false sentence and the true one.
+
+    The paragraph said two things about PyPI that publication had made false
+    and one true thing about npm, in consecutive sentences, inside a
+    blockquote, with every command in backticks. A guard that flags the npm
+    sentence to catch the pip sentence would be unusable, and one that reads
+    the page as a single blob cannot tell them apart.
+    """
+    page = tmp_path / "README.md"
+    page.write_text(THE_PARAGRAPH_THAT_GOT_THROUGH, encoding="utf-8")
+    sentences = sentences_on(page)
+
+    assert any("no public ghcr image" in s for s in sentences), (
+        "the bare negative that named no command is what survived; it must be caught without one"
+    )
+    about_pip = [s for s in sentences if "pip install valqore-qed" in s]
+    assert about_pip, "stripping `>` and backticks is what finds this sentence at all"
+    assert any("placeholder" in s for s in about_pip)
+
+    about_npm = [s for s in sentences if "npm install valqore-qed" in s]
+    assert about_npm, "the true sentence has to be found too, to prove it is left alone"
+    assert not any("pip install valqore-qed" in s for s in about_npm), (
+        "npm really does serve a stub; flagging that sentence would make the "
+        "guard demand a false correction"
+    )
+
+
 def test_a_spent_caveat_is_not_still_on_the_page() -> None:
     """The caveats are spent, and a spent caveat is the next overclaim.
 
@@ -297,17 +408,37 @@ def test_a_spent_caveat_is_not_still_on_the_page() -> None:
     fail. The same shape as the exit-code table in `README.md` that was correct
     140 lines below the quick start that got it wrong: a document can be
     accurate as a whole and wrong at the only place anybody reads.
+
+    **This test passed for five days while `README.md` was wrong**, and the
+    reason is the lesson. Its first version read only the pages returned by
+    `pages_telling_a_reader_to_install()` -- pages carrying a line a reader
+    copies -- so the repository's front page was never opened, because what it
+    carried was a paragraph telling a reader *not* to copy one. It then looked
+    for one exact phrase, "installs a placeholder", while the paragraph said
+    "what it installs is a `0.0.0` placeholder". Two independent misses, each
+    enough on its own.
+
+    So selection is by **mention** now, not by instruction, and the claims are
+    matched per sentence and per page rather than as one literal string. A
+    guard for a false sentence cannot be keyed to the way the author happened
+    to phrase the true one.
     """
     offenders: list[str] = []
-    for page, command, marker in pages_telling_a_reader_to_install():
-        text = page.read_text(encoding="utf-8").lower()
-        # Each command's own caveat, and nothing else. There used to be an
-        # `or "not on pypi yet" in text` here, which meant a page warning
-        # about PyPI satisfied the guard for a Docker command it also carried.
-        if marker in text:
-            offenders.append(
-                f"{page.relative_to(ROOT).as_posix()} says `{command}` and still claims {marker!r}"
-            )
+    for page in CHECKED_PAGES:
+        name = page.relative_to(ROOT).as_posix()
+        sentences = sentences_on(page)
+        for claim in SPENT_ANYWHERE:
+            if any(claim in sentence for sentence in sentences):
+                offenders.append(f"{name} still says {claim!r}")
+        for command, claims in SPENT_BESIDE_THE_COMMAND.items():
+            for sentence in sentences:
+                if command not in sentence:
+                    continue
+                offenders += [
+                    f"{name} says `{command}` and still claims {claim!r} in the same sentence"
+                    for claim in claims
+                    if claim in sentence
+                ]
     assert not offenders, (
         "v1.0.0 is on PyPI and GHCR, so these pages carry a caveat that is now "
         "false in the direction that costs a reader something -- they are told to "

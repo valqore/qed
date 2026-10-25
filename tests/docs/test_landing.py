@@ -217,34 +217,67 @@ class TestTheDenyList:
         assert "every adapter is ADVISORY" in source, "the page quotes doctor; doctor changed"
 
 
-class TestThePrelaunchNotice:
-    def test_it_is_present(self, visible: str) -> None:
-        """`pip install valqore-qed` now *succeeds*, which is why this notice
-        matters more than it did.
+class TestTheNoticeThatCameOff:
+    #: What the banner said until 2026-10-25, and what the install block said
+    #: under it. Every one of these was true when written and false by the time
+    #: a reader saw it.
+    SPENT = (
+        "not published yet",
+        "do not work yet",
+        "placeholder that installs nothing",
+        "once the names are reserved",
+    )
 
-        Until 2026-10-17 the command failed, and a failure is self-explaining.
-        The names are reserved now, so pip resolves and installs a `0.0.0`
-        placeholder that contains nothing but a README. A reader who tried the
-        command and got a clean exit would have every reason to think QED was
-        installed. The page shows the command because that is what it will be;
-        it carries the notice because what is behind the name today is not the
-        product. `landing/README.md` says to remove the notice in the same
-        commit that sets `PUBLISH_PYPI=true`.
+    @pytest.mark.parametrize("phrase", SPENT)
+    def test_the_spent_notice_is_gone(self, phrase: str, visible: str) -> None:
+        """The banner outlived its own truth by five days, and the test that
+        was supposed to retire it could not see that.
+
+        It asserted the notice was *present*, and paired that with a check
+        that `release.yml` still carried `vars.PUBLISH_PYPI == 'true'` -- on
+        the reasoning that publication would delete the gate and fail the
+        pair. Publication did not touch the workflow. It set the repository
+        *variable*, which no test can read, so the gate stayed written, the
+        pair stayed green, and the page went on telling readers that
+        `pip install valqore-qed` does not work while it did.
+
+        The assertion is therefore inverted, which is the only form of it that
+        survives the world moving: a sentence that was true and is now false
+        can be named from inside the repository forever, while the sentence
+        that is true today cannot be known from here at all. The gate itself is
+        still checked, once, in `tests/docs/test_claims.py` -- two copies of
+        one assertion is two places for it to disagree.
         """
-        assert "Not published yet" in visible
-        assert "do not work yet" in visible
+        assert phrase not in visible.lower(), (
+            f"{phrase!r} is still on the landing page, and v1.0.0 is on PyPI, "
+            "GHCR and the Homebrew tap"
+        )
 
-    def test_publishing_is_still_gated(self) -> None:
-        """The other half of that pair, so the two cannot drift apart silently.
+    def test_the_published_commands_are_the_ones_shown(self, visible: str) -> None:
+        """And the page shows what now works, rather than only the clone."""
+        assert "pip install valqore-qed" in visible
+        assert "brew install valqore/tap/qed" in visible
+        assert "ghcr.io/valqore/qed:1.0.0" in visible
 
-        A test cannot read a repository variable, so this checks the gate is
-        still *written* in the workflow. If publishing is ever unconditional
-        while the notice is up, this is where it surfaces.
+    def test_what_is_still_unfinished_is_named(self, visible: str) -> None:
+        """The banner was not deleted, it was re-pointed.
+
+        Publication closed the claim it carried; it did not close the two that
+        matter more to a reader deciding whether to trust this. Nothing here
+        has been reviewed by a second person (`GOVERNANCE.md`), and the macOS
+        binaries are not notarised (`deploy/qed.spec` keeps UPX off so that
+        stays possible). A page that drops its caveats on launch day is the
+        genre of small dishonesty this suite exists to prevent.
         """
-        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        assert "vars.PUBLISH_PYPI == 'true'" in workflow, (
-            "publishing is no longer gated; remove the pre-launch notice from "
-            "landing/index.html in the same change"
+        # Whitespace comes out first: the page wraps at 80 columns, so the
+        # phrase this looks for is split across two lines in the source and a
+        # literal match would fail on a page that says exactly the right thing.
+        lowered = re.sub(r"\s+", " ", visible.lower())
+        assert "not code-signed or notarised" in lowered
+        assert "one maintainer" in lowered
+        governance = (ROOT / "GOVERNANCE.md").read_text(encoding="utf-8")
+        assert "one maintainer" in governance.lower(), (
+            "the page quotes GOVERNANCE.md's count of maintainers; it changed"
         )
 
     def test_the_launch_checklist_exists(self) -> None:

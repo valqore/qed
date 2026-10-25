@@ -17,43 +17,44 @@ Any static host. It is a single file with no routing, so:
 cp landing/index.html <wherever>/index.html
 ```
 
-The domain is not chosen yet (SPEC §24.1 is still open, with the EUIPO/USPTO
-registration and the PyPI, Homebrew and GHCR name reservations). The page does
-not hardcode one, so it works at whatever hostname it lands on.
+This page is not hosted anywhere yet, and nothing in `.github/workflows/`
+deploys it. The documentation site is separate (`mkdocs.yml` →
+`qed.valqore.io`); this file is the one-page pitch, and it does not hardcode a
+hostname, so it works at whatever one it lands on.
 
-## The pre-launch notice comes off deliberately
+## The pre-launch notice was re-pointed, not removed
 
-The top of the page says, in so many words, that QED is unpublished and that
-`pip install valqore-qed` does not work yet. That is true today: the names are
-unreserved and `release.yml` has publishing gated behind the `PUBLISH_GHCR` and
-`PUBLISH_PYPI` repository variables.
+What the notice used to say: that QED was unpublished and that
+`pip install valqore-qed` did not work yet. **That instruction — "remove the
+notice in the same commit that sets `PUBLISH_PYPI=true`" — is how it went
+wrong.** Publication did not happen in a commit. It happened by setting a
+repository variable on 2026-10-19, which touched no file here, so there was no
+commit to remove the notice in; the banner then told readers for five days that
+three live install channels did not work.
 
-**Remove the notice in the same commit that sets those variables to `true`.**
-Not before — a landing page offering an install command that fails is the exact
-genre of small dishonesty this repository spends a test suite avoiding — and not
-long after, either, because once the package exists the notice is itself the
-false statement.
+So the notice now carries what publication did **not** close: the binaries are
+not notarised, one maintainer has read this code, no design partner is in
+enforce mode and no auditor has accepted the evidence format. Those are claims
+about this repository rather than about an index, which means they expire when
+somebody here does something, not when something happens elsewhere.
 
-`tests/docs/test_landing.py` checks what it can check without reading CI
-variables: that every command shown on the page is a command the CLI actually
-has, that the measured numbers match their sources in the repository, and that
-nothing from a short deny-list (star counts, customer names, certifications,
-compliance percentages) has appeared.
+`tests/docs/test_landing.py` enforces it from both ends: the four phrases the
+old banner used are **forbidden**, the three published install commands must be
+**shown**, and the two remaining caveats must be **named**. It no longer asserts
+that `release.yml` still gates publishing — `tests/docs/test_claims.py` owns
+that check, and two copies of one assertion is two places for it to disagree.
 
 ## Launch checklist
 
 In order. Each line is a thing that is false until it is done.
 
-1. Reserve the names. **Done 2026-10-17** for PyPI (`valqore-qed`,
-   `qed-verify` and `valqore`, each a `0.0.0` placeholder that installs
-   nothing) and for the Homebrew tap (`valqore/homebrew-tap`, private, holding
-   the rendered formula). **npm done the same day** — `valqore-qed`,
-   `qed-verify` and `valqore`, staged and then approved, so each serves the
-   `0.0.0` placeholder at `latest`. Still to do: making `ghcr.io/valqore/qed`
-   public, and filing the trademark (SPEC §25.1). Note what reserving changed:
-   `pip install valqore-qed` and `npm install valqore-qed` both used to fail
-   and now succeed, so the pre-launch notice in `index.html` is doing more work
-   than before, not less.
+1. Reserve the names. **Done 2026-10-17** — PyPI, npm and the Homebrew tap,
+   each holding `valqore-qed`, `qed-verify` and `valqore` at a `0.0.0` stub.
+   **Published 2026-10-19**: PyPI and GHCR now serve 1.0.0, the tap is public,
+   and the container carries a cosign signature and an SBOM attestation. npm
+   still serves the stub on purpose — QED is a Python program and a JavaScript
+   client has never existed. Still to do: filing the trademark (SPEC §25.1),
+   and code-signing the macOS binaries.
 2. Enable GitHub private vulnerability reporting. `SECURITY.md` points at
    `tunc@valqore.io`, which is a deliberate choice for launch and not an
    oversight: a maintainer address that is read beats a role alias that
