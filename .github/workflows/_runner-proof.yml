@@ -5,7 +5,10 @@
 # one is a thing to prove on a branch -- this is that proof.
 name: runner-proof
 on:
-  workflow_dispatch:
+  # Push, not workflow_dispatch: a dispatchable workflow has to exist on the
+  # default branch first, and this one never will.
+  push:
+    branches: [ci/macos-14-retires]
 
 jobs:
   arch:
