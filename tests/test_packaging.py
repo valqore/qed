@@ -244,3 +244,143 @@ class TestTheInstalledCommands:
         )
         assert result.returncode == 0, result.stderr
         assert f"Usage: {name} " in plain(result.stdout), result.stdout
+
+
+# --------------------------------------------------------------------------
+# What the package index shows a reader
+# --------------------------------------------------------------------------
+
+
+def pyproject(path: Path) -> dict[str, object]:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+#: The two distributions this repository publishes, and the directory each is
+#: built from. `readme` and `license-files` both resolve inside that directory,
+#: which is why the verifier has its own copies rather than references upwards.
+DISTRIBUTIONS = {
+    "valqore-qed": ROOT,
+    "qed-verify": ROOT / "packages" / "qed-verify",
+}
+
+#: Keys PyPI renders as the project page sidebar. `Security` is here because
+#: this project asks readers to report vulnerabilities privately and a reader
+#: who found one should not have to guess where.
+REQUIRED_URLS = ("Homepage", "Documentation", "Source", "Changelog", "Issues", "Security")
+
+#: Hosts a URL in this metadata may point at. A project whose claim is "verify
+#: this yourself" should not route a reader through anybody else.
+ALLOWED_URL_PREFIXES = (
+    "https://github.com/valqore/qed",
+    "https://qed.valqore.io",
+)
+
+
+class TestTheProjectPageIsNotBlank:
+    """Both PyPI pages were blank through v1.0.0.
+
+    Neither `pyproject.toml` declared `readme`, and neither declared
+    `[project.urls]`. So `pypi.org/project/valqore-qed` -- the page a reader
+    reaches by searching the name they were told to install -- carried a
+    one-line summary, no description and no link back to the source, the
+    documentation or the disclosure policy, while `README.md` in this
+    repository was the most carefully checked document in the project.
+
+    This is the same shape as the README bug of 2026-10-19: the repository was
+    right and the surface a reader actually lands on was not, because nothing
+    connected the two. The connection is two keys, and this is the test that
+    says they are still there.
+    """
+
+    @pytest.mark.parametrize("name", sorted(DISTRIBUTIONS))
+    def test_a_readme_is_declared_and_present(self, name: str) -> None:
+        directory = DISTRIBUTIONS[name]
+        config = pyproject(directory / "pyproject.toml")["project"]
+        readme = config.get("readme")  # type: ignore[union-attr]
+        assert readme, (
+            f"{name} declares no `readme`, so its PyPI page has no body at all. "
+            "That page is where a reader who was told to install this arrives."
+        )
+        path = directory / str(readme)
+        assert path.exists(), f"{name} declares readme={readme!r} and the file is not there"
+        assert len(path.read_text(encoding="utf-8").strip()) > 400, (
+            f"{name}'s readme is too short to tell a reader what this is"
+        )
+
+    @pytest.mark.parametrize("name", sorted(DISTRIBUTIONS))
+    def test_the_readme_has_no_relative_link(self, name: str) -> None:
+        """A README is two documents: a page on GitHub and the body of a page on
+        PyPI. A relative link works on the first and 404s on the second.
+
+        `README.md` had fourteen of them -- `SECURITY.md`, `THREAT_MODEL.md`,
+        `docs/validation.md`, the license -- so the moment it became the PyPI
+        page body it became a page whose every internal link was broken. They
+        are absolute now, which is correct on both surfaces; in-page anchors and
+        `mailto:` are left alone because they work on both.
+        """
+        directory = DISTRIBUTIONS[name]
+        config = pyproject(directory / "pyproject.toml")["project"]
+        readme = directory / str(config["readme"])  # type: ignore[index]
+        relative = sorted(
+            {
+                target
+                for target in re.findall(r"\]\(([^)]+)\)", readme.read_text(encoding="utf-8"))
+                if not target.startswith(("http://", "https://", "#", "mailto:"))
+            }
+        )
+        assert not relative, (
+            f"{name}'s readme links to {relative} relatively. It is the body of the "
+            "PyPI project page, where a relative link resolves against pypi.org "
+            "and 404s. Use the full https://github.com/valqore/qed/blob/main/... URL."
+        )
+
+    @pytest.mark.parametrize("name", sorted(DISTRIBUTIONS))
+    def test_every_repository_link_in_the_readme_names_a_file_that_exists(self, name: str) -> None:
+        """Absolute links fix the 404 on PyPI and introduce a second way to rot:
+        a file renamed here, and a link to `blob/main/` still pointing at the old
+        name. This is the check that makes the first fix safe."""
+        directory = DISTRIBUTIONS[name]
+        config = pyproject(directory / "pyproject.toml")["project"]
+        readme = directory / str(config["readme"])  # type: ignore[index]
+        missing = []
+        for target in re.findall(
+            r"https://github\.com/valqore/qed/(?:blob|tree)/main/([^)#\s]+)",
+            readme.read_text(encoding="utf-8"),
+        ):
+            if not (ROOT / target).exists():
+                missing.append(target)
+        assert not missing, (
+            f"{name}'s readme links to files that are not here: {sorted(set(missing))}"
+        )
+
+    @pytest.mark.parametrize("name", sorted(DISTRIBUTIONS))
+    def test_the_urls_are_declared(self, name: str) -> None:
+        config = pyproject(DISTRIBUTIONS[name] / "pyproject.toml")["project"]
+        urls = config.get("urls") or {}  # type: ignore[union-attr]
+        missing = [key for key in REQUIRED_URLS if key not in urls]
+        assert not missing, f"{name} has no {missing} in [project.urls]"
+
+    @pytest.mark.parametrize("name", sorted(DISTRIBUTIONS))
+    def test_every_url_points_somewhere_we_own(self, name: str) -> None:
+        urls = pyproject(DISTRIBUTIONS[name] / "pyproject.toml")["project"]["urls"]  # type: ignore[index]
+        stray = sorted(
+            f"{key}={value}"
+            for key, value in dict(urls).items()
+            if not str(value).startswith(ALLOWED_URL_PREFIXES)
+        )
+        assert not stray, f"{name} metadata links outside valqore: {stray}"
+
+    @pytest.mark.parametrize("name", sorted(DISTRIBUTIONS))
+    def test_every_url_into_this_repository_names_a_file_that_exists(self, name: str) -> None:
+        """A `blob/main/SECURITY.md` link survives the file being renamed, as a
+        404 on the one page a reader with a vulnerability is reading."""
+        urls = pyproject(DISTRIBUTIONS[name] / "pyproject.toml")["project"]["urls"]  # type: ignore[index]
+        for key, value in dict(urls).items():
+            match = re.fullmatch(
+                r"https://github\.com/valqore/qed/(?:blob|tree)/main/(.+)", str(value)
+            )
+            if match is None:
+                continue
+            target = ROOT / match.group(1)
+            assert target.exists(), f"{name}'s {key} points at {match.group(1)}, which is not here"

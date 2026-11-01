@@ -21,10 +21,18 @@
   from a short deny-list (stars, customers, certifications, compliance
   percentages) has crept in.
 
-  The pre-launch notice at the top comes off in the same commit that sets
-  `PUBLISH_PYPI=true` in the release workflow -- see `landing/README.md` for the
-  checklist. Until then the install commands do not work, and the page says so
-  rather than letting a reader find out.
+  The notice at the top was re-pointed on 2026-10-25, not removed. This comment
+  used to say it "comes off in the same commit that sets `PUBLISH_PYPI=true`",
+  which is how the page came to tell readers for five days that three live
+  install channels did not work: publication happened by setting a repository
+  variable, so there was no such commit. The notice now names what publication
+  did not close -- one maintainer, no design partner in enforce mode, no auditor
+  acceptance -- and those expire when somebody here does something, which is the
+  only kind of claim a file can keep. See `landing/README.md`.
+
+  No version number in the prose. The image tag below is the one version literal
+  on this page, and `tests/test_version.py` checks it against `qed/version.py`;
+  a second copy in a sentence is a second thing to forget.
 -->
 <html lang="en">
 <head>
@@ -190,7 +198,7 @@
 
 <div class="notice">
   <div class="wrap">
-    <strong>Published, and not reviewed by anybody else.</strong> v1.0.0 is on
+    <strong>Published, and not reviewed by anybody else.</strong> QED is on
     PyPI, on GHCR and in the Homebrew tap, and the macOS binaries are not
     code-signed or notarised yet. One maintainer has read this code; no design
     partner is in enforce mode and no auditor has accepted the evidence
@@ -376,10 +384,10 @@ purged    : 0 payload(s) removed under retention
 <section>
   <div class="wrap">
     <h2>Install</h2>
-<pre class="term"><span class="c"># v1.0.0, published and cosign-signed on the container</span>
+<pre class="term"><span class="c"># published, and cosign-signed on the container</span>
 $ <b>pip install valqore-qed</b>
 $ <b>brew install valqore/tap/qed</b>
-$ <b>docker run ghcr.io/valqore/qed:1.0.0 serve</b>
+$ <b>docker run ghcr.io/valqore/qed:1.1.0 serve</b>
 
 <span class="c"># or from the repository, which is how it is developed</span>
 $ <b>git clone https://github.com/valqore/qed &amp;&amp; cd qed</b>

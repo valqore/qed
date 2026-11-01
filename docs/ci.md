@@ -116,7 +116,7 @@ jobs:
       # between one deploy and the next is not a gate, and `qed check`'s
       # exit codes are what this job branches on.
       - name: Install qed
-        run: pip install valqore-qed==1.0.0
+        run: pip install valqore-qed==1.1.0
 
       - name: Ask QED whether this may deploy
         env:

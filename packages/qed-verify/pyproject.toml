@@ -4,8 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qed-verify"
-version = "1.0.0"
+version = "1.1.0"
 description = "Independent verifier for qed evidence chains"
+# The body of the PyPI project page, and the page an auditor lands on when they
+# are told to verify a chain. Through v1.0.0 there was no `readme` key here and
+# no README in this directory, so that page carried one line and no instructions
+# at all. Written for this directory rather than pointing at the root README:
+# `readme`, like `license-files` below, resolves inside the project directory,
+# and the verifier's reader wants the verifier's instructions, not the kernel's.
+readme = "README.md"
 requires-python = ">=3.12"
 # `license-files` globs are resolved inside this project directory, so the
 # root LICENSE and NOTICE are copied here rather than referenced upwards. CI
@@ -16,6 +23,14 @@ classifiers = ["Programming Language :: Python :: 3.12"]
 # One dependency, on purpose: an auditor must be able to install this on a
 # machine that is not allowed to reach the internet twice.
 dependencies = ["cryptography>=42"]
+
+[project.urls]
+Homepage = "https://github.com/valqore/qed"
+Documentation = "https://qed.valqore.io"
+Source = "https://github.com/valqore/qed/tree/main/packages/qed-verify"
+Changelog = "https://github.com/valqore/qed/blob/main/CHANGELOG.md"
+Issues = "https://github.com/valqore/qed/issues"
+Security = "https://github.com/valqore/qed/blob/main/SECURITY.md"
 
 [project.scripts]
 qed-verify = "qed_verify.cli:main"

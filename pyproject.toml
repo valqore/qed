@@ -4,8 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valqore-qed"
-version = "1.0.0"
+version = "1.1.0"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
+# The body of the PyPI project page. Omitted through v1.0.0, which meant the
+# page a reader reaches by searching for this name carried one line of summary,
+# no description and no link back to anything -- while `README.md` in the
+# repository was the most carefully checked document in the project. The
+# `readme` key is the only thing that connects the two.
+readme = "README.md"
 requires-python = ">=3.12"
 # SPEC 25.1. An SPDX expression, not the old `{text = ...}` table: setuptools
 # 77 deprecated the table form (PEP 639) and a `License ::` classifier
@@ -46,6 +52,18 @@ dependencies = [
     # OS keychain, and on a box without one to a 0600 file with a warning.
     "keyring>=25.7.0",
 ]
+
+# PyPI renders these as the sidebar of the project page. Without them the page
+# offers a reader no way back to the source, the documentation or the place to
+# report a vulnerability, which for a project whose whole claim is "verify this
+# yourself" is the wrong first impression to make.
+[project.urls]
+Homepage = "https://github.com/valqore/qed"
+Documentation = "https://qed.valqore.io"
+Source = "https://github.com/valqore/qed"
+Changelog = "https://github.com/valqore/qed/blob/main/CHANGELOG.md"
+Issues = "https://github.com/valqore/qed/issues"
+Security = "https://github.com/valqore/qed/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 dev = [
