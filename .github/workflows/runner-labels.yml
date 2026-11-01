@@ -1,0 +1,81 @@
+# Is every runner `release.yml` asks for still a runner GitHub serves?
+#
+# This exists because the answer went from yes to no twice, silently, and both
+# times the discovery was a release.
+#
+# `macos-13` cost v1.0.0 two tags: the job was queued against a retired label
+# and waited for a runner that was never coming, holding the release until
+# GitHub cancelled it at the 24-hour queue limit. `macos-14` retired on
+# 2026-11-02 and cost v1.1.0 its `macos-arm64` binary: that job was cancelled
+# in the same second it started, with no runner and no steps, so the *run*
+# reported `cancelled` while every publishing job inside it reported success --
+# which is how a release goes out to PyPI, GHCR, the chart registry and a
+# GitHub release while quietly missing one asset.
+#
+# A comment in `release.yml` recorded the first lesson accurately and did not
+# prevent the second. A label is a dependency, and a dependency nothing checks
+# is a dependency that breaks on the day it matters most. So it is checked
+# here, weekly, away from a tag: a retirement then shows up as a failing
+# scheduled run on an ordinary Monday rather than as a missing artifact in a
+# release that has already published everything else.
+#
+# `tests/deploy/test_binary.py` asserts this matrix and `release.yml`'s set of
+# labels are the same set. Adding a runner there without adding it here would
+# make this file reassuring and wrong.
+name: runner-labels
+
+on:
+  schedule:
+    # Monday 06:00 UTC. A retirement is announced weeks ahead and brownouts run
+    # for days before the date, so weekly is early enough to act on and quiet
+    # enough that a failure means something.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-15
+          - macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      # Nothing is built. The question is only whether a machine with this
+      # label exists and will run a step; the architecture is printed because
+      # `macos-15-intel` and `macos-15` differ in nothing else, and a label
+      # that silently changed architecture would break the binaries without
+      # breaking the build.
+      - name: Say what this runner is
+        run: |
+          echo "label   = ${{ matrix.runner }}"
+          echo "arch    = $(uname -m)"
+          echo "kernel  = $(uname -s)"
+
+  # A probe against a retired label is *cancelled*, not failed, and a cancelled
+  # run is easy to read as somebody pressing a button. This turns it into a
+  # failure, which is the only state that reliably reaches a maintainer.
+  verdict:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every label answered
+        run: |
+          result="${{ needs.probe.result }}"
+          echo "probe result: $result"
+          if [ "$result" != "success" ]; then
+            echo "::error::A runner label release.yml depends on did not run (${result})."
+            echo "::error::A label cancelled with no runner and no steps is a retired label."
+            echo "::error::Check https://github.blog/changelog/ and fix the matrix in"
+            echo "::error::release.yml AND in this workflow -- tests/deploy/test_binary.py"
+            echo "::error::asserts the two lists are the same set."
+            exit 1
+          fi

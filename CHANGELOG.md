@@ -4,6 +4,69 @@ All notable changes to this project. Format: [Keep a Changelog]. Versioning:
 semver, with `schema_version` of `ActionProposal` / `EvidenceRecord` tracked
 independently (SPEC §25.6).
 
+## [1.1.1] — 2026-11-01
+
+**One line, and the release it cost.** `v1.1.0` published to PyPI, GHCR, the
+chart registry and a GitHub release with every artifact except
+`qed-1.1.0-macos-arm64`, because `release.yml`'s binary matrix named
+`macos-14` — a runner image GitHub retired on 2026-11-02, with failing
+brownout windows from 2026-10-05. The label is `macos-15` now, proved on a
+branch before a tag depended on it: `uname -m` = `arm64` on `macos-15`
+(15.8.2) and `x86_64` on `macos-15-intel` (15.7.9).
+
+There is no way to repair 1.1.0. Re-running the job cannot work — the label
+has no machines — and re-dispatching the workflow would try to upload 1.1.0
+to PyPI again and re-push `qed:1.1.0` to a new digest, orphaning the cosign
+signature already attached to the current one. A release moves forward; it does
+not get retagged. So 1.1.1 is 1.1.0 plus this fix, and the asset set it
+produces is complete.
+
+### Fixed — a retired runner label, for the second time
+
+**This is the same failure as v1.0.0's first two tags, one label along.**
+`macos-13` retired on 2025-12-04 and cost that release two tags: the job queued
+against a label with no machines and waited for a runner that was never coming,
+holding `release` — which lists `binary` in `needs`, where `if: always()`
+survives a job that *fails* but not one that never starts — until GitHub
+cancelled it at the 24-hour queue limit.
+
+`macos-14`'s newer behaviour is worse to read and kinder to wait on. The job is
+cancelled in the same second it starts, with no runner assigned and no steps
+executed, and the **run** then reports `cancelled` while `verify`, `wheels`,
+`image` (both arches), `sign`, `chart`, `pypi` and `release` all report
+success. A release goes out to four channels, missing one asset, under a word
+that reads like somebody pressed a button.
+
+**The part worth recording: `release.yml` carried an accurate comment about the
+first occurrence throughout the second.** It explained the queue, the `needs`
+edge, the 24-hour limit, and ended "a runner label is a dependency like any
+other, and changing one is a thing to prove on a branch rather than on a tag".
+All true, all still there, and `macos-14` went stale underneath it anyway. A
+comment recording a lesson is not a guard against the lesson.
+
+So there is a guard now. `.github/workflows/runner-labels.yml` runs weekly and
+on demand, starts one job per label `release.yml` depends on, and does nothing
+but print `uname -m`. A `verdict` job with `if: always()` converts the result
+into an **exit 1** when any probe did not succeed, because a probe against a
+retired label is *cancelled* rather than failed and a cancelled scheduled run
+reads like a button press. A retirement now arrives as a red Monday rather than
+as a missing artifact in a release that has already published everything else.
+
+`tests/deploy/test_binary.py` guards the canary in turn: the labels it probes
+and the labels `release.yml` uses must be the same set, in both directions. A
+canary watching a label nothing depends on is a weekly green tick for a
+question nobody is asking, and a `release.yml` label the canary does not probe
+is this bug again — finding #58, the fix applied to one of the two places
+that needed it. Four of the five new assertions were run against the state they
+describe: putting `macos-14` back fails two of them, and dropping one label
+from the canary's matrix fails one.
+
+Also kept, as a floor rather than a catalogue: no workflow may name
+`macos-12`, `macos-13`, `macos-14` or `ubuntu-20.04`. There is no API that
+lists the labels GitHub currently serves — which is why the canary is a live
+probe and not a list — but the ones already known to be gone should not come
+back by somebody copying an old job.
+
 ## [1.1.0] — 2026-11-01
 
 **Everything in this release was already written.** v1.0.0 was tagged on

@@ -19,6 +19,7 @@ and the bundler needed its directory on `pathex`.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import ClassVar, cast
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "deploy" / "qed.spec"
@@ -449,3 +451,118 @@ def binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
     assert 10 < megabytes < 200, f"the binary is {megabytes:.0f} MB, which is suspicious"
     yield built
     shutil.rmtree(work, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# The runners the release depends on
+# --------------------------------------------------------------------------
+
+WORKFLOWS = ROOT / ".github" / "workflows"
+
+
+def runner_labels(path: Path) -> set[str]:
+    """Every hosted-runner label a workflow names.
+
+    Read from the text rather than the parsed YAML because the labels appear in
+    three shapes: `runs-on: ubuntu-latest` on a job, `- runner: macos-15` in a
+    matrix the job then uses as `runs-on: ${{ matrix.runner }}`, and a bare
+    `- ubuntu-latest` under a `runner:` block list. A `runs-on` that is an
+    expression is not a label; the matrix entry it resolves to is.
+    """
+    labels: set[str] = set()
+    in_block_list = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        inline = re.match(r"-?\s*(?:runs-on|runner):\s*(.*)$", stripped)
+        if inline:
+            value = inline.group(1).strip().strip("\"'")
+            # `runner:` with nothing after it opens a block list of labels.
+            in_block_list = not value
+            if value and "${{" not in value:
+                labels.add(value)
+            continue
+
+        if in_block_list:
+            item = re.match(r"-\s*(\S+)$", stripped)
+            if item:
+                labels.add(item.group(1).strip("\"'"))
+                continue
+            in_block_list = False
+
+    return labels
+
+
+class TestTheRunnerLabelCanary:
+    """`.github/workflows/runner-labels.yml` must cover what `release.yml` uses.
+
+    A retired runner label has now cost two releases. `macos-13` cost v1.0.0
+    two tags -- the job queued against a label with no machines and held the
+    release until GitHub cancelled it at the 24-hour limit. `macos-14` retired
+    on 2026-11-02 and cost v1.1.0 its `macos-arm64` binary: that job was
+    cancelled in the same second it started, so the *run* read `cancelled`
+    while `pypi`, `image`, `sign`, `chart` and `release` all reported success.
+    A release went to four channels missing one asset.
+
+    `release.yml` carried an accurate comment about the first occurrence
+    throughout the second. A recorded lesson is not a guard. The canary is the
+    guard, and this is the guard on the canary: the two label lists have to be
+    the same set, or the canary becomes a weekly green tick for a question
+    nobody is asking any more. Same shape as finding #58 -- the fix applied to
+    one of the two places that needed it.
+    """
+
+    def test_the_canary_exists(self) -> None:
+        assert (WORKFLOWS / "runner-labels.yml").exists()
+
+    def test_it_probes_exactly_the_labels_the_release_depends_on(self) -> None:
+        release = runner_labels(WORKFLOWS / "release.yml")
+        canary = yaml.safe_load((WORKFLOWS / "runner-labels.yml").read_text(encoding="utf-8"))
+        probed = set(canary["jobs"]["probe"]["strategy"]["matrix"]["runner"])
+        # `verdict` runs on a label of its own and is not a thing to probe.
+        probed_plus_own = probed | {canary["jobs"]["verdict"]["runs-on"]}
+        missing = release - probed_plus_own
+        assert not missing, (
+            f"release.yml depends on {sorted(missing)} and runner-labels.yml does not "
+            "probe them. A label is a dependency; add it to the canary's matrix."
+        )
+        stale = probed - release
+        assert not stale, (
+            f"runner-labels.yml probes {sorted(stale)}, which release.yml no longer uses. "
+            "A canary watching a label nothing depends on is a weekly green tick for "
+            "a question nobody is asking."
+        )
+
+    def test_it_turns_a_cancelled_probe_into_a_failure(self) -> None:
+        """The whole point. A job cancelled for want of a runner is not a
+        failure, and a cancelled scheduled run reads like somebody pressed a
+        button. The `verdict` job is what makes a retirement arrive as a
+        failure, which is the only state that reaches a maintainer."""
+        text = (WORKFLOWS / "runner-labels.yml").read_text(encoding="utf-8")
+        assert "needs.probe.result" in text
+        assert "if: always()" in text
+        assert "exit 1" in text
+
+    def test_it_runs_on_a_schedule_and_not_only_on_demand(self) -> None:
+        """A canary nobody triggers is a file. `on.schedule` is what makes a
+        retirement show up on an ordinary Monday instead of in a release."""
+        canary = yaml.safe_load((WORKFLOWS / "runner-labels.yml").read_text(encoding="utf-8"))
+        # PyYAML parses the unquoted key `on` as the boolean True.
+        triggers = canary.get("on") or canary.get(True)
+        assert "schedule" in triggers, "runner-labels.yml has no schedule"
+        assert triggers["schedule"][0]["cron"]
+
+    def test_no_workflow_still_names_a_retired_label(self) -> None:
+        """The two that have already cost a release, by name.
+
+        Not a general check against GitHub's catalogue -- there is no API for
+        that, which is why the canary is a live probe rather than a list. This
+        is only a floor: the labels known to be gone cannot come back by
+        somebody copying an old job.
+        """
+        retired = {"macos-13", "macos-14", "macos-12", "ubuntu-20.04"}
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            found = runner_labels(path) & retired
+            assert not found, f"{path.name} names the retired label(s) {sorted(found)}"
