@@ -3,9 +3,9 @@
 A self-hosted policy and evidence kernel for AI-agent actions.
 
 [![CI](https://github.com/valqore/qed/actions/workflows/ci.yml/badge.svg)](https://github.com/valqore/qed/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](pyproject.toml)
-[![Evidence format](https://img.shields.io/badge/evidence%20format-1.0%20frozen-brightgreen)](docs/evidence-format.md)
+[![License](https://img.shields.io/badge/licence-Apache--2.0-blue)](https://github.com/valqore/qed/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](https://github.com/valqore/qed/blob/main/pyproject.toml)
+[![Evidence format](https://img.shields.io/badge/evidence%20format-1.0%20frozen-brightgreen)](https://github.com/valqore/qed/blob/main/docs/evidence-format.md)
 [![Docs](https://img.shields.io/badge/docs-qed.valqore.io-blue)](https://qed.valqore.io)
 
 An agent proposes an action. `qed` decides **ALLOW / BLOCK / REQUIRE_APPROVAL**
@@ -37,7 +37,7 @@ literals, and nowhere else.
 > **What each channel serves, and what it does not.**
 > `pip install valqore-qed` installs the kernel, and `pip install qed-verify`
 > the standalone verifier that checks a chain without it.
-> `docker run ghcr.io/valqore/qed:1.0.0` and the Helm chart at
+> `docker run ghcr.io/valqore/qed:1.1.0` and the Helm chart at
 > `oci://ghcr.io/valqore/charts/qed` are public and cosign-signed;
 > `docs/deployment.md` carries the `cosign verify` line to check that with.
 > `brew install valqore/tap/qed` works from a public tap holding three
@@ -332,12 +332,12 @@ including the ones that are less flattering.
 **[qed.valqore.io](https://qed.valqore.io)** — built from `docs/` with
 mkdocs-material and deployed from CI on every push to `main`
 (`mkdocs serve` to read it locally). **New here?**
-[`docs/onboarding-shadow-to-enforce.md`](docs/onboarding-shadow-to-enforce.md)
+[`docs/onboarding-shadow-to-enforce.md`](https://github.com/valqore/qed/blob/main/docs/onboarding-shadow-to-enforce.md)
 is the install path, in the order that keeps you able to roll back at every
 step — and it explains the three separate dials that all have to point at
 "enforce" before a `BLOCK` stops anything.
 
-[`examples/README.md`](examples/README.md) is the index of things that run.
+[`examples/README.md`](https://github.com/valqore/qed/blob/main/examples/README.md) is the index of things that run.
 
 ## Reading order
 
@@ -413,15 +413,15 @@ it on every commit in a pull request, and a commit without it cannot merge.
 
 | | |
 |---|---|
-| Contributing, and the DCO | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Who may merge, and what is in scope | [`GOVERNANCE.md`](GOVERNANCE.md) |
-| Reporting a vulnerability — **not** as an issue | [`SECURITY.md`](SECURITY.md) |
-| Twelve things qed does **not** protect against | [`THREAT_MODEL.md`](THREAT_MODEL.md) |
-| What a green test suite cannot see | [`docs/validation.md`](docs/validation.md) |
-| Code of conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
-| Licence | [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) |
+| Contributing, and the DCO | [`CONTRIBUTING.md`](https://github.com/valqore/qed/blob/main/CONTRIBUTING.md) |
+| Who may merge, and what is in scope | [`GOVERNANCE.md`](https://github.com/valqore/qed/blob/main/GOVERNANCE.md) |
+| Reporting a vulnerability — **not** as an issue | [`SECURITY.md`](https://github.com/valqore/qed/blob/main/SECURITY.md) |
+| Twelve things qed does **not** protect against | [`THREAT_MODEL.md`](https://github.com/valqore/qed/blob/main/THREAT_MODEL.md) |
+| What a green test suite cannot see | [`docs/validation.md`](https://github.com/valqore/qed/blob/main/docs/validation.md) |
+| Code of conduct | [`CODE_OF_CONDUCT.md`](https://github.com/valqore/qed/blob/main/CODE_OF_CONDUCT.md) |
+| Licence | [`LICENSE`](https://github.com/valqore/qed/blob/main/LICENSE), [`NOTICE`](https://github.com/valqore/qed/blob/main/NOTICE) |
 
 Found a claim in this repository that overstates what the code does? There is
 an issue template for exactly that
-([`.github/ISSUE_TEMPLATE/overclaim.yml`](.github/ISSUE_TEMPLATE/overclaim.yml)),
+([`.github/ISSUE_TEMPLATE/overclaim.yml`](https://github.com/valqore/qed/blob/main/.github/ISSUE_TEMPLATE/overclaim.yml)),
 and it is the most useful issue you can open here.
