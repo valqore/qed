@@ -49,12 +49,12 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
 ## The container
 
 !!! note "The image is signed, so check it rather than trusting the tag"
-    `ghcr.io/valqore/qed:1.1.0` is published for `linux/amd64` and
+    `ghcr.io/valqore/qed:1.1.1` is published for `linux/amd64` and
     `linux/arm64` and signed in CI with keyless cosign, which records the
     workflow that built it rather than a key somebody holds:
 
     ```bash
-    cosign verify ghcr.io/valqore/qed:1.1.0       --certificate-identity-regexp '^https://github.com/valqore/qed/'       --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    cosign verify ghcr.io/valqore/qed:1.1.1       --certificate-identity-regexp '^https://github.com/valqore/qed/'       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     ```
 
     A tag can be moved; a signature over a digest cannot. `docker build -t qed
@@ -62,11 +62,11 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
     pull anything.
 
 ```bash
-docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.1.0 \
+docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.1.1 \
   keys init --dir /var/lib/qed
 
 docker run --rm -p 8710:8710 -v qed-state:/var/lib/qed \
-  ghcr.io/valqore/qed:1.1.0
+  ghcr.io/valqore/qed:1.1.1
 ```
 
 Distroless and non-root (SPEC §20.4): no shell, no package manager, no pip. A

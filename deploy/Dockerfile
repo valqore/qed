@@ -74,7 +74,7 @@ FROM gcr.io/distroless/base-debian12:nonroot AS runtime
 LABEL org.opencontainers.image.title="Valqore QED" \
       org.opencontainers.image.description="Policy and evidence kernel for AI-agent actions" \
       org.opencontainers.image.source="https://github.com/valqore/qed" \
-      org.opencontainers.image.version="1.1.0" \
+      org.opencontainers.image.version="1.1.1" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.vendor="Valqore"
 

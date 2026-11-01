@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valqore-qed"
-version = "1.1.0"
+version = "1.1.1"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
 # The body of the PyPI project page. Omitted through v1.0.0, which meant the
 # page a reader reaches by searching for this name carried one line of summary,
