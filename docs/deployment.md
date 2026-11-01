@@ -49,12 +49,12 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
 ## The container
 
 !!! note "The image is signed, so check it rather than trusting the tag"
-    `ghcr.io/valqore/qed:1.0.0` is published for `linux/amd64` and
+    `ghcr.io/valqore/qed:1.1.0` is published for `linux/amd64` and
     `linux/arm64` and signed in CI with keyless cosign, which records the
     workflow that built it rather than a key somebody holds:
 
     ```bash
-    cosign verify ghcr.io/valqore/qed:1.0.0       --certificate-identity-regexp '^https://github.com/valqore/qed/'       --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    cosign verify ghcr.io/valqore/qed:1.1.0       --certificate-identity-regexp '^https://github.com/valqore/qed/'       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     ```
 
     A tag can be moved; a signature over a digest cannot. `docker build -t qed
@@ -62,11 +62,11 @@ adapters (SPEC §17). Read the `blockers` field; it says which.
     pull anything.
 
 ```bash
-docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.0.0 \
+docker run --rm -v qed-state:/var/lib/qed ghcr.io/valqore/qed:1.1.0 \
   keys init --dir /var/lib/qed
 
 docker run --rm -p 8710:8710 -v qed-state:/var/lib/qed \
-  ghcr.io/valqore/qed:1.0.0
+  ghcr.io/valqore/qed:1.1.0
 ```
 
 Distroless and non-root (SPEC §20.4): no shell, no package manager, no pip. A
@@ -224,10 +224,13 @@ Settings → Secrets and variables → Actions → Variables.
 
 ```bash
 # qed/version.py is the only literal; everything else is checked against it
-vim qed/version.py            # VERSION = "1.0.0"
-pytest tests/test_version.py  # the chart, the Dockerfile label, the docs
-# move the [Unreleased] entries under `## [0.7.0] — <date>` in CHANGELOG.md
-git commit -am "release: 1.0.0" && git tag v1.0.0 && git push --tags
+# X.Y.Z throughout: this is the procedure, not a statement about which
+# version is current. The two are different things, and writing the current
+# one here means this block is wrong from the next release onwards.
+vim qed/version.py            # VERSION = "X.Y.Z"
+pytest tests/test_version.py  # the chart, the Dockerfile label, the pages
+# move the [Unreleased] entries under `## [X.Y.Z] — <date>` in CHANGELOG.md
+git commit -am "release: X.Y.Z" && git tag vX.Y.Z && git push --tags
 ```
 
 The workflow refuses a tag that disagrees with `qed/version.py`, and refuses

@@ -104,17 +104,92 @@ class TestTheFilesThatCannotImportIt:
         text = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
         assert f'org.opencontainers.image.version="{VERSION}"' in text
 
-    def test_no_stale_image_tag_in_the_docs(self) -> None:
-        """`docs/deployment.md` tells an operator what to `docker run`. A tag
-        that was never published is a first five minutes that fails."""
-        for name in ("deployment.md", "checkpoints.md", "ci.md", "siem.md"):
-            path = ROOT / "docs" / name
-            if not path.exists():
-                continue
-            for tag in re.findall(
-                r"ghcr\.io/valqore/qed:([0-9][^\s`]*)", path.read_text(encoding="utf-8")
-            ):
-                assert tag == VERSION, f"{name} names qed:{tag}, this is {VERSION}"
+    #: Every page that tells a reader what to `docker run`. The four under
+    #: `docs/` were the whole list until 1.1.0, and the two most-read pages in
+    #: the project were not on it: `README.md`, which is the first screen of the
+    #: repository *and* the body of the PyPI page, and the landing page, whose
+    #: install transcript is the one a reader copies. Both named `qed:1.0.0`
+    #: with nothing checking them -- the same shape as finding #58, a fix
+    #: applied to one of the two places that needed it.
+    PAGES_NAMING_AN_IMAGE_TAG = (
+        "docs/deployment.md",
+        "docs/checkpoints.md",
+        "docs/ci.md",
+        "docs/siem.md",
+        "README.md",
+        "landing/index.html",
+    )
+
+    #: `docs/validation.md` is deliberately absent. It is a table of what pages
+    #: said on given dates, so it names `qed:1.0.0` correctly and forever: a
+    #: history a version bump rewrites has stopped being a history.
+    EXEMPT = ("docs/validation.md",)
+
+    @pytest.mark.parametrize("relative", PAGES_NAMING_AN_IMAGE_TAG)
+    def test_no_stale_image_tag_on_a_page_that_tells_a_reader_to_run_one(
+        self, relative: str
+    ) -> None:
+        """A tag that was never published is a first five minutes that fails."""
+        path = ROOT / relative
+        if not path.exists():
+            pytest.skip(f"{relative} does not exist")
+        for tag in re.findall(
+            r"ghcr\.io/valqore/qed:([0-9][^\s`<]*)", path.read_text(encoding="utf-8")
+        ):
+            assert tag == VERSION, f"{relative} names qed:{tag}, this is {VERSION}"
+
+    def test_no_stale_version_pin_on_any_page(self) -> None:
+        """`pip install valqore-qed==X` tells a reader which version to pin.
+
+        `docs/ci.md` says to pin it, for a good reason -- a gate that silently
+        changes which rules it enforces between two deploys is not a gate -- and
+        that makes the pinned number a thing a reader copies into their own
+        workflow. Unlike the image tag, nothing was checking it, so the example
+        pinned 1.0.0 while this file said 1.1.0.
+
+        No exempt list here. A page recording what another page used to say
+        quotes `pip install valqore-qed` without a pin, so every pin in the tree
+        is a live instruction.
+        """
+        stale = []
+        for pattern in ("*.md", "*.html", "*.yml", "*.yaml"):
+            for path in ROOT.rglob(pattern):
+                relative = path.relative_to(ROOT).as_posix()
+                if relative.startswith(("site/", ".venv/", "node_modules/")):
+                    continue
+                if relative == "CHANGELOG.md":
+                    continue
+                for pin in re.findall(
+                    r"valqore-qed==([0-9][^\s`'\"]*)", path.read_text(encoding="utf-8")
+                ):
+                    if pin != VERSION:
+                        stale.append(f"{relative} pins {pin}")
+        assert not stale, f"these pages pin a version that is not {VERSION}: {stale}"
+
+    def test_the_list_of_pages_is_not_missing_one(self) -> None:
+        """The guard above checks a list, and the list is the failure surface.
+
+        So the list is checked against the filesystem: any tracked page naming
+        an image tag must be on it, or deliberately exempt. Adding a page that
+        tells a reader to `docker run` something is then a decision about this
+        list rather than a silent omission.
+        """
+        found = set()
+        for pattern in ("*.md", "*.html"):
+            for path in ROOT.rglob(pattern):
+                relative = path.relative_to(ROOT).as_posix()
+                if relative.startswith(("site/", ".venv/", "node_modules/")):
+                    continue
+                if relative == "CHANGELOG.md":
+                    # Release notes are a record of what each version shipped.
+                    continue
+                if "ghcr.io/valqore/qed:" in path.read_text(encoding="utf-8"):
+                    found.add(relative)
+        known = set(self.PAGES_NAMING_AN_IMAGE_TAG) | set(self.EXEMPT)
+        assert not (found - known), (
+            f"these pages name a qed image tag and nothing checks it: {sorted(found - known)}. "
+            "Add each to PAGES_NAMING_AN_IMAGE_TAG, or to EXEMPT with a reason."
+        )
 
 
 class TestWhatIsDeliberatelyIndependent:

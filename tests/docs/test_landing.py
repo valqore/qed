@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from qed.version import VERSION
+
 ROOT = Path(__file__).resolve().parents[2]
 PAGE = ROOT / "landing" / "index.html"
 
@@ -87,16 +89,22 @@ class TestItExists:
 class TestEveryCommandShownIsReal:
     #: Each command the page shows, as the page spells it and as the CLI
     #: registers it. The two differ: the install block ends in
-    #: `docker run ghcr.io/valqore/qed:1.0.0 serve`, where the command has no
-    #: `qed ` in front of it, and a test that assumed one reported `qed serve`
-    #: missing from a page that shows it.
+    #: `docker run ghcr.io/valqore/qed:<version> serve`, where the command has
+    #: no `qed ` in front of it, and a test that assumed one reported `qed
+    #: serve` missing from a page that shows it.
+    #:
+    #: The tag is interpolated from `qed/version.py` rather than written here.
+    #: It used to be the literal `:1.0.0`, which made this file a second place
+    #: the version is stated -- and the one that would have gone stale silently,
+    #: because a bump that left the page behind fails the *page's* check in
+    #: `tests/test_version.py` only if this one does not quietly agree with it.
     SHOWN = (
         ("qed keys init", "keys init"),
         ("qed doctor", "doctor"),
         ("qed check", "check"),
         ("qed export", "export"),
         ("qed policy test", "policy test"),
-        (":1.0.0 serve", "serve"),
+        (f":{VERSION} serve", "serve"),
     )
 
     def test_the_page_shows_commands(self, visible: str) -> None:
@@ -249,7 +257,7 @@ class TestTheNoticeThatCameOff:
         one assertion is two places for it to disagree.
         """
         assert phrase not in visible.lower(), (
-            f"{phrase!r} is still on the landing page, and v1.0.0 is on PyPI, "
+            f"{phrase!r} is still on the landing page, and QED is on PyPI, "
             "GHCR and the Homebrew tap"
         )
 
@@ -257,7 +265,24 @@ class TestTheNoticeThatCameOff:
         """And the page shows what now works, rather than only the clone."""
         assert "pip install valqore-qed" in visible
         assert "brew install valqore/tap/qed" in visible
-        assert "ghcr.io/valqore/qed:1.0.0" in visible
+        assert f"ghcr.io/valqore/qed:{VERSION}" in visible
+
+    def test_the_prose_states_no_version(self, visible: str) -> None:
+        """One version literal on the page, in the image tag.
+
+        The banner used to open "v1.0.0 is on PyPI, on GHCR and in the Homebrew
+        tap". True when written, and a sentence that goes stale on the next
+        release without anything here noticing -- `tests/test_version.py` checks
+        the *image tag* against `qed/version.py`, and a version in prose is a
+        second claim it does not cover. The page now says QED is on those three
+        channels and leaves which version to the channel, which is where the
+        answer actually lives.
+        """
+        prose = re.sub(r"<pre.*?</pre>", "", visible, flags=re.DOTALL)
+        assert not re.search(r"(?<![\w.])v?\d+\.\d+\.\d+(?![\w.])", prose), (
+            "the landing page states a version outside the install transcript; "
+            "which version a channel serves is a question for the channel"
+        )
 
     def test_what_is_still_unfinished_is_named(self, visible: str) -> None:
         """The banner was not deleted, it was re-pointed.

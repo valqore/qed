@@ -4,7 +4,118 @@ All notable changes to this project. Format: [Keep a Changelog]. Versioning:
 semver, with `schema_version` of `ActionProposal` / `EvidenceRecord` tracked
 independently (SPEC §25.6).
 
-## [Unreleased]
+## [1.1.0] — 2026-11-01
+
+**Everything in this release was already written.** v1.0.0 was tagged on
+2026-10-12 and published on 2026-10-19, and the three weeks since produced
+twenty-three entries that nothing published. So `pip install valqore-qed`
+served a kernel with no `qed --version`, no `qed replay`, no `qed demo`, no
+`qed adapters`, no second checkpoint anchor and none of the regex-budget
+fixes: the repository was three weeks better than the product, and the only
+place that difference was visible was this file. Closing that is what the
+release is for.
+
+The evidence format does not move. `schema_version` is still `1.0`, and a
+record written by 1.0.0 verifies under this verifier unchanged (SPEC §25.6)
+— which is what makes this a minor version despite three new commands
+(`replay`, `demo`, `adapters`) and a `--version` flag.
+
+### Fixed — both PyPI project pages were blank
+
+`pip install valqore-qed` is the first line of the README, of the landing page
+and of five documents. The page a reader reaches by searching that name carried
+one line of summary, no description, and no link to the source, the
+documentation or the disclosure policy, because neither `pyproject.toml`
+declared `readme` and neither declared `[project.urls]`. `qed-verify` — the
+distribution an auditor is told to install and run, on a machine that may not
+be allowed to reach the internet twice — had no README in its directory at
+all.
+
+This is the 2026-10-19 bug again, one surface along. There the repository was
+right and the README was stale; here the README was right and nothing carried
+it to the index. **A published artifact is a different surface from the
+repository that produced it, and a document is on it only if something puts it
+there.**
+
+Both distributions now declare `readme` and six `[project.urls]` entries, and
+`packages/qed-verify/README.md` is written for the reader who arrives holding a
+chain and a set of keys: the seven checks in the order they run, the three exit
+codes, and why `--instance-id` is the only one of the seven that ties the
+records to a particular instance. Verified by building the metadata rather than
+by reading the keys back: both distributions now produce a `text/markdown`
+description, 22.7 KB and 3.1 KB, where both produced none.
+
+`tests/test_packaging.py` asserts the keys are present, the files exist and are
+long enough to say anything, every URL points at something Valqore owns, and
+every `blob/main/...` link names a file still in the tree — a `SECURITY.md`
+link that 404s is at its worst on the one page a reader with a vulnerability is
+reading. Removing the two keys again fails four of those tests.
+
+`README.md`'s internal links are absolute now, which is the other half of the
+same problem. A README is two documents — a page on GitHub and the body of a
+page on PyPI — and a relative link is correct on the first and a 404 on the
+second. There were fourteen of them: `SECURITY.md`, `THREAT_MODEL.md`,
+`docs/validation.md`, the licence, the overclaim issue template. Declaring
+`readme` without fixing those would have replaced a blank page with a page
+whose every internal link was broken, which is not obviously better. Two tests
+hold it: no relative link in a declared readme, and every
+`blob/main/…` link in one names a file still in the tree — because absolute
+links fix the 404 and introduce a second way to rot, a file renamed here and a
+link left pointing at the old name.
+
+### Fixed — two pages named an image tag and nothing checked them
+
+`tests/test_version.py` has checked `docker run ghcr.io/valqore/qed:<tag>`
+against `qed/version.py` since the eight-literal drift of week 5 — on four
+pages under `docs/`. `README.md` and `landing/index.html` were not among them,
+which is finding #58 exactly: the fix went to one of the places that needed it.
+Both named `:1.0.0`, and both are read more than the four that were covered.
+The README is the first screen of the repository and, as of the entry above,
+the body of the PyPI page; the landing transcript is the block a reader copies.
+
+The guard now takes a list of six pages, and a second test walks the tree to
+assert that no other page names a tag without being on that list — a guard
+that checks a hand-written list has its list as the failure surface.
+`docs/validation.md` is explicitly exempt and says why: it records what pages
+said on given dates, so it names `qed:1.0.0` correctly and permanently, and a
+history that a version bump rewrites has stopped being a history. Reverting
+both pages to `:1.0.0` fails two of these.
+
+`tests/docs/test_landing.py` held `:1.0.0` twice as a literal of its own. It
+now interpolates `VERSION`, and a new check forbids a version number anywhere
+in the page's prose: the banner opened "v1.0.0 is on PyPI, on GHCR and in the
+Homebrew tap", which is a state claim carrying a second copy of the version
+inside it. **Which version a channel serves is a question for the channel.**
+The page states one version, in the image tag, where the existing guard can see
+it.
+
+The stale HTML comment at the top of `landing/index.html` is corrected in the
+same commit. It was still telling the next maintainer that the notice "comes
+off in the same commit that sets `PUBLISH_PYPI=true`" — the instruction that
+produced the five-day banner — and `landing/README.md` had been corrected on
+2026-10-25 while the comment had not. One fix, two places, one of them done:
+the shape this entry is about, inside the entry about it.
+
+Three more version statements came out of the same sweep. `docs/ci.md` tells a
+reader to pin the installed version, for a good reason — a gate that silently
+changes which rules it enforces between two deploys is not a gate — which
+makes `pip install valqore-qed==1.0.0` a line copied into somebody's workflow,
+and nothing was checking it; there is now a tree-wide check on every pin, with
+no exempt list, because a page quoting the install command without a pin is not
+a pin. `docs/deployment.md`'s "bump before you tag" block stated the current
+version as part of a worked procedure, and had already drifted into
+contradicting itself — `VERSION = "1.0.0"` beside a changelog heading of
+`[0.7.0]`. It says `X.Y.Z` throughout now: the procedure and the current
+version are different things, and a block that states both is wrong from the
+next release onwards.
+
+And the launch checklist in `landing/README.md` still said "tag `v1.0.0`" and
+still carried, as step 5, "remove the pre-launch notice from `index.html` and
+deploy" — the instruction the section above it already explains as the cause
+of the five-day banner. Steps 3 and 4 are marked done with their dates, and
+step 5 is struck through and kept rather than deleted, with **do not** and the
+reason: a checklist that quietly drops the step that went wrong teaches nobody.
+
 
 ### Fixed — the front page said three live install channels did not work
 

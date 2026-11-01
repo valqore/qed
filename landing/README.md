@@ -50,11 +50,12 @@ In order. Each line is a thing that is false until it is done.
 
 1. Reserve the names. **Done 2026-10-17** — PyPI, npm and the Homebrew tap,
    each holding `valqore-qed`, `qed-verify` and `valqore` at a `0.0.0` stub.
-   **Published 2026-10-19**: PyPI and GHCR now serve 1.0.0, the tap is public,
-   and the container carries a cosign signature and an SBOM attestation. npm
-   still serves the stub on purpose — QED is a Python program and a JavaScript
-   client has never existed. Still to do: filing the trademark (SPEC §25.1),
-   and code-signing the macOS binaries.
+   **Published 2026-10-19**, and serving 1.1.0 since 2026-11-01: the tap is
+   public and the container carries a cosign signature and an SBOM attestation.
+   Which version each index serves is a question for the index and never for
+   this file. npm still serves the stub on purpose — QED is a Python program
+   and a JavaScript client has never existed. Still to do: filing the trademark
+   (SPEC §25.1), and code-signing the macOS binaries.
 2. Enable GitHub private vulnerability reporting. `SECURITY.md` points at
    `tunc@valqore.io`, which is a deliberate choice for launch and not an
    oversight: a maintainer address that is read beats a role alias that
@@ -62,10 +63,22 @@ In order. Each line is a thing that is false until it is done.
    Move to a `security@` alias when there is a second person to receive it —
    and change `SECURITY.md` in the same commit, because a disclosure address
    that bounces is worse than a personal one.
-3. Flip the repository public. The banner on `valqore.io` links here, so it
-   cannot go up before this.
-4. Set `PUBLISH_GHCR=true` and `PUBLISH_PYPI=true`, tag `v1.0.0`, and check the
-   release summary says both published.
-5. Remove the pre-launch notice from `index.html` and deploy.
+3. Flip the repository public. **Done 2026-10-12.** The banner on `valqore.io`
+   links here, so it could not go up before this.
+4. Set `PUBLISH_GHCR=true` and `PUBLISH_PYPI=true` and tag. **Done
+   2026-10-19**; both variables are `true` and stay that way. The gate is no
+   longer an embargo — it is what stops a `v*` tag cut to test the pipeline
+   from publishing. Every later release is `qed/version.py`, a changelog
+   section under that version, and the tag; `tests/test_version.py` and the
+   workflow both refuse a tag that disagrees with the file.
+5. ~~Remove the pre-launch notice from `index.html` and deploy.~~ **Do not.**
+   This line is the one that caused the five-day banner, and the section above
+   explains why: publication set a repository variable, not a file, so the
+   commit this instruction waits for never happened. The notice is re-pointed
+   when what it says stops being true, which is a judgement somebody here makes
+   and not an event elsewhere. Leaving the struck line in place is deliberate
+   — a checklist that quietly drops the step that went wrong teaches nobody.
 6. Turn on docs-site versioning (`mike`), which `mkdocs.yml` explains was
-   deferred precisely until there was a published site to version.
+   deferred precisely until there was a published site to version. 1.1.0 is the
+   first release where that is more than theoretical: there are now two
+   published versions and one URL serving whichever built last.
