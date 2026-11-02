@@ -4,13 +4,78 @@ All notable changes to this project. Format: [Keep a Changelog]. Versioning:
 semver, with `schema_version` of `ActionProposal` / `EvidenceRecord` tracked
 independently (SPEC §25.6).
 
+## [Unreleased]
+
+### Corrected — `macos-14` was not retired, and 1.1.1 said it was
+
+**The fix was right, the deadline was real, and the stated cause was wrong.**
+1.1.1 moved `release.yml`'s arm64 binary job from `macos-14` to `macos-15` and
+said it did so because GitHub had retired the `macos-14` image. On 2026-11-02
+at 11:47 UTC — the retirement date itself, and thirteen hours after the v1.1.0
+job on that label was cancelled — the new canary probed `macos-14` and got a
+real runner in four seconds: image `macos-14-arm64`, version `20260831.0302.1`,
+`uname -m` = `arm64`. The label answered. It had not retired.
+
+What the published schedule actually says: deprecation from 2026-07-06,
+retirement dated 2026-11-02, failing brownout windows 14:00–00:00 UTC on days
+from 2026-10-05 to 2026-10-31, and a warning that capacity would be reduced
+ahead of the date. The v1.1.0 cancellation was at 2026-11-01 22:14:34 UTC —
+after the last published brownout window and before retirement completed — so
+the cause was that reduced capacity, not a retirement that had already
+happened.
+
+Two things also turned out to be wrong in the telling. The cancellation was
+described as having waited eight minutes; it did not wait at all. Both
+attempts were created, started and completed in a single second, at 22:14:34
+and 22:22:32 UTC. The eight-minute figure was attempt 2's record read as
+attempt 1's.
+
+So the wording changes in four places — `release.yml`'s matrix comment,
+`runner-labels.yml`'s header and error text, this file's 1.1.1 section, and
+`tests/deploy/test_binary.py` — and the substance does not. `macos-15` is
+still correct, `macos-14` still retires, and a label that will not run a job
+still costs a release its asset. What the canary watches for is no longer
+written as "retirement" but as "a label that will not run a job, whatever the
+reason", because that is the only part a release can feel and the only part
+the probe can see.
+
+The floor set in `tests/deploy/test_binary.py` was called `retired` and
+contained `macos-14`, so it asserted something false about its own contents.
+It is `moved_off` now, with the reason written down.
+
+### Fixed — the canary's failure path had never run
+
+`verdict` exists to turn a probe that did not succeed into `exit 1`, and until
+now it had only ever been green, which says nothing about what it does when a
+probe fails. Proved on a throwaway branch (run `41440411755`) by forcing one
+probe to exit 1: `verdict` ran on `if: always()`, read `probe result: failure`,
+emitted its annotations and exited 1, so the run read `failure` rather than
+`cancelled`. The comparison is `!= "success"`, so the cancelled case takes the
+branch the failed one just took.
+
+The first attempt at that proof put `macos-14` back in the matrix expecting a
+cancellation, and got a successful build instead — which is how the correction
+above was found. A guard that has only ever passed is a guess, and the test
+written to pin this down was itself blind on the first draft: `assert '!=
+"success"' in text` passed against a mutated workflow, because the comment
+above the job quotes `!= "success"` in prose and `in text` cannot tell a
+comment from a command. It reads the parsed `run` block now. Finding #48, in
+the test written to close finding #60b.
+
 ## [1.1.1] — 2026-11-01
 
 **One line, and the release it cost.** `v1.1.0` published to PyPI, GHCR, the
 chart registry and a GitHub release with every artifact except
 `qed-1.1.0-macos-arm64`, because `release.yml`'s binary matrix named
 `macos-14` — a runner image GitHub retired on 2026-11-02, with failing
-brownout windows from 2026-10-05. The label is `macos-15` now, proved on a
+brownout windows from 2026-10-05.
+
+> **Corrected 2026-11-02.** `macos-14` had *not* retired when this was
+> written: it served a real runner on 2026-11-02, after this release shipped.
+> The cause was the capacity reduction that preceded the retirement date. The
+> fix in this release is unaffected. Kept as written, with the correction
+> beside it, because a changelog that quietly edits what it claimed teaches
+> nobody. See **Corrected** under `[Unreleased]`. The label is `macos-15` now, proved on a
 branch before a tag depended on it: `uname -m` = `arm64` on `macos-15`
 (15.8.2) and `x86_64` on `macos-15-intel` (15.7.9).
 
