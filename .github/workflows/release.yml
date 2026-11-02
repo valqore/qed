@@ -540,10 +540,50 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
+  # PyPI is the one surface in this workflow that cannot be taken back.
+  #
+  # A container tag can be overwritten and a package version deleted; a GitHub
+  # release can be edited or removed; the Helm registry is the same. PyPI is
+  # different in kind: a release file can be deleted but **its version string
+  # can never be reused**, by this project or anybody. Publishing 1.1.2 by
+  # mistake does not cost a re-run, it costs the number.
+  #
+  # So this job, and only this job, waits for a human. The `pypi` environment
+  # carries a required-reviewer rule, which makes the tag mean "build it" and
+  # a person mean "publish it". Everything else in the release proceeds while
+  # this one waits: `release` does not list `pypi` in its `needs`, so the
+  # release, the signed image and the chart all land without an approval, and
+  # only the irreversible step is held. That asymmetry is the point, not an
+  # oversight -- gating the recoverable steps would buy nothing and make every
+  # release need a babysitter.
+  #
+  # The environment has **no deployment branch policy**, deliberately. A
+  # tag-only policy looks tighter and would break the `workflow_dispatch` path
+  # above, which can reach this job from any ref; the workflow's own `on:` is
+  # already the constraint on when this runs at all. `prevent_self_review` is
+  # off for the same class of reason: GOVERNANCE.md says there is one
+  # maintainer, and a rule that forbids approving your own run is a deadlock,
+  # not a control, until there is a second.
+  #
+  # Proven before it was wired in here, because a gate that has never gated
+  # is a guess. A throwaway workflow declaring this environment was pushed on a
+  # branch (run `41464363390`): the job sat at `waiting` with a pending
+  # deployment naming reviewer `tunc-celik-valqore`, then ran to success once
+  # approved. Both halves -- that it stops, and that it can be released -- were
+  # observed rather than assumed.
+  #
+  # One half of this lives outside the repository and no test here can see it:
+  # PyPI's own trusted-publisher configuration has an optional environment
+  # field. Left blank, it accepts a token from any environment and this gate is
+  # the only thing in front of a publish. Set to `pypi`, PyPI itself refuses an
+  # OIDC token minted outside this environment, which closes the path where
+  # somebody adds a second workflow that publishes without the gate. Setting it
+  # to anything *else* breaks the next release. See `docs/deployment.md`.
   pypi:
     needs: [verify, wheels]
     if: vars.PUBLISH_PYPI == 'true'
     runs-on: ubuntu-latest
+    environment: pypi
     permissions:
       id-token: write # trusted publishing; no API token to leak
     steps:

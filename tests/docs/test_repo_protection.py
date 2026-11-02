@@ -27,7 +27,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 RULESETS = ROOT / ".github" / "rulesets"
+ENVIRONMENTS = ROOT / ".github" / "environments"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 
 
 def ruleset(name: str) -> dict[str, Any]:
@@ -245,8 +247,158 @@ def test_the_installer_defaults_to_a_plan() -> None:
     assert '"$HERE"/*.json' in script, "the script does not install every ruleset here"
 
 
+def test_the_installer_installs_the_environments_too() -> None:
+    """Otherwise `.github/environments/` is documentation.
+
+    A file describing an approval gate that nothing installs is worse than no
+    file: it reads as a control and is a wish. This asserts the glob rather
+    than the word `environments`, because a mention in a comment is not an
+    installation -- the failure #48 keeps producing.
+    """
+    script = (RULESETS / "apply.sh").read_text(encoding="utf-8")
+    assert '"$ENVS"/*.json' in script, (
+        "apply.sh does not install every environment in .github/environments/"
+    )
+    assert "environments/$env_name" in script, "apply.sh does not PUT the environments it reads"
+
+
 def test_the_governance_promise_is_still_the_one_being_kept() -> None:
     """If this sentence is rewritten, everything above is enforcing a claim the
     project no longer makes."""
     governance = (ROOT / "GOVERNANCE.md").read_text(encoding="utf-8")
     assert "no bypass and no admin merge" in governance
+
+
+def release_workflow() -> dict[str, Any]:
+    loaded = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def jobs_publishing_to_pypi() -> set[str]:
+    """Every job with a step that uploads to PyPI, found by the action it uses.
+
+    Found by action rather than by job name so that a second publishing job --
+    the plausible way this gate gets bypassed -- is covered the day it is
+    added, not the day somebody remembers to add it to a list here.
+    """
+    publishers = set()
+    for name, job in release_workflow()["jobs"].items():
+        for step in job.get("steps") or []:
+            if "gh-action-pypi-publish" in str(step.get("uses", "")):
+                publishers.add(name)
+    return publishers
+
+
+class TestPublishingToPyPINeedsAHuman:
+    """The one step in the release that cannot be taken back.
+
+    A container tag can be overwritten, a package version deleted, a GitHub
+    release edited. PyPI is different in kind: a release file can be deleted
+    but **its version string can never be reused**, by this project or anybody.
+    Publishing by mistake does not cost a re-run, it costs the number.
+
+    So `release.yml`'s `pypi` job declares an `environment`, and that
+    environment carries a required reviewer. What the tests below can see is
+    the workflow and the declared environment -- both files. **What no test
+    here can see is the live environment**, which is a settings page, same
+    blind spot the module docstring describes for branch protection. The file
+    is the intent; `gh api repos/valqore/qed/environments/pypi` is the truth,
+    and `apply.sh --apply` is what makes them agree.
+
+    Nor can anything here see PyPI's own trusted-publisher configuration, which
+    has an optional environment field of its own. Left blank, this gate is the
+    only thing in front of a publish; set to `pypi`, PyPI refuses an OIDC token
+    minted anywhere else.
+    """
+
+    def test_the_pypi_job_declares_an_environment(self) -> None:
+        job = release_workflow()["jobs"]["pypi"]
+        assert job.get("environment") == "pypi", (
+            "the pypi job does not run in the `pypi` environment, so a tag "
+            "publishes with no human in the loop"
+        )
+
+    def test_every_job_that_publishes_is_gated(self) -> None:
+        """Not only the one that exists today."""
+        publishers = jobs_publishing_to_pypi()
+        assert publishers, (
+            "no job uses pypa/gh-action-pypi-publish -- this test has stopped "
+            "watching anything, so find how publishing happens now"
+        )
+        jobs = release_workflow()["jobs"]
+        ungated = {n for n in publishers if not jobs[n].get("environment")}
+        assert not ungated, f"{sorted(ungated)} publish to PyPI with no environment"
+
+    def test_every_declared_environment_exists_as_a_file(self) -> None:
+        """A name in a workflow creates the environment on first use, with no
+        protection rules at all.
+
+        That is the quiet failure: a typo, or a new job naming `release`
+        instead of `pypi`, gets a *green* run through an environment that gates
+        nothing. The workflow naming an environment and the repository
+        declaring one have to be the same set.
+        """
+        named = {
+            str(job["environment"])
+            for job in release_workflow()["jobs"].values()
+            if job.get("environment")
+        }
+        declared = {path.stem for path in ENVIRONMENTS.glob("*.json")}
+        assert named <= declared, (
+            f"{sorted(named - declared)} named in release.yml with no file in "
+            ".github/environments/, so apply.sh will not give it any rule"
+        )
+
+    def test_the_declared_environment_requires_a_reviewer(self) -> None:
+        spec = json.loads((ENVIRONMENTS / "pypi.json").read_text(encoding="utf-8"))
+        reviewers = spec.get("reviewers") or []
+        assert reviewers, "the pypi environment declares no required reviewer"
+        for entry in reviewers:
+            assert entry.get("login"), (
+                "a reviewer is named by numeric id; use a login so the file "
+                "says who, and so it breaks when they stop being a maintainer"
+            )
+
+    def test_self_review_tracks_the_number_of_maintainers(self) -> None:
+        """Same shape as the approval-count test above, and the same trap.
+
+        `prevent_self_review` is a control when there are two people and a
+        deadlock when there is one: the sole maintainer cuts the tag, so the
+        sole maintainer is the one who cannot approve it, and the release stops
+        forever with no way out but editing the settings page mid-release.
+
+        When a second maintainer arrives, `GOVERNANCE.md` stops saying this
+        code is unreviewed and this test fails here, naming the file. Changing
+        a governance document and changing what the gate requires are two
+        motions and the second is the one that gets forgotten.
+        """
+        spec = json.loads((ENVIRONMENTS / "pypi.json").read_text(encoding="utf-8"))
+        unreviewed = "**Nothing in this repository has been reviewed by a second person.**"
+        governance = (ROOT / "GOVERNANCE.md").read_text(encoding="utf-8")
+        if spec.get("prevent_self_review"):
+            assert unreviewed not in governance, (
+                "the pypi gate forbids self-review while GOVERNANCE.md says there "
+                "is nobody else to approve -- the next release would never publish"
+            )
+        else:
+            assert unreviewed in governance, (
+                "GOVERNANCE.md no longer says this repository is unreviewed, so "
+                "somebody else can approve a publish: set prevent_self_review "
+                "in .github/environments/pypi.json"
+            )
+
+    def test_the_gate_does_not_hold_the_recoverable_steps(self) -> None:
+        """The asymmetry is deliberate, so pin it.
+
+        `release` does not wait on `pypi`, which means the GitHub release, the
+        signed image and the chart all land without an approval and only the
+        irreversible step is held. Adding `pypi` to `release`'s `needs` would
+        make every release wait on a human for steps that can simply be redone
+        -- and would be an easy thing to add while tidying a graph.
+        """
+        needs = release_workflow()["jobs"]["release"]["needs"]
+        assert "pypi" not in needs, (
+            "the release job now waits on the approval gate, so nothing in a "
+            "release lands until somebody approves PyPI"
+        )

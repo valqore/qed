@@ -201,24 +201,59 @@ qed-verify chain-$(date +%F).jsonl --keys /var/lib/qed/public --instance-id <you
 
 `.github/workflows/release.yml`, on a `v*` tag.
 
-**Publishing is off until somebody turns it on.** SPEC §24.1's name
-reservations — PyPI `valqore-qed` and `qed-verify`, the GHCR path, the Homebrew
-tap — are not done, and publishing is the irreversible step: a version on PyPI
-cannot be unpublished and reused, and an image pushed under a name somebody
-else later owns is a mess to undo.
+A tag produces the whole release: the version gate, the full test suite, both
+wheels (checked for the data files they read at runtime), the container built
+*and started* on both architectures, the Helm chart linted and packaged, the
+single-file binaries, and a GitHub Release with all of it attached.
 
-So a tag today produces the whole release and pushes none of it: the version
-gate, the full test suite, both wheels (checked for the data files they read at
-runtime), the container built *and started* on both architectures, the Helm
-chart linted and packaged, and a GitHub Release with all of it attached. Two
-repository variables turn the rest on:
+Three repository variables decide how much of that is *published*. All three
+are now `true`:
 
 | Variable | What it enables |
 |---|---|
 | `PUBLISH_GHCR=true` | push the multi-arch image, cosign keyless signature, SBOM attestation, Helm chart to `oci://ghcr.io/valqore/charts` |
 | `PUBLISH_PYPI=true` | publish both wheels via trusted publishing |
+| `PUBLISH_DOCS=true` | publish the documentation site |
 
-Settings → Secrets and variables → Actions → Variables.
+Settings → Secrets and variables → Actions → Variables. They used to hold an
+embargo, and now do the opposite job: they are what stops a tag pushed for a
+test from reaching an index.
+
+### PyPI waits for a human
+
+One step in a release cannot be taken back. A container tag can be
+overwritten, a package version deleted, a GitHub release edited — but while a
+file can be removed from PyPI, **its version string can never be reused**, by
+this project or anybody. Publishing the wrong thing as 1.2.0 does not cost a
+re-run; it costs the number.
+
+So the `pypi` job runs in a GitHub **environment** with a required reviewer.
+The tag means *build it* and a person means *publish it*. Nothing else in the
+release waits: `release` does not depend on `pypi`, so the GitHub release, the
+signed image and the chart all land unattended, and only the irreversible step
+is held. Gating the recoverable steps would buy nothing and make every release
+need a babysitter.
+
+The environment is declared as a file, `.github/environments/pypi.json`, and
+installed by `.github/rulesets/apply.sh --apply` — same reasoning as the
+rulesets beside it: an approval rule that lives only in a settings page is a
+claim no reader can check. `tests/docs/test_repo_protection.py` holds the
+workflow and that file to each other, including the case that matters most,
+which is a *second* job that publishes without a gate.
+
+Two things no test in this repository can see:
+
+- **The live environment.** The file is the intent; the settings page is the
+  truth. `gh api repos/valqore/qed/environments/pypi` reads the truth, and
+  `apply.sh --apply` is what makes them agree.
+- **PyPI's own trusted-publisher configuration**, which has an environment
+  field of its own. Left blank, PyPI accepts an OIDC token from any
+  environment in this repository and the gate above is the only thing in front
+  of a publish. Set to `pypi`, PyPI itself refuses a token minted anywhere
+  else, which closes the path where a new workflow publishes without the gate.
+  Set to anything *other* than `pypi`, the next release fails at the upload —
+  so change it on pypi.org for both `valqore-qed` and `qed-verify`, or leave
+  it blank, but do not guess at it.
 
 ### Bump before you tag
 
@@ -232,6 +267,13 @@ pytest tests/test_version.py  # the chart, the Dockerfile label, the pages
 # move the [Unreleased] entries under `## [X.Y.Z] — <date>` in CHANGELOG.md
 git commit -am "release: X.Y.Z" && git tag vX.Y.Z && git push --tags
 ```
+
+Then **go and approve the publish.** The tag starts everything; the `pypi` job
+sits at *Waiting* on the run page until a reviewer clicks Approve, and the rest
+of the release will have finished around it, so a release that looks complete
+can still be missing from PyPI. `gh run view <id>` shows the job as `waiting`,
+and `gh api repos/valqore/qed/actions/runs/<id>/pending_deployments` says who
+can release it.
 
 The workflow refuses a tag that disagrees with `qed/version.py`, and refuses
 one with no matching `## [x.y.z]` changelog section. Both are guard rails for
