@@ -498,13 +498,20 @@ def runner_labels(path: Path) -> set[str]:
 class TestTheRunnerLabelCanary:
     """`.github/workflows/runner-labels.yml` must cover what `release.yml` uses.
 
-    A retired runner label has now cost two releases. `macos-13` cost v1.0.0
-    two tags -- the job queued against a label with no machines and held the
-    release until GitHub cancelled it at the 24-hour limit. `macos-14` retired
-    on 2026-11-02 and cost v1.1.0 its `macos-arm64` binary: that job was
+    A runner label that will not run a job has now cost two releases.
+    `macos-13` cost v1.0.0 two tags -- the job queued against a label with no
+    machines and held the release until GitHub cancelled it at the 24-hour
+    limit. `macos-14` cost v1.1.0 its `macos-arm64` binary: that job was
     cancelled in the same second it started, so the *run* read `cancelled`
     while `pypi`, `image`, `sign`, `chart` and `release` all reported success.
     A release went to four channels missing one asset.
+
+    `macos-14` was deprecated and due to retire on 2026-11-02, but it had not
+    retired when that happened: a probe on 2026-11-02 at 11:47 UTC got a real
+    runner in four seconds. The cause was the capacity reduction GitHub warned
+    would precede the date. So neither the canary nor this class tests for
+    retirement; they test whether a label release.yml depends on will run a
+    job, which is the only part a release can feel.
 
     `release.yml` carried an accurate comment about the first occurrence
     throughout the second. A recorded lesson is not a guard. The canary is the
@@ -538,12 +545,40 @@ class TestTheRunnerLabelCanary:
     def test_it_turns_a_cancelled_probe_into_a_failure(self) -> None:
         """The whole point. A job cancelled for want of a runner is not a
         failure, and a cancelled scheduled run reads like somebody pressed a
-        button. The `verdict` job is what makes a retirement arrive as a
-        failure, which is the only state that reaches a maintainer."""
+        button. The `verdict` job is what makes that arrive as a failure, which
+        is the only state that reaches a maintainer.
+
+        This asserts the wiring is present, which is text matching and not
+        behaviour: these three strings were all present while the job had only
+        ever run green, and a guard that has never failed is a guess about what
+        it does when it fails. The behaviour was proved separately, on a
+        throwaway branch on 2026-11-02 (run 41440411755), by forcing one probe
+        to exit 1 -- `verdict` ran on `if: always()`, read `probe result:
+        failure` and exited 1. The comparison is `!= "success"`, so a cancelled
+        probe takes the branch a failed one just took.
+        """
         text = (WORKFLOWS / "runner-labels.yml").read_text(encoding="utf-8")
         assert "needs.probe.result" in text
         assert "if: always()" in text
         assert "exit 1" in text
+
+        # The comparison itself, read from the parsed step rather than from
+        # the file. `!= "success"` is what makes cancelled and failed the same
+        # case; `= "failure"` would miss the one that actually happens.
+        #
+        # Read from the file, this assertion passes against that exact bug,
+        # because the comment above the job quotes `!= "success"` in prose and
+        # `in text` cannot tell a comment from a command. It was written that
+        # way first and it did exactly that -- finding #48, a guard answered by
+        # a comment. yaml.safe_load drops comments, so the parsed `run` block
+        # is the only place the question can be asked honestly.
+        canary = yaml.safe_load(text)
+        verdict = canary["jobs"]["verdict"]["steps"][0]["run"]
+        assert '!= "success"' in verdict, (
+            'the verdict job does not test `!= "success"`. A probe against a '
+            "label that will not run is cancelled, not failed; a test for "
+            "failure alone misses the case this workflow exists for."
+        )
 
     def test_it_runs_on_a_schedule_and_not_only_on_demand(self) -> None:
         """A canary nobody triggers is a file. `on.schedule` is what makes a
@@ -554,15 +589,23 @@ class TestTheRunnerLabelCanary:
         assert "schedule" in triggers, "runner-labels.yml has no schedule"
         assert triggers["schedule"][0]["cron"]
 
-    def test_no_workflow_still_names_a_retired_label(self) -> None:
-        """The two that have already cost a release, by name.
+    def test_no_workflow_names_a_label_we_have_already_moved_off(self) -> None:
+        """The ones that have already cost a release, plus their generation.
 
         Not a general check against GitHub's catalogue -- there is no API for
         that, which is why the canary is a live probe rather than a list. This
-        is only a floor: the labels known to be gone cannot come back by
+        is only a floor: a label we have moved off should not come back by
         somebody copying an old job.
+
+        Deliberately not called `retired`. `macos-14` is in this set and still
+        served a runner on its own retirement date, so a set called `retired`
+        would be asserting something false about its own contents -- which is
+        the mistake this test's own class docstring used to make.
         """
-        retired = {"macos-13", "macos-14", "macos-12", "ubuntu-20.04"}
+        moved_off = {"macos-12", "macos-13", "macos-14", "ubuntu-20.04"}
         for path in sorted(WORKFLOWS.glob("*.yml")):
-            found = runner_labels(path) & retired
-            assert not found, f"{path.name} names the retired label(s) {sorted(found)}"
+            found = runner_labels(path) & moved_off
+            assert not found, (
+                f"{path.name} names {sorted(found)}, which this project has moved off. "
+                "Use a current label; the canary probes only what release.yml uses."
+            )

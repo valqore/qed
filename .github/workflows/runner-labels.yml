@@ -3,14 +3,22 @@
 # This exists because the answer went from yes to no twice, silently, and both
 # times the discovery was a release.
 #
-# `macos-13` cost v1.0.0 two tags: the job was queued against a retired label
-# and waited for a runner that was never coming, holding the release until
-# GitHub cancelled it at the 24-hour queue limit. `macos-14` retired on
-# 2026-11-02 and cost v1.1.0 its `macos-arm64` binary: that job was cancelled
-# in the same second it started, with no runner and no steps, so the *run*
-# reported `cancelled` while every publishing job inside it reported success --
-# which is how a release goes out to PyPI, GHCR, the chart registry and a
-# GitHub release while quietly missing one asset.
+# `macos-13` cost v1.0.0 two tags: the job was queued against a label with no
+# machines and waited for a runner that was never coming, holding the release
+# until GitHub cancelled it at the 24-hour queue limit. `macos-14` cost v1.1.0
+# its `macos-arm64` binary: that job was cancelled in the same second it
+# started, with no runner and no steps, so the *run* reported `cancelled` while
+# every publishing job inside it reported success -- which is how a release
+# goes out to PyPI, GHCR, the chart registry and a GitHub release while
+# quietly missing one asset.
+#
+# `macos-14` was not retired when that happened, and the first version of this
+# comment said it was. It was deprecated, due to retire on 2026-11-02, and in
+# the capacity reduction GitHub warned would precede the date. This workflow
+# probed it on 2026-11-02 at 11:47 UTC and got a real runner in four seconds
+# (image `macos-14-arm64`/20260831.0302.1, arm64). So what this file watches
+# for is not only retirement: it is a label that will not run a job, whatever
+# the reason, which is the only part a release can feel.
 #
 # A comment in `release.yml` recorded the first lesson accurately and did not
 # prevent the second. A label is a dependency, and a dependency nothing checks
@@ -59,9 +67,16 @@ jobs:
           echo "arch    = $(uname -m)"
           echo "kernel  = $(uname -s)"
 
-  # A probe against a retired label is *cancelled*, not failed, and a cancelled
-  # run is easy to read as somebody pressing a button. This turns it into a
-  # failure, which is the only state that reliably reaches a maintainer.
+  # A probe against a label that will not run is *cancelled*, not failed, and a
+  # cancelled run is easy to read as somebody pressing a button. This turns it
+  # into a failure, which is the only state that reliably reaches a maintainer.
+  #
+  # The test is `!= "success"`, so cancelled and failed take the same branch.
+  # Proved on a throwaway branch on 2026-11-02 (run 41440411755) by forcing one
+  # probe to exit 1: `verdict` ran on `if: always()`, read `probe result:
+  # failure`, and exited 1, so the run read `failure`. Until then this job had
+  # only ever been green, which says nothing about what it does when it is not
+  # -- the same defect as a comment that records a lesson without guarding it.
   verdict:
     needs: probe
     if: always()
@@ -73,7 +88,8 @@ jobs:
           echo "probe result: $result"
           if [ "$result" != "success" ]; then
             echo "::error::A runner label release.yml depends on did not run (${result})."
-            echo "::error::A label cancelled with no runner and no steps is a retired label."
+            echo "::error::Cancelled with no runner and no steps means the label"
+            echo "::error::would not run a job -- retired, in a brownout, or out of capacity."
             echo "::error::Check https://github.blog/changelog/ and fix the matrix in"
             echo "::error::release.yml AND in this workflow -- tests/deploy/test_binary.py"
             echo "::error::asserts the two lists are the same set."
