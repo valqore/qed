@@ -6,6 +6,63 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — a weekly check that the Homebrew tap is not behind
+
+`release.yml` publishes to PyPI, GHCR, the Helm registry and a GitHub release.
+It does not touch the tap. `valqore/homebrew-tap`'s `Formula/qed.rb` is
+rendered by hand with `deploy/homebrew/render.sh <version>`, and a step done by
+hand is a step that gets skipped: the tap served 1.0.0 while the kernel went to
+1.1.0 and then 1.1.1, so `brew install valqore/tap/qed` was two releases behind
+for a fortnight and nothing said so.
+
+`.github/workflows/tap-drift.yml` runs Mondays at 06:30 UTC, half an hour after
+the runner-label canary, and compares the version in the tap's formula against
+**the newest release that carries a complete set of binaries** — then checks
+that the formula's three checksums are that release's.
+
+Three choices in that sentence are the whole design:
+
+* **Not against `qed/version.py`.** `main` legitimately runs ahead of every
+  published version between the bump commit and the tag. Which version a
+  channel serves is a question for the channel.
+* **Not against the newest release.** v1.1.0 *is* a release with no
+  `macos-arm64` binary. Pointing the tap at it would give every Apple Silicon
+  user a 404, which is why 1.1.0 was skipped by hand when the tap was brought
+  to 1.1.1. Encoding "complete" means nobody has to make that call from memory
+  again.
+* **Not inside `release.yml`.** The formula's checksums come from the release's
+  own `.sha256` files, so the render can only happen after the release exists.
+  A release-time check would fail every release, correctly and uselessly. The
+  drift worth catching is the tap still trailing days later.
+
+It also checks the checksums rather than only the version, because a matching
+version with a stale hash is worse than a stale version: `brew install` fails
+on a checksum mismatch while the formula looks current.
+
+Proved live on a branch before merging, both ways. Against the real state:
+`complete: v1.1.1`, tap `1.1.1`, `All three checksums match v1.1.1`. Against a
+run with v1.1.1 hidden from the tag list: `incomplete, skipping: v1.1.0`,
+`complete: v1.0.0`, then `exit 1` naming the render command — so the branch
+that rejects an incomplete release is proved by the release that actually was
+incomplete.
+
+Eight mutations were run against the nine new assertions in
+`tests/deploy/test_binary.py`. Two passed and were the tests' fault, not the
+workflow's: `assert "exit 1" in <the whole workflow>` cannot tell which of four
+steps lost it, so the version comparison was softened to a `::warning::` and
+nothing failed. Both assertions are per-step now, found by content so renaming
+a step cannot silently stop testing it.
+
+One more lesson for the file that collects them: `yaml.safe_load` drops *YAML*
+comments but a `#` line inside a `run:` block is a *shell* comment and survives
+into the parsed string. Asserting on parsed YAML is necessary and not
+sufficient — the first draft of the "reads the API, not the raw CDN" test
+failed on the comment explaining why the check avoids the raw CDN.
+
+Also corrected: `deploy/homebrew/qed.rb.template`'s header still said the tap
+and this repository were **private** and would "go public in the same step".
+They did, on 2026-10-12 and 2026-10-19.
+
 ### Corrected — `macos-14` was not retired, and 1.1.1 said it was
 
 **The fix was right, the deadline was real, and the stated cause was wrong.**

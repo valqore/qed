@@ -47,8 +47,6 @@ on:
     # on the same morning are still two separate stories.
     - cron: "30 6 * * 1"
   workflow_dispatch:
-  push:
-    branches: [ci/tap-drift]   # TEMP: removed before merge
 
 permissions:
   contents: read
@@ -70,7 +68,7 @@ jobs:
 
           found=""
           for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
-                         --json tagName --jq '.[].tagName' | grep -v '^v1.1.1$'); do   # TEMP
+                         --json tagName --jq '.[].tagName'); do
             version="${tag#v}"
             assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
                         --json assets --jq '.assets[].name')"
