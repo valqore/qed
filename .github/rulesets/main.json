@@ -32,6 +32,7 @@
         "required_status_checks": [
           { "context": "secrets" },
           { "context": "dco" },
+          { "context": "minimum-versions" },
           { "context": "audit" },
           { "context": "check (ubuntu-latest, 3.12)" },
           { "context": "check (ubuntu-latest, 3.13)" },

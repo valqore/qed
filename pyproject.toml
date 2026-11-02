@@ -33,7 +33,13 @@ dependencies = [
     "cryptography>=42",
     "typer>=0.27.3",
     "pyyaml>=6.0.3",
-    "python-ulid>=2",
+    # The floor is **3.1**, not 2: below it `ULID()` draws fresh random
+    # bytes every call, so ids minted in the same millisecond do not sort
+    # in creation order -- and `new_proposal_id` promises they do. Measured
+    # rather than read off a changelog: the ordering test failed 10 of 10
+    # runs on 3.0.0 and passed 10 of 10 on 3.1.0. Found by the
+    # `minimum-versions` CI job.
+    "python-ulid>=3.1",
     "regex>=2026.9.29",
     # Week 2. All four are in SPEC 20.3's allowed set for the kernel wheel.
     # `mcp` is pinned to 2.x: the 2.0 SDK replaced the decorator-based
@@ -47,7 +53,12 @@ dependencies = [
     # named, but `authlib.jose` is deprecated in 1.8 in favour of `joserfc` by
     # the same author, and it warns on import -- which this suite treats as an
     # error. `joserfc` is the successor, not an additional dependency.
-    "joserfc>=1.0,<2",
+    # The floor is **1.5**, not 1.0: joserfc 1.0 through 1.4 raise
+    # `ValueError: Algorithm of "Ed25519" is not supported`, and ADR-0019
+    # chose Ed25519 per RFC 9864, so delegation does not work at all below
+    # it. Found by the `minimum-versions` CI job -- the old `>=1.0` had
+    # never been installed by anything, which is what that job is for.
+    "joserfc>=1.5,<2",
     # Week 3. SPEC 20.3 allows it; the device-flow refresh token goes to the
     # OS keychain, and on a box without one to a 0600 file with a warning.
     "keyring>=25.7.0",

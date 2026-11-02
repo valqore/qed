@@ -6,6 +6,123 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — two declared dependency floors were false
+
+The first run of the new `minimum-versions` job found both.
+
+**`joserfc>=1.0`** was the first. joserfc 1.0 through
+1.4 raise `ValueError: Algorithm of "Ed25519" is not supported`; ADR-0019
+chose Ed25519 per RFC 9864; so **every delegation token operation failed
+across most of the declared range** — 27 tests, all of
+`tests/delegation/test_tokens.py` plus its dependents. The boundary was
+bisected to **1.5.0**, the first release that knows the algorithm, and the
+floor is now `joserfc>=1.5,<2` with the reason beside it in `pyproject.toml`.
+
+**`python-ulid>=2`** was the second. Below 3.1 every `ULID()` draws fresh
+random bytes, so ids minted in the same millisecond do not sort in creation
+order -- and `new_proposal_id` promises in its own docstring that they do.
+Measured rather than read off a changelog, because the test is probabilistic
+(50 ids that happen to straddle a millisecond boundary sort correctly whatever
+the generator does): the ordering test failed **10 of 10** runs on 3.0.0 and
+passed **10 of 10** on 3.1.0. The floor is now `>=3.1`.
+
+That check mattered. The first bisection looked like a boundary at 3.1.0 from
+single runs, which is the same evidence a flaky test produces, and the floor
+would have been raised on a coin flip rather than a fact.
+
+Nothing had ever installed either old floor. That is the whole point of the
+next entry: a `>=` is a claim, and twelve of them had never been tested.
+
+### Added — a CI job that installs every dependency at its declared floor
+
+`minimum-versions` resolves with `uv pip install --resolution lowest-direct`,
+runs the three commands a user runs (`qed --help`, `qed policy lint`,
+`qed-verify --help`) and then the suite. It prints the versions it resolved,
+because a failure is read by comparing that list against the floors and a
+reader who cannot see it has to reproduce the resolution to understand the
+failure.
+
+`lowest-direct` rather than `lowest`: the latter pins *transitive*
+dependencies to their floors as well, which builds a combination nobody will
+ever install and fails for reasons that say nothing about this project's
+declarations.
+
+**This one job does not treat deprecation warnings as errors, and the reason
+is the method rather than laziness.** Holding direct dependencies at their
+floors while transitive ones resolve freely produces a **mixed-age**
+environment that no real install does: at `fastapi==0.115.0` it pairs
+starlette 0.38.6 with a current `python-multipart` whose legacy import path
+warns, and at starlette 0.41.3 it pairs a TestClient calling
+`anyio.abc.BlockingPortal` with an anyio that has moved it. Both are old
+libraries complaining about new ones, in pairings this project never ships.
+Treating them as errors would mean raising floors to silence warnings no user
+ever sees, which makes the declarations *less* true. Every other warning class
+still fails the job, the `check` matrix still treats all warnings as errors,
+and the defect this job exists to catch was an exception rather than a
+warning.
+
+### Added — `qed policy lint` reports a regex that backtracks exponentially
+
+A repeat whose body also repeats — `(a+)+`, `(\w+\s?)*`, `(?:\d+)+` — can
+split its input between the inner and outer repeat in exponentially many ways,
+and the engine tries all of them before reporting no match. ADR-0017 and
+ADR-0018 already bound the damage at runtime, so such a pattern costs a skipped
+rule and an `AG-PRD-001` hit rather than a hung kernel. The new
+`catastrophic_regex` finding tells the **author** at authoring time instead of
+telling the operator at decision time.
+
+Checked on the **parse tree**, not by matching the pattern text, so `(a+)+` and
+`(?:a{1,}){2,}` are one finding and a `+` inside a character class is none. The
+tree comes from the standard library's own parser, which is a private module:
+if it cannot read a pattern that `regex` compiled, the check returns nothing.
+**Silence there means "not examined", never "safe"**, and a test pins that
+rather than asserting a verdict, so a documented blind spot does not quietly
+become a promise.
+
+**A warning, not an error**, which is ADR-0018's reasoning carried over:
+whether a pattern backtracks catastrophically on *some* input is not a question
+a linter settles, so this one recognises a shape and is wrong in both
+directions. `(a{1,3}){1,3}` is not flagged because both bounds are small, and a
+pattern it misses can still meet the input that defeats it. Refusing the bundle
+would let a heuristic disable a correct BLOCK, and a disabled BLOCK is worse
+than a slow one.
+
+Validated the way it had to be before it could ship: against all **48 regex
+predicates in the shipped baseline packs**, with zero false positives. A
+heuristic that fired on real policy regexes would train authors to ignore it.
+Seven mutations against the new tests, all seven caught — and one of them found
+a test of mine asserting something true on both sides of the change:
+`((a+)+)+` is capped at one finding by the walk's own early return, so it
+proved nothing about the cap. Replaced with `(a+)+x|(b+)+y`, two independent
+sites in separate branches, which actually reaches the second one.
+
+### Added — the npm stub is a file in the repository now
+
+`deploy/npm/package.json` and its README. The published `0.0.0` carried a
+homepage and **no `repository`**, so npmjs.com offered a reader no route to the
+source — the same shape as the blank PyPI pages: a surface this repository
+never reached, so nothing here could see it was thin. The manifest now carries
+`repository` and `bugs`, and the README names what does work (`pip install
+valqore-qed`, the tap, the container, the verifier).
+
+The claim itself needed no correcting. The stub's own description already said
+*"Installs nothing"*, `README.md` says so, and `tests/docs/test_claims.py`
+guards that sentence. What was missing was that the published artifact existed
+nowhere in the repository, so it could not be reviewed or changed except by
+publishing.
+
+`tests/test_version.py` gains the one class in that file asserting a version
+must **not** track `qed/version.py`: npm's `valqore-qed` is a name
+reservation, not a release, and a stub advertising the kernel's version reads
+as a usable JavaScript client that happens to be empty. The class sits beside
+the others so that nobody later "fixes" the inconsistency. Four mutations, four
+caught.
+
+Publishing it needs the account's hardware 2FA and npm's staged-publish flow,
+so the file is where the change is made and the publish stays a separate human
+step.
+
+
 ### Corrected — what PyPI's environment field actually buys
 
 Two claims landed with the approval gate above, both mine and both wrong in
