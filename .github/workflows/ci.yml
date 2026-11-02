@@ -162,14 +162,17 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # v10 is current; `version` pins uv itself to the build this job was
-      # developed and validated against, the same way `audit` pins pip-audit.
-      - uses: astral-sh/setup-uv@v10
-        with:
-          version: "0.10.7"
+      # uv comes from pip rather than `astral-sh/setup-uv`, which is one less
+      # third-party action to track and sidesteps a trap: that action stopped
+      # publishing floating major tags after `v7`, so `@v10` does not resolve
+      # even though `v10.3.3` is the current release, and the job fails in
+      # five seconds at "Set up job" with `Unable to resolve action`. Pinned
+      # exactly, the same way `audit` pins pip-audit.
       - name: Install every direct dependency at its declared floor
         run: |
           set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install uv==0.10.7
           uv venv .venv-min --python 3.12
           uv pip install --python .venv-min/bin/python \
             --resolution lowest-direct \
