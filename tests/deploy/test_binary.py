@@ -32,6 +32,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "deploy" / "qed.spec"
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def spec_text() -> str:
@@ -118,14 +119,7 @@ class TestTheHomebrewFormula:
     def test_it_names_every_asset_the_release_builds(self) -> None:
         """The formula downloads by name. A label added to the release matrix
         and not here is a platform nobody can `brew install`."""
-        import yaml as pyyaml
-
-        workflow = pyyaml.safe_load(
-            (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        )
-        labels = {
-            entry["label"] for entry in workflow["jobs"]["binary"]["strategy"]["matrix"]["include"]
-        }
+        labels = binary_labels()
         text = self.formula()
         for label in labels:
             assert label in text, f"the release builds {label} and the formula ignores it"
@@ -137,6 +131,174 @@ class TestTheHomebrewFormula:
         text = self.formula()
         assert "policy lint" in text
         assert "qed verify" in text
+
+
+class TestTheTapDriftCheck:
+    """`.github/workflows/tap-drift.yml` must notice a tap left behind.
+
+    `release.yml` publishes to PyPI, GHCR, the Helm registry and a GitHub
+    release and does not touch the Homebrew tap. `valqore/homebrew-tap`'s
+    formula is rendered by hand, and a step done by hand is a step that gets
+    skipped: the tap served 1.0.0 while this repository shipped 1.1.0 and then
+    1.1.1, so `brew install valqore/tap/qed` was two releases behind and
+    nothing said so.
+
+    Finding #72 is why this cannot be a unit test. A guard inside a repository
+    cannot see a surface the repository never reaches; the tap is a different
+    repository and `brew` is a different channel. So the workflow reads them
+    live, and these tests only guard the workflow -- the two label lists
+    agreeing, the failure being a failure, and the gotchas staying written
+    down.
+    """
+
+    CHECK: ClassVar[Path] = WORKFLOWS / "tap-drift.yml"
+
+    def workflow(self) -> dict:
+        return cast(dict, yaml.safe_load(self.CHECK.read_text(encoding="utf-8")))
+
+    def run_blocks(self) -> str:
+        """The executable lines of every `run:` body, and nothing else.
+
+        Deliberately not the file's text. An assertion against the text of a
+        workflow is answered by that workflow's own comments -- which is how a
+        guard written an hour ago passed against the exact bug it was for
+        (finding #48, in `runner-labels.yml`).
+
+        `yaml.safe_load` is not enough on its own, which is the part that is
+        easy to miss: it drops *YAML* comments, but a `#` line inside a `run:`
+        block is a *shell* comment and lives on inside the parsed string. Two
+        kinds of comment, one of them invisible to the parser. The first draft
+        of this helper stopped at `safe_load`, and
+        `test_it_reads_the_tap_through_the_api_not_the_raw_cdn` failed on the
+        comment that explains why the check avoids the raw CDN.
+        """
+        steps = self.workflow()["jobs"]["tap"]["steps"]
+        lines = [
+            line
+            for step in steps
+            if "run" in step
+            for line in step["run"].splitlines()
+            if not line.strip().startswith("#")
+        ]
+        return "\n".join(lines)
+
+    def steps(self) -> dict[str, str]:
+        """Each step's executable lines, keyed by the step's name.
+
+        `run_blocks()` concatenates everything, which is fine for "is this
+        idea present anywhere" and useless for "does *this* step fail". Four
+        steps here can each exit 1, so a search of the concatenation passed
+        when the version comparison was softened to a warning and the other
+        three still exited. Mutation 4, caught by running it.
+        """
+        out: dict[str, str] = {}
+        for step in self.workflow()["jobs"]["tap"]["steps"]:
+            if "run" not in step:
+                continue
+            body = "\n".join(
+                line for line in step["run"].splitlines() if not line.strip().startswith("#")
+            )
+            out[str(step.get("name", ""))] = body
+        return out
+
+    def the_step_that(self, *needles: str) -> str:
+        """The one step whose body mentions all of `needles`.
+
+        Found by content rather than by name, so renaming a step does not
+        silently stop testing it.
+        """
+        matches = [body for body in self.steps().values() if all(n in body for n in needles)]
+        assert len(matches) == 1, (
+            f"expected exactly one step mentioning {needles}, found {len(matches)}"
+        )
+        return matches[0]
+
+    def test_the_check_exists(self) -> None:
+        assert self.CHECK.exists()
+
+    def test_it_requires_exactly_the_platforms_the_release_builds(self) -> None:
+        """Both directions, same as the runner-label canary.
+
+        A platform added to `release.yml` and not here is a `brew install` that
+        404s for somebody with nothing to warn them -- and a platform required
+        here that the release stopped building makes this check fail every
+        Monday for a question nobody is asking.
+        """
+        required = set(re.findall(r"platforms=\"([^\"]+)\"", self.run_blocks()))
+        assert len(required) == 1, "tap-drift.yml should set `platforms=` exactly once"
+        probed = set(required.pop().split())
+        built = binary_labels()
+
+        missing = built - probed
+        assert not missing, (
+            f"release.yml builds {sorted(missing)} and tap-drift.yml does not require it. "
+            "A platform the formula skips is one nobody can brew install."
+        )
+        stale = probed - built
+        assert not stale, (
+            f"tap-drift.yml requires {sorted(stale)}, which release.yml no longer builds. "
+            "This check would fail every Monday for a platform that does not exist."
+        )
+
+    def test_it_runs_on_a_schedule(self) -> None:
+        """The drift that matters is the tap trailing days later, so a Monday
+        is what finds it. It cannot live in `release.yml`: the formula's
+        checksums come from the release's own `.sha256` files, so the render
+        can only happen after the release exists and a release-time check
+        would fail every time, correctly and uselessly."""
+        canary = self.workflow()
+        # PyYAML parses the unquoted key `on` as the boolean True.
+        triggers = canary.get("on") or canary.get(True)
+        assert "schedule" in triggers, "tap-drift.yml has no schedule"
+        assert triggers["schedule"][0]["cron"]
+
+    def test_the_version_comparison_fails_rather_than_warns(self) -> None:
+        """A notice nobody reads is not a guard.
+
+        Asserted on the comparing step alone. `exit 1` appears in four steps
+        here, so searching the whole workflow passed with this one softened to
+        `::warning::` -- which is the exact bug, since a warning on a green run
+        is how the tap got two releases behind in the first place.
+        """
+        comparing = self.the_step_that("$RELEASE", "$TAP")
+        assert "exit 1" in comparing, (
+            "the step comparing the tap against the release does not exit 1"
+        )
+
+    def test_it_says_how_to_fix_it(self) -> None:
+        """The fix is a hand render in another repository, which nobody will
+        remember. The error message carries the command."""
+        blocks = self.run_blocks()
+        assert "render.sh" in blocks
+        assert "homebrew-tap" in blocks
+
+    def test_it_checks_the_checksums_and_not_only_the_version(self) -> None:
+        """A matching version with a stale hash is worse than a stale version:
+        `brew install` fails on a checksum mismatch while the formula looks
+        current. A version comparison alone cannot see that.
+
+        Its own step, and that step has to fail too.
+        """
+        checksums = self.the_step_that(".sha256", "formula.rb")
+        assert "gh release download " in checksums
+        assert "exit 1" in checksums, "the checksum step reports and does not fail"
+
+    def test_it_does_not_ask_for_the_latest_release(self) -> None:
+        """`/releases/latest` excludes prereleases, and every QED release so
+        far is marked prerelease -- it returns the wrong answer or none. The
+        check lists releases and filters, and this keeps somebody from
+        "simplifying" it back into the trap."""
+        blocks = self.run_blocks()
+        assert "releases/latest" not in blocks
+        assert "gh release list" in blocks
+
+    def test_it_reads_the_tap_through_the_api_not_the_raw_cdn(self) -> None:
+        """`raw.githubusercontent.com` caches for minutes and served a stale
+        version within seconds of the tap being pushed to 1.1.1, which would
+        make this check fail on a tap that is in fact current."""
+        blocks = self.run_blocks()
+        assert "raw.githubusercontent" not in blocks
+        assert "gh api repos/valqore/homebrew-tap" in blocks
 
 
 def working_bash() -> str | None:
@@ -457,7 +619,17 @@ def binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
 # The runners the release depends on
 # --------------------------------------------------------------------------
 
-WORKFLOWS = ROOT / ".github" / "workflows"
+
+def binary_labels() -> set[str]:
+    """The platform labels `release.yml`'s binary matrix builds.
+
+    Every asset in a release is named `qed-<version>-<label>`, so this set is
+    what the formula must cover and what `tap-drift.yml` must require. Two
+    hand-written copies of it would be two chances to be wrong, which is the
+    argument this whole module's docstring makes about `qed.spec`.
+    """
+    workflow = yaml.safe_load((WORKFLOWS / "release.yml").read_text(encoding="utf-8"))
+    return {entry["label"] for entry in workflow["jobs"]["binary"]["strategy"]["matrix"]["include"]}
 
 
 def runner_labels(path: Path) -> set[str]:

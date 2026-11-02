@@ -1,0 +1,159 @@
+# Does the Homebrew tap still serve the release this repository last shipped?
+#
+# `release.yml` publishes to PyPI, GHCR, the Helm registry and a GitHub
+# release. It does **not** touch the tap. `valqore/homebrew-tap` holds a
+# `Formula/qed.rb` rendered by hand with `deploy/homebrew/render.sh <version>`,
+# and a step done by hand is a step that gets skipped: the tap served 1.0.0
+# while the kernel went to 1.1.0 and then 1.1.1, so `brew install
+# valqore/tap/qed` was two releases behind for a fortnight and nothing said so.
+#
+# This is the same shape as the runner-label canary next door, and the same
+# shape as finding #72: a guard inside a repository cannot see a surface the
+# repository never reaches. The tap is a different repository and `brew` is a
+# different channel, so the check has to read them, not a file here.
+#
+# ## Why it is scheduled and not part of `release.yml`
+#
+# The formula's three checksums come from the release's own `.sha256` files,
+# so the render can only happen *after* the release exists. A check inside
+# `release.yml` would therefore fail on every release, correctly and uselessly.
+# The drift that matters is the tap still trailing days later, which is what a
+# Monday finds.
+#
+# ## What it compares the tap against
+#
+# The newest release that carries a **complete** set of binaries -- not the
+# newest release, and not `qed/version.py`.
+#
+# `qed/version.py` is the wrong answer because `main` legitimately runs ahead
+# of every published version between the bump commit and the tag. Which
+# version a channel serves is a question for the channel.
+#
+# "Newest release" is the wrong answer because v1.1.0 is a release with no
+# `macos-arm64` binary: its arm64 job was cancelled and the release published
+# anyway. Pointing the tap at it would give every Apple Silicon user a 404,
+# which is why 1.1.0 was skipped by hand when the tap was brought to 1.1.1.
+# Encoding "complete" here means the next person does not have to make that
+# judgement call from memory.
+#
+# Note for anyone reaching for `/releases/latest`: it excludes prereleases,
+# and every QED release so far is marked prerelease. It returns the wrong
+# answer or none. Listing and filtering is not an accident here.
+name: tap-drift
+
+on:
+  schedule:
+    # Monday 06:30 UTC, half an hour after `runner-labels`, so two red ticks
+    # on the same morning are still two separate stories.
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [ci/tap-drift]   # TEMP: removed before merge
+
+permissions:
+  contents: read
+
+jobs:
+  tap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: The newest release with a complete set of binaries
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Kept in step with `release.yml`'s binary matrix by
+          # tests/deploy/test_binary.py, which asserts these are the same set.
+          platforms="macos-arm64 macos-x86_64 linux-x86_64"
+
+          found=""
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+                         --json tagName --jq '.[].tagName'); do
+            version="${tag#v}"
+            assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+                        --json assets --jq '.assets[].name')"
+            complete=yes
+            for p in $platforms; do
+              for suffix in "" ".sha256"; do
+                printf '%s\n' "$assets" | grep -qx "qed-${version}-${p}${suffix}" || complete=no
+              done
+            done
+            if [ "$complete" = yes ]; then
+              found="$version"
+              echo "complete: $tag"
+              break
+            fi
+            echo "incomplete, skipping: $tag"
+          done
+
+          if [ -z "$found" ]; then
+            echo "::error::No release in the last 30 carries all of: $platforms"
+            echo "::error::Either the matrix changed and this list did not, or"
+            echo "::error::every recent release is missing a binary."
+            exit 1
+          fi
+          echo "version=$found" >> "$GITHUB_OUTPUT"
+          echo "::notice::Release channel serves $found"
+
+      - name: What the tap serves
+        id: tap
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Read through the API, not raw.githubusercontent: that CDN caches
+          # for minutes and has already reported a stale version once today.
+          gh api repos/valqore/homebrew-tap/contents/Formula/qed.rb \
+            --jq '.content' | base64 -d > formula.rb
+
+          version="$(grep -oE '^  version "[^"]+"' formula.rb | grep -oE '[0-9][^"]*')"
+          if [ -z "$version" ]; then
+            echo "::error::Could not read a version out of the tap's Formula/qed.rb."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "::notice::Tap serves $version"
+
+      - name: They have to agree
+        env:
+          RELEASE: ${{ steps.release.outputs.version }}
+          TAP: ${{ steps.tap.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE" != "$TAP" ]; then
+            echo "::error::The tap serves $TAP and the newest complete release is $RELEASE."
+            echo "::error::brew install valqore/tap/qed is behind. release.yml does not"
+            echo "::error::render the tap; do it by hand and push to valqore/homebrew-tap:"
+            echo "::error::  ./deploy/homebrew/render.sh $RELEASE > Formula/qed.rb"
+            exit 1
+          fi
+          echo "Both on $RELEASE."
+
+      - name: And the checksums have to be that release's
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A matching version with a stale hash is worse than a stale version:
+          # `brew install` fails on a checksum mismatch and the formula looks
+          # current. This is the half a version comparison cannot see.
+          gh release download "v$RELEASE" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'qed-*.sha256' --dir sums
+
+          bad=0
+          for file in sums/*.sha256; do
+            expected="$(cut -d' ' -f1 < "$file")"
+            asset="$(basename "$file" .sha256)"
+            if ! grep -q "$expected" formula.rb; then
+              echo "::error::The tap's formula does not carry the checksum for $asset."
+              bad=1
+            fi
+          done
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Re-render it: ./deploy/homebrew/render.sh $RELEASE"
+            exit 1
+          fi
+          echo "All three checksums match v$RELEASE."
