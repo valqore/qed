@@ -3,11 +3,16 @@
 # ## This is a template, and it is not published
 #
 # The formula lives in a **separate tap repository**: `brew tap valqore/tap`
-# resolves to `github.com/valqore/homebrew-tap`, which was reserved on
-# 2026-10-17 and is **private**, because every release URL in the rendered
-# formula points at an asset of a repository that is still private too. A
-# public tap whose only formula 404s is worse than no tap. Both go public in
-# the same step.
+# resolves to `github.com/valqore/homebrew-tap`. Both it and this repository
+# are **public** -- they went public together, for the reason this paragraph
+# used to give for them both being private: every release URL in a rendered
+# formula points at an asset here, and a public tap whose only formula 404s is
+# worse than no tap.
+#
+# Nothing in `release.yml` writes to the tap. The rendered formula is pushed by
+# hand, which is how the tap came to serve 1.0.0 while this repository shipped
+# 1.1.0 and 1.1.1. `.github/workflows/tap-drift.yml` is the weekly check that
+# says so out loud; it does not do the render.
 #
 # This file stays here, placeholders and all, so that the binary and the
 # formula that installs it change together, and so that there is exactly one
