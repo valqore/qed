@@ -116,6 +116,107 @@ jobs:
           fi
           echo "ok: every commit in this pull request is signed off"
 
+  # Does the project work at the versions it says it works at?
+  #
+  # Every `>=` in `pyproject.toml` is a claim, and until this job existed not
+  # one of them had ever been installed. `uv pip install --resolution
+  # lowest-direct` takes each **direct** dependency at its floor and resolves
+  # everything else normally.
+  #
+  # It found two on its first run. `joserfc>=1.0` was a lie: 1.0 through 1.4
+  # raise `ValueError: Algorithm of "Ed25519" is not supported`, ADR-0019
+  # chose Ed25519 per RFC 9864, and so delegation did not work anywhere in
+  # most of the declared range -- 27 tests failed. And `python-ulid>=2` was a
+  # lie: below 3.1 ids minted in the same millisecond do not sort in creation
+  # order, which `new_proposal_id` promises they do. Both floors were raised
+  # to the first version that holds, each measured rather than read off a
+  # changelog.
+  #
+  # `lowest-direct` and not `lowest`: the latter pins transitive dependencies
+  # to their floors too, which tests a combination nobody will ever install
+  # and fails for reasons that say nothing about this project's declarations.
+  #
+  # ## Why this one job does not treat deprecation warnings as errors
+  #
+  # `pyproject.toml` sets `filterwarnings = error` and every other job keeps
+  # it. This job cannot, and the reason is the method rather than laziness.
+  # Holding direct dependencies at their floors while transitive ones resolve
+  # freely builds a **mixed-age** environment that no real install produces:
+  # at `fastapi==0.115.0` it pairs starlette 0.38.6 with a current
+  # `python-multipart`, whose legacy import path warns, and at starlette
+  # 0.41.3 it pairs a TestClient that calls `anyio.abc.BlockingPortal` with an
+  # anyio that has moved it. Both are old libraries complaining about new
+  # ones, in combinations this project never ships, and neither is a defect
+  # here.
+  #
+  # Treating them as errors would mean raising floors to silence warnings that
+  # no user ever sees, which makes the declarations *less* true, not more. So
+  # deprecation warnings are downgraded **in this job only** -- every other
+  # warning class still fails, and the real failure mode this job exists to
+  # catch is an exception, not a warning. If a future deprecation does matter,
+  # it is the `check` matrix that will say so.
+  minimum-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # uv comes from pip rather than `astral-sh/setup-uv`, which is one less
+      # third-party action to track and sidesteps a trap: that action stopped
+      # publishing floating major tags after `v7`, so `@v10` does not resolve
+      # even though `v10.3.3` is the current release, and the job fails in
+      # five seconds at "Set up job" with `Unable to resolve action`. Pinned
+      # exactly, the same way `audit` pins pip-audit.
+      - name: Install every direct dependency at its declared floor
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install uv==0.10.7
+          uv venv .venv-min --python 3.12
+          uv pip install --python .venv-min/bin/python \
+            --resolution lowest-direct \
+            -e ".[dev]" -e packages/qed-verify
+      - name: Show what that resolved to
+        run: |
+          set -euo pipefail
+          # Printed because the whole point of this job is which versions it
+          # chose. A failure is read by comparing this list against the floors
+          # in pyproject.toml, and a reader who cannot see the list has to
+          # reproduce the resolution to understand the failure.
+          .venv-min/bin/python - <<'PY'
+          import tomllib
+          from importlib.metadata import version
+          from packaging.requirements import Requirement
+
+          declared = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          names = [
+              Requirement(spec).name
+              for spec in declared["dependencies"]
+              + declared["optional-dependencies"]["dev"]
+          ]
+          for name in sorted(set(names)):
+              try:
+                  print(f"{name:24} {version(name)}")
+              except Exception as exc:  # noqa: BLE001
+                  print(f"{name:24} NOT INSTALLED ({exc})")
+          PY
+      - name: The commands a user runs, at the floors
+        run: |
+          set -euo pipefail
+          # Before the suite, because these are what break first and the
+          # failure is legible: a bundled data file missing from a wheel, or
+          # an algorithm a JOSE library does not know.
+          .venv-min/bin/qed --help > /dev/null
+          .venv-min/bin/qed policy lint
+          .venv-min/bin/qed-verify --help > /dev/null
+      - name: The suite, with deprecations downgraded (see the header)
+        run: |
+          set -euo pipefail
+          .venv-min/bin/python -m pytest -q \
+            -W "ignore::DeprecationWarning" \
+            -W "ignore::PendingDeprecationWarning"
+
   audit:
     runs-on: ubuntu-latest
     steps:

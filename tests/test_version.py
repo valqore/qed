@@ -18,9 +18,11 @@ workflow refuses a tag that disagrees with any of them.
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
+from typing import Any, ClassVar
 
 import pytest
 import yaml
@@ -218,3 +220,71 @@ class TestTheVersionItself:
 
     def test_it_is_a_valid_oci_tag(self) -> None:
         assert re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}", VERSION)
+
+
+class TestTheNpmStubIsNotAVersionedThing:
+    """The one published artifact that must **not** track `qed/version.py`.
+
+    Every other test in this file exists because a version literal lives
+    somewhere that cannot import `VERSION`. This class is the opposite case
+    and belongs beside them so nobody later "fixes" the inconsistency: npm's
+    `valqore-qed` is a **name reservation**, not a release, and a stub
+    advertising the real version number would read as a usable JavaScript
+    client that happens to be empty. QED is a Python program and a JS client
+    has never existed.
+
+    `deploy/npm/` is the source of what gets published, for the same reason
+    `.github/environments/pypi.json` is a file: a published artifact nobody
+    can review is a claim nobody can check. Publishing it needs the account's
+    hardware 2FA and npm's staged-publish flow, so the file is where the
+    change is made and the publish is a separate, human step.
+    """
+
+    PACKAGE: ClassVar[Path] = ROOT / "deploy" / "npm" / "package.json"
+
+    def manifest(self) -> dict[str, Any]:
+        loaded = json.loads(self.PACKAGE.read_text(encoding="utf-8"))
+        assert isinstance(loaded, dict)
+        return loaded
+
+    def test_the_stub_stays_at_0_0_0(self) -> None:
+        assert self.manifest()["version"] == "0.0.0", (
+            "the npm stub is a name reservation; a real version number there "
+            "advertises a JavaScript client that does not exist"
+        )
+
+    def test_it_does_not_accidentally_track_the_kernel(self) -> None:
+        assert self.manifest()["version"] != VERSION
+
+    def test_the_description_says_it_installs_nothing(self) -> None:
+        """The sentence a reader sees on npmjs.com before they install.
+
+        `README.md` makes the same promise and `tests/docs/test_claims.py`
+        guards it there; this guards the half that is published rather than
+        written.
+        """
+        assert "installs nothing" in self.manifest()["description"].lower()
+
+    def test_it_points_back_at_the_repository(self) -> None:
+        """What was missing, and the reason this file exists at all.
+
+        The published 0.0.0 carries a homepage and **no** `repository`, so the
+        npm page offers a reader no way to reach the source. Same shape as the
+        blank PyPI pages: a surface the repository never reached, so nothing
+        here could see it was thin.
+        """
+        manifest = self.manifest()
+        assert manifest["repository"]["url"].endswith("github.com/valqore/qed.git")
+        assert "github.com/valqore/qed" in manifest["bugs"]["url"]
+
+    def test_it_declares_no_entry_point(self) -> None:
+        """A stub with a `bin` or a `main` is a stub somebody can run."""
+        manifest = self.manifest()
+        assert "bin" not in manifest
+        assert "main" not in manifest
+
+    def test_the_readme_sends_the_reader_somewhere_real(self) -> None:
+        readme = (ROOT / "deploy" / "npm" / "README.md").read_text(encoding="utf-8")
+        assert "installs nothing" in readme.lower()
+        assert "pip install valqore-qed" in readme, "the stub should name the thing that does work"
+        assert "github.com/valqore/qed" in readme

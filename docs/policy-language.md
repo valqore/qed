@@ -165,9 +165,51 @@ switched off and who said so.
 `invalid_rule`, `invalid_regex`, `unknown_field_path`, `invalid_predicate`,
 `allow_rule`, `override_target_missing`, `override_hardening`,
 `invalid_override`, `disabled_without_reason` as **errors**;
-`approval_without_approvers` and `unknown_framework` as **warnings**.
+`approval_without_approvers`, `unknown_framework`, `suspicious_glob` and
+`catastrophic_regex` as **warnings**.
 
 `qed check` refuses to decide anything against a bundle with errors.
+
+### `catastrophic_regex`
+
+A repeat whose body also repeats — `(a+)+`, `(\w+\s?)*`, `(?:\d+)+` — can
+split its input between the inner and the outer repeat in exponentially many
+ways. On a long near-match the engine tries all of them, so a pattern like
+this is the difference between microseconds and minutes.
+
+It will not hang the kernel. A regex that overruns its budget is retried once
+and then abandoned ([ADR-0017](adr/0017-a-regex-timeout-is-retried-before-it-is-believed.md)),
+and every regex in one decision draws on a single 5-second allowance
+([ADR-0018](adr/0018-one-allowance-of-regex-per-decision.md)), so the cost is
+a **skipped rule** recorded as `AG-PRD-001` rather than a stalled request. That
+is a verdict reached without one of your rules, which you would rather know
+about while writing it.
+
+Fix it by bounding the outer repeat, or by rewriting so the two parts cannot
+both consume the same input:
+
+```yaml
+# flagged: the group repeats, and so does what is inside it
+when: { field: action.params_redacted.body, regex: "(\\w+\\s?)*$" }
+
+# fine: one repeat doing the same job
+when: { field: action.params_redacted.body, regex: "[\\w\\s]*$" }
+```
+
+**A warning, and it cannot be anything else.** Whether a pattern backtracks
+catastrophically on *some* input is not a question a linter settles; this one
+recognises a shape, so it is wrong in both directions. `(a{1,3}){1,3}` is not
+reported because both bounds are small. More importantly, **a pattern it does
+not report can still meet the input that defeats it** — a clean lint is not a
+promise, and the guarantee comes from the allowance above, not from here. If it
+were an error, a heuristic could refuse a correct `BLOCK` rule, and a disabled
+`BLOCK` is worse than a slow one.
+
+The shape is read from the pattern's parse tree rather than its text, so
+`(a+)+` and `(?:a{1,}){2,}` are one finding and a `+` inside a character class
+is none. Where that parse fails — a construct the `regex` module accepts and
+the standard library does not — nothing is reported, which means *not
+examined* rather than *safe*.
 
 ## The bundle hash
 

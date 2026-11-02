@@ -22,6 +22,29 @@ import regex
 from qed.core.policy.fields import is_known_path
 from qed.core.regex_budget import BUDGET, PoolSpent, Remaining, under_budget
 
+#: The standard library's regex parser, used only to read the *shape* of a
+#: pattern for `_lint_regex_shape`. Private on purpose by CPython, so every
+#: use of it is wrapped and a failure means "not examined" rather than "safe".
+#: Imported here rather than inside the function so that an interpreter where
+#: it has moved costs one import error at start-up instead of a silent
+#: never-fires lint check.
+try:
+    import re._parser as _sre  # type: ignore[import-not-found,unused-ignore]
+except ImportError:  # pragma: no cover - depends on the interpreter
+    _sre = None
+
+_REPEATS: Final = frozenset(
+    getattr(_sre, name)
+    for name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT")
+    if _sre is not None and hasattr(_sre, name)
+)
+_ASSERTIONS: Final = frozenset(
+    getattr(_sre, name)
+    for name in ("ASSERT", "ASSERT_NOT")
+    if _sre is not None and hasattr(_sre, name)
+)
+_ATOMIC_GROUP: Final = getattr(_sre, "ATOMIC_GROUP", None)
+
 #: How deep a `when` tree may nest. One constant, because the evaluator
 #: refuses past it, the linter refuses past it, and `predicate_fields`
 #: stops walking there -- three places that must agree or a rule could be
@@ -331,6 +354,8 @@ def validate_predicate(node: object, path: str = "when", depth: int = 0) -> list
                 regex.compile(operand)
             except regex.error as exc:
                 errors.append(("invalid_regex", f"{path}: invalid regex {operand!r}: {exc}"))
+            else:
+                errors += _lint_regex_shape(operand, path)
     if op == "glob":
         errors += _lint_glob(node[op], path)
     if op in {"in", "not_in"} and not isinstance(node[op], list):
@@ -338,6 +363,103 @@ def validate_predicate(node: object, path: str = "when", depth: int = 0) -> list
     if op == "exists" and not isinstance(node[op], bool):
         errors.append(("invalid_predicate", f"{path}: 'exists' operand must be true or false"))
     return errors
+
+
+def _quantified_children(op: object, av: object) -> list[object]:
+    """The sub-patterns of one parse-tree node, whatever kind of node it is."""
+    if op in _REPEATS:
+        return [av[2]]  # type: ignore[index]
+    if op is _sre.SUBPATTERN:
+        return [av[3]]  # type: ignore[index]
+    if op is _sre.BRANCH:
+        return list(av[1])  # type: ignore[index]
+    if op in _ASSERTIONS:
+        return [av[1]]  # type: ignore[index]
+    if op is _ATOMIC_GROUP and _ATOMIC_GROUP is not None:
+        return [av]
+    return []
+
+
+def _repeats_inside(node: object) -> bool:
+    if not isinstance(node, _sre.SubPattern):
+        return False
+    for op, av in node.data:
+        if op in _REPEATS:
+            return True
+        if any(_repeats_inside(child) for child in _quantified_children(op, av)):
+            return True
+    return False
+
+
+def _lint_regex_shape(pattern: str, path: str) -> list[tuple[str, str]]:
+    """A repeat whose body also repeats, which is where backtracking explodes.
+
+    ``(a+)+`` against ``aaaaaaaaaaaaaaaaaaaaaaaaaaaaX`` can split the input
+    between the inner and the outer repeat in exponentially many ways, and the
+    engine tries all of them before reporting no match. ADR-0017 and ADR-0018
+    bound the damage -- a timeout is retried, then the decision's whole regex
+    allowance is capped -- so a pattern like this costs a skipped rule and an
+    ``AG-PRD-001`` hit rather than a hung kernel. This finding is about telling
+    the author at authoring time instead.
+
+    **It is a warning, and ADR-0018 says why it has to be.** Whether a pattern
+    backtracks catastrophically on *some* input is not a question a linter
+    settles; this one recognises a shape. So it is wrong in both directions.
+    ``(a{1,3}){1,3}`` is flagged by nothing here because both bounds are small,
+    and a pattern this does not flag can still meet the input that defeats it.
+    A clean lint is not a promise, which is why it cannot be an error: an
+    author whose correct rule is refused by a heuristic would delete the rule,
+    and a disabled BLOCK is worse than a slow one.
+
+    Checked on the **parse tree** rather than by matching the pattern text, so
+    that ``(a+)+`` and ``(?:a{1,}){2,}`` are one finding and a ``+`` inside a
+    character class is not one at all. The tree comes from the standard
+    library's own parser, which is a private module: if it cannot read a
+    pattern that ``regex`` compiled -- a module-specific construct, a recursion
+    limit -- the check returns nothing rather than guessing. Silence here means
+    "not examined", never "safe".
+    """
+    if _sre is None:  # pragma: no cover - stdlib internals moved
+        return []
+    try:
+        parsed = _sre.parse(pattern)
+    except Exception:  # any parse failure means "not examined", never "safe"
+        return []
+
+    findings: list[tuple[str, str]] = []
+
+    def walk(node: object) -> None:
+        if not isinstance(node, _sre.SubPattern):
+            return
+        for op, av in node.data:
+            if op in _REPEATS and _unbounded(av) and _repeats_inside(av[2]):
+                findings.append(
+                    (
+                        "catastrophic_regex",
+                        f"{path}: {pattern!r} applies an unbounded repeat to a "
+                        "group that already repeats, which backtracks "
+                        "exponentially on a near-match; bound the outer repeat "
+                        "or rewrite it so the parts cannot both consume the "
+                        "same input",
+                    )
+                )
+                return
+            for child in _quantified_children(op, av):
+                walk(child)
+
+    walk(parsed)
+    return findings[:1]
+
+
+def _unbounded(av: object) -> bool:
+    """A repeat with no upper bound, or one high enough not to matter.
+
+    ``100`` is a judgement and not a measurement: ``(a+){1,100}`` is already
+    far past anything a policy author writes on purpose, and small bounded
+    nesting like ``(a{1,3}){1,3}`` is both common and harmless.
+    """
+    maximum = av[1]  # type: ignore[index]
+    return bool(maximum >= _sre.MAXREPEAT or maximum > 100)
 
 
 def _lint_glob(operand: object, path: str) -> list[tuple[str, str]]:

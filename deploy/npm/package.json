@@ -1,0 +1,17 @@
+{
+  "name": "valqore-qed",
+  "version": "0.0.0",
+  "description": "Name reservation for Valqore QED. Installs nothing.",
+  "keywords": ["ai", "agents", "policy", "governance", "audit", "evidence"],
+  "license": "Apache-2.0",
+  "homepage": "https://valqore.io/qed",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/valqore/qed.git"
+  },
+  "bugs": {
+    "url": "https://github.com/valqore/qed/issues"
+  },
+  "files": ["README.md"],
+  "private": false
+}

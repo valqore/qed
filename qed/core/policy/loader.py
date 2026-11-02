@@ -44,7 +44,11 @@ _SOFTENING_ORDER = {Decision.BLOCK: 2, Decision.REQUIRE_APPROVAL: 1, Decision.AL
 #: evaluates; it just probably does not mean what its author thinks. An error
 #: here would refuse the whole bundle, and a character class is a legal glob
 #: feature -- rarely the intended one, but not something to forbid.
-_PREDICATE_WARNINGS = frozenset({"suspicious_glob"})
+#: Predicate findings that are warnings rather than errors. Both are
+#: heuristics about a pattern's *shape*: they are wrong in both directions,
+#: so refusing to load the rule would mean a heuristic can disable a
+#: correct BLOCK, and a disabled BLOCK is worse than a slow one.
+_PREDICATE_WARNINGS = frozenset({"suspicious_glob", "catastrophic_regex"})
 
 
 class LoadResult(Frozen):

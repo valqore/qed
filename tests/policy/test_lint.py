@@ -7,8 +7,9 @@ approve it.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import yaml
@@ -338,6 +339,203 @@ class TestASuspiciousGlob:
         assert [f.code for f in result.findings] == ["suspicious_glob"]
         assert [f.severity for f in result.findings] == ["warning"]
         assert len(result.bundle.rules) == 1
+
+
+class TestACatastrophicRegexShape:
+    """A repeat whose body also repeats is where backtracking explodes.
+
+    ``(a+)+`` against a long near-match can split the input between the inner
+    and outer repeat in exponentially many ways. ADR-0017 and ADR-0018 bound
+    the damage at runtime -- retried, then capped at the decision's whole regex
+    allowance -- so this costs a skipped rule rather than a hung kernel. The
+    lint finding exists to tell the author instead of the operator.
+
+    Every case below is parameterised on the *shape*, not the text, because
+    the check reads the parse tree: ``(a+)+`` and ``(?:a{1,}){2,}`` have to be
+    one finding and a ``+`` inside a character class has to be none.
+    """
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            r"(a+)+$",
+            r"(a*)*b",
+            r"(\w+\s?)*$",
+            r"(?:\d+)+x",
+            r"([a-z]+)*!",
+            r"(a{1,}){2,}",
+            r"(x+x+)+y",
+            r"((a+))+z",
+        ],
+        ids=lambda p: p,
+    )
+    def test_a_nested_unbounded_repeat_is_reported(self, pattern: str) -> None:
+        findings = validate_predicate({"field": "action.params_redacted.body", "regex": pattern})
+        assert [code for code, _ in findings] == ["catastrophic_regex"]
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            r"^arn:aws:iam::\d{12}:role/.+$",
+            r"(?:prod|staging)-[a-z0-9-]+",
+            r"\bDROP\s+TABLE\b",
+            r"[+*]+",
+            r"^(a|b|c)+$",
+            r"(ab)+",
+            r"a+b+c+",
+            r"(?:x+)?y",
+            r"(a{1,3}){1,3}",
+        ],
+        ids=lambda p: p,
+    )
+    def test_an_ordinary_pattern_is_quiet(self, pattern: str) -> None:
+        """The false-positive half, and the half that decides whether this can
+        ship: a heuristic that fires on real policy regexes would train authors
+        to ignore it."""
+        assert validate_predicate({"field": "action.params_redacted.body", "regex": pattern}) == []
+
+    def test_a_small_bounded_nesting_is_allowed(self) -> None:
+        """``(a{1,3}){1,3}`` is nine repetitions, not an explosion, and the
+        bound is a judgement written down in `_unbounded` rather than a
+        measurement."""
+        assert (
+            validate_predicate({"field": "action.params_redacted.body", "regex": r"(a{1,3}){1,3}"})
+            == []
+        )
+
+    def test_the_message_says_what_to_do(self) -> None:
+        _, message = validate_predicate(
+            {"field": "action.params_redacted.body", "regex": r"(a+)+$"}
+        )[0]
+        assert "bound the outer repeat" in message
+        assert "(a+)+$" in message, "the finding does not quote the pattern"
+
+    def test_one_finding_per_predicate_not_one_per_site(self) -> None:
+        """One mistake, one finding, so a bundle report stays readable.
+
+        The pattern is two *independent* nested repeats in separate branches,
+        chosen on purpose. ``((a+)+)+`` would pass this test with or without
+        the cap, because the walk stops at the first hit inside one branch --
+        it asserts something true on both sides of the change and so proves
+        nothing. An alternation reaches the second site, which is what makes
+        this discriminating.
+        """
+        findings = validate_predicate(
+            {"field": "action.params_redacted.body", "regex": r"(a+)+x|(b+)+y"}
+        )
+        assert len(findings) == 1, (
+            "two nested-repeat sites produced two findings; one predicate is one mistake to fix"
+        )
+        assert findings[0][0] == "catastrophic_regex"
+
+    def test_nesting_inside_nesting_is_also_one_finding(self) -> None:
+        findings = validate_predicate(
+            {"field": "action.params_redacted.body", "regex": r"((a+)+)+$"}
+        )
+        assert len(findings) == 1
+
+    def test_an_invalid_regex_reports_only_that(self) -> None:
+        """The shape check runs on the `else` of the compile, so a pattern that
+        does not compile is not also reported for its shape -- one broken thing
+        should produce one finding."""
+        findings = validate_predicate({"field": "action.params_redacted.body", "regex": r"(a+)+["})
+        assert [code for code, _ in findings] == ["invalid_regex"]
+
+    def test_it_is_a_warning_and_not_an_error(self, tmp_path: Path) -> None:
+        """ADR-0018's reasoning, as a test. Whether a pattern backtracks
+        catastrophically on *some* input is not a question a linter settles, so
+        this one recognises a shape and is wrong in both directions. Refusing
+        the bundle would let a heuristic disable a correct BLOCK, and a
+        disabled BLOCK is worse than a slow one."""
+        pack = tmp_path / "p.yaml"
+        rule = dict(GOOD)
+        rule["when"] = {"field": "action.params_redacted.body", "regex": r"(a+)+$"}
+        pack.write_text(yaml.safe_dump([rule]), encoding="utf-8")
+        result = load_bundle([pack])
+        assert [f.code for f in result.findings] == ["catastrophic_regex"]
+        assert [f.severity for f in result.findings] == ["warning"]
+        assert len(result.bundle.rules) == 1, "the rule was refused, not warned about"
+
+    def test_the_runtime_bound_is_what_actually_protects_the_kernel(self) -> None:
+        """The thing this finding is *not*. A pattern it does not flag can
+        still meet the input that defeats it, so the guarantee has to come from
+        ADR-0018's allowance rather than from a clean lint. Asserted here so
+        that deleting the allowance does not leave the lint looking sufficient.
+        """
+        from qed.core.regex_budget import BUDGET, POOL
+
+        assert POOL > BUDGET > 0
+
+    def test_a_pattern_the_stdlib_cannot_parse_is_skipped_not_guessed(self) -> None:
+        """`regex` accepts constructs `re` does not, such as its `(?V1)` flag.
+
+        The check must not raise on those and must not invent a finding. What
+        it returns is deliberately not asserted beyond that: silence here means
+        "not examined", never "safe", and pinning the answer would turn a
+        documented blind spot into a promise.
+        """
+        findings = validate_predicate(
+            {"field": "action.params_redacted.body", "regex": r"(?V1)(?:a+)+"}
+        )
+        assert isinstance(findings, list)
+        assert all(code != "invalid_regex" for code, _ in findings), (
+            "regex compiled it, so it must not be reported as invalid"
+        )
+
+
+class TestTheDocumentationMatchesTheLinter:
+    """`docs/policy-language.md` lists the codes and shows a worked fix.
+
+    Both are hand-written next to code that can change without them, which is
+    the shape that keeps producing stale claims here. These tie the page to
+    the linter: a code that becomes a warning without the page saying so, and
+    a documented before/after that stops being true, both fail here.
+
+    The missing `suspicious_glob` is why this exists -- the page listed the
+    warnings and had never mentioned it.
+    """
+
+    PAGE: ClassVar[Path] = Path(__file__).resolve().parents[2] / "docs" / "policy-language.md"
+
+    def page(self) -> str:
+        return self.PAGE.read_text(encoding="utf-8")
+
+    def test_every_predicate_warning_is_documented_as_one(self) -> None:
+        from qed.core.policy.loader import _PREDICATE_WARNINGS
+
+        page = self.page()
+        warnings_section = page[page.index("as **errors**") :]
+        undocumented = [
+            code for code in sorted(_PREDICATE_WARNINGS) if f"`{code}`" not in warnings_section
+        ]
+        assert not undocumented, (
+            f"{undocumented} are warnings in the loader and are not listed as warnings on the page"
+        )
+
+    def _documented_examples(self) -> list[str]:
+        """The regex operands from the page's fix example, in order."""
+        page = self.page()
+        section = page[page.index("### `catastrophic_regex`") :]
+        return re.findall(r'regex:\s*"(.*?)"\s*\}', section)
+
+    def test_the_example_it_calls_flagged_is_flagged(self) -> None:
+        examples = self._documented_examples()
+        assert len(examples) == 2, f"the page's fix example no longer has two regexes: {examples}"
+        bad = examples[0].replace("\\\\", "\\")
+        findings = validate_predicate({"field": "action.params_redacted.body", "regex": bad})
+        assert [code for code, _ in findings] == ["catastrophic_regex"], (
+            f"the page shows {bad!r} as the flagged pattern and it is not flagged"
+        )
+
+    def test_the_fix_it_recommends_is_actually_clean(self) -> None:
+        """The half that matters more. Telling an author to rewrite a pattern
+        into something that is also flagged would send them in a circle."""
+        good = self._documented_examples()[1].replace("\\\\", "\\")
+        findings = validate_predicate({"field": "action.params_redacted.body", "regex": good})
+        assert findings == [], (
+            f"the page recommends {good!r} as the fix and the linter reports "
+            f"{[code for code, _ in findings]}"
+        )
 
 
 def test_the_shipped_baseline_pack_lints_clean() -> None:
