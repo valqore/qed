@@ -1,0 +1,8 @@
+{
+  "wait_timer": 0,
+  "prevent_self_review": false,
+  "reviewers": [
+    { "type": "User", "login": "tunc-celik-valqore" }
+  ],
+  "deployment_branch_policy": null
+}

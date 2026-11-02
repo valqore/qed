@@ -6,6 +6,86 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — publishing to PyPI now waits for a human
+
+A tag used to publish to PyPI with nobody in the loop. Every other surface in
+a release is recoverable — a container tag can be overwritten, a package
+version deleted, a GitHub release edited — but while a file can be removed
+from PyPI, **its version string can never be reused**, by this project or
+anybody. Publishing the wrong thing as 1.2.0 does not cost a re-run; it costs
+the number. It is also now reachable from more than a tag: `release.yml` grew
+a `workflow_dispatch` input, so the `pypi` job can be started from any ref.
+
+`release.yml`'s `pypi` job now runs in a GitHub environment with a required
+reviewer. The tag means *build it* and a person means *publish it*.
+
+**Only that job waits.** `release` does not list `pypi` in its `needs`, so the
+GitHub release, the signed image and the chart all land unattended and only
+the irreversible step is held. The asymmetry is the design, not an oversight,
+and `test_the_gate_does_not_hold_the_recoverable_steps` pins it — adding
+`pypi` to that `needs` list while tidying the graph would make every release
+wait on a human for steps that can simply be redone.
+
+**The environment is a file.** `.github/environments/pypi.json`, installed by
+`.github/rulesets/apply.sh --apply`, for the reason the rulesets beside it are
+files: an approval rule that lives only in a settings page is a claim no
+reader can check, and the README there is explicit that the file is the intent
+while the settings page is the truth. Three fields in it are choices, each
+easy to get backwards and each written down with why:
+
+- the reviewer is named by **login**, not the numeric id the API wants, so the
+  file says who and breaks when they stop being a maintainer;
+- `prevent_self_review` is **off**, because `GOVERNANCE.md` says there is one
+  maintainer — a rule forbidding you to approve your own run is a control
+  with two people and a deadlock with one. A test ties it to that sentence,
+  the same way the approval count in `main.json` already was, so the two
+  cannot drift apart quietly;
+- there is **no deployment branch policy**. A tag-only policy reads as tighter
+  and would break the `workflow_dispatch` path; the workflow's own `on:`
+  already decides when the job can run.
+
+**Proven before it was wired in, because a gate that has never gated is a
+guess** — the same lesson the runner-label canary taught one release ago,
+where the failure branch of a guard had never once executed. A throwaway
+workflow declaring this environment was pushed on a branch (run
+`41464363390`): the job sat at `waiting` with a pending deployment naming the
+reviewer and `current_user_can_approve: true`, then ran to success once
+approved. Both halves were observed rather than assumed — that it stops, and
+that it can be released. The second half matters as much as the first: a gate
+that pauses and cannot be opened is a release that never ships, and
+`prevent_self_review` is exactly how that happens to a solo maintainer.
+
+Eight mutations ran against the six new assertions and all eight failed
+correctly, including the one that is the real point: **a second job that
+publishes to PyPI with no environment.** The test finds publishing jobs by the
+action they use rather than by name, so that job is covered the day it is
+added instead of the day somebody remembers to add it to a list. Both halves
+of that are classes the findings file has numbered more than once: a fix
+applied to one of the two places that needed it, and a guard whose
+hand-written list is its own failure surface.
+
+Two things no test in this repository can see, both written down in
+`docs/deployment.md` rather than left implied. The live environment, because
+it is a settings page. And **PyPI's own trusted-publisher configuration**,
+which has an environment field of its own: blank, it accepts a token from any
+environment here and this gate is the only thing in front of a publish; set to
+`pypi`, PyPI refuses a token minted anywhere else; set to anything else, the
+next release fails at the upload.
+
+### Fixed — `docs/deployment.md` still said publishing was off
+
+The §Releasing section opened with "**Publishing is off until somebody turns
+it on**" and "a tag today produces the whole release and pushes none of it",
+and listed the two variables that would turn it on. All three variables have
+been `true` since 2026-10-19 and three versions have shipped. The page also
+missed `PUBLISH_DOCS` entirely.
+
+Another state claim outliving the launch step it described, which is the
+class the findings file keeps numbering: a sentence naming today's
+state has an expiry date and nothing in CI can read a date. The replacement
+says what the variables *do* — they stop a test tag from reaching an index —
+which is a claim about mechanism, and mechanism claims survive.
+
 ### Added — a weekly check that the Homebrew tap is not behind
 
 `release.yml` publishes to PyPI, GHCR, the Helm registry and a GitHub release.

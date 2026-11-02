@@ -98,6 +98,56 @@ run gh api -X PATCH "repos/$REPO" \
   -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'
 
 # --------------------------------------------------------------------------
+# Environments. One file per environment in ../environments, named after it.
+#
+# Before the rulesets on purpose: rulesets are the call that answers 403 on the
+# wrong plan, and an approval gate on the irreversible publish step should not
+# be skipped because something after it is unavailable.
+#
+# The files name a reviewer by **login** and the API wants a numeric id, so the
+# id is resolved here. A file carrying the number would be unreadable and would
+# keep pointing at an account that had stopped being a maintainer.
+# --------------------------------------------------------------------------
+say ""
+say "environments"
+ENVS="$(cd "$HERE/../environments" && pwd)"
+for file in "$ENVS"/*.json; do
+  env_name="$(basename "$file" .json)"
+  payload="$(python -c "
+import json, subprocess, sys
+
+spec = json.load(open(sys.argv[1], encoding='utf-8'))
+out = []
+for entry in spec.get('reviewers') or []:
+    if 'login' in entry:
+        who = entry['login']
+        kind = 'users' if entry.get('type', 'User') == 'User' else 'orgs'
+        got = subprocess.run(
+            ['gh', 'api', f'{kind}/{who}', '--jq', '.id'],
+            capture_output=True, text=True, check=True,
+        )
+        out.append({'type': entry.get('type', 'User'), 'id': int(got.stdout.strip())})
+    else:
+        out.append(entry)
+spec['reviewers'] = out
+print(json.dumps(spec))
+" "$file")" || { say "  !! could not resolve reviewers for '$env_name'"; FAILED=$(( FAILED + 1 )); continue; }
+  reviewers="$(printf '%s' "$payload" | python -c "
+import json, sys
+print(', '.join(str(r.get('id', r)) for r in json.load(sys.stdin)['reviewers']) or 'none')
+")"
+  say "  '$env_name' -- required reviewer id(s): $reviewers"
+  # Through `run` like every other call here, so a failure is counted and its
+  # first lines are printed. The payload goes via a file because `run` takes a
+  # command and not a pipeline, and an environment that failed to install
+  # silently is the one thing this section must not do.
+  body="$(mktemp)"
+  printf '%s' "$payload" > "$body"
+  run gh api -X PUT "repos/$REPO/environments/$env_name" --input "$body"
+  rm -f "$body"
+done
+
+# --------------------------------------------------------------------------
 # Rulesets.
 # --------------------------------------------------------------------------
 say ""
