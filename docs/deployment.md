@@ -246,14 +246,53 @@ Two things no test in this repository can see:
 - **The live environment.** The file is the intent; the settings page is the
   truth. `gh api repos/valqore/qed/environments/pypi` reads the truth, and
   `apply.sh --apply` is what makes them agree.
-- **PyPI's own trusted-publisher configuration**, which has an environment
-  field of its own. Left blank, PyPI accepts an OIDC token from any
-  environment in this repository and the gate above is the only thing in front
-  of a publish. Set to `pypi`, PyPI itself refuses a token minted anywhere
-  else, which closes the path where a new workflow publishes without the gate.
-  Set to anything *other* than `pypi`, the next release fails at the upload —
-  so change it on pypi.org for both `valqore-qed` and `qed-verify`, or leave
-  it blank, but do not guess at it.
+- **PyPI's own trusted-publisher configuration.** See below — it is worth
+  more than a bullet.
+
+### The publisher on PyPI, and what its environment field actually buys
+
+A trusted publisher matches on four claims: owner, repository, **workflow
+filename**, and an optional environment. The first three are already set, which
+is how `release.yml` publishes at all.
+
+The workflow filename does more work than it looks. A publisher registered
+against `release.yml` refuses a token minted by **any other workflow in this
+repository**, whatever its environment, because GitHub puts the minting
+workflow's own filename in the token's `workflow_ref` claim. So "somebody adds
+a second workflow that publishes" is not a path that was ever open.
+
+What setting the environment to `pypi` narrows is smaller and still worth
+having: a job added to **`release.yml` itself** that publishes without
+declaring `environment: pypi`. `test_every_job_that_publishes_is_gated` already
+catches that from this side, so PyPI's field is the half that survives somebody
+deleting the test.
+
+Change it per project at `pypi.org/manage/project/<name>/settings/publishing/`,
+for both `valqore-qed` and `qed-verify`. **Add the new publisher before
+removing the old one.** The UI offers Remove and not Edit, so this is a
+replace, and removing first leaves a window with no publisher at all — a typo
+or an expired session in that window means the next release has nothing to
+authenticate against. Setting it to anything other than `pypi` breaks the next
+release at the upload.
+
+### Why nothing here can check that for you
+
+The obvious idea is a workflow that mints a token, offers it to PyPI's exchange
+endpoint, and reports whether PyPI accepts it. **It cannot work**, for the
+reason that makes the publisher narrow in the first place: a token minted by
+`some-check.yml` carries *that* filename, so PyPI refuses it on the filename
+and the refusal is indistinguishable from a refusal on the environment. A
+check like that reports "correctly scoped" in a repository where nothing is
+scoped at all.
+
+Measured rather than reasoned: a probe minted a token and decoded its claims
+(run `41470673853`), and both `workflow_ref` and `job_workflow_ref` named the
+probe's own file. One such check was built and deleted on that evidence.
+
+Registering a second publisher for the checking workflow would make it work and
+would defeat the point, since that workflow could then publish. So the only
+things that can verify this setting are the release itself and the settings
+page, and the release is the expensive way to find out.
 
 ### Bump before you tag
 
