@@ -572,13 +572,30 @@ jobs:
   # approved. Both halves -- that it stops, and that it can be released -- were
   # observed rather than assumed.
   #
-  # One half of this lives outside the repository and no test here can see it:
-  # PyPI's own trusted-publisher configuration has an optional environment
-  # field. Left blank, it accepts a token from any environment and this gate is
-  # the only thing in front of a publish. Set to `pypi`, PyPI itself refuses an
-  # OIDC token minted outside this environment, which closes the path where
-  # somebody adds a second workflow that publishes without the gate. Setting it
-  # to anything *else* breaks the next release. See `docs/deployment.md`.
+  # One half of this lives outside the repository and no test here can see
+  # it: PyPI's own trusted-publisher configuration, which matches on four
+  # claims -- owner, repository, **workflow filename** and an optional
+  # environment. Setting the environment to `pypi` means PyPI itself refuses
+  # a token minted outside this environment. Setting it to anything else
+  # breaks the next release. See `docs/deployment.md`.
+  #
+  # An earlier version of this comment said that closes "the path where
+  # somebody adds a second workflow that publishes without the gate." It does
+  # not, and the workflow filename is why: the publisher is bound to
+  # `release.yml`, so a token minted by any *other* workflow in this
+  # repository is refused whatever its environment. That path was already
+  # closed. What the environment field actually narrows is a job added to
+  # **this file** that publishes without declaring the environment -- the
+  # same risk `test_every_job_that_publishes_is_gated` covers from the
+  # repository side, so PyPI's field is the half that survives that test
+  # being deleted.
+  #
+  # Measured, not reasoned: a probe workflow minted a token and decoded it
+  # (run `41470673853`). `workflow_ref` and `job_workflow_ref` both named the
+  # probe's own filename, not this one. A check that exchanges a token from a
+  # separate workflow to verify this publisher is therefore impossible -- it
+  # is refused for the filename, which reads exactly like being refused for
+  # the environment. One was built and deleted for that reason.
   pypi:
     needs: [verify, wheels]
     if: vars.PUBLISH_PYPI == 'true'

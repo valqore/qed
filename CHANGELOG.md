@@ -6,6 +6,52 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Corrected — what PyPI's environment field actually buys
+
+Two claims landed with the approval gate above, both mine and both wrong in
+the same direction: they credited PyPI's optional environment field with
+closing a path it does not close.
+
+A trusted publisher matches on four claims, and the third is the **workflow
+filename**. A publisher registered against `release.yml` refuses a token
+minted by any other workflow in this repository whatever its environment,
+because GitHub puts the minting workflow's own filename in the token's
+`workflow_ref` claim. So "somebody adds a second workflow that publishes
+without the gate" was never an open path, and saying the environment field
+closes it oversells the setting. What it actually narrows is smaller and still
+worth having: a job added to `release.yml` *itself* that publishes without
+declaring the environment. `test_every_job_that_publishes_is_gated` already
+covers that from this side, so PyPI's field is the half that survives somebody
+deleting the test.
+
+**The same fact killed a workflow built to check the setting.** The idea was
+to mint a token, offer it to PyPI's exchange endpoint and report the answer,
+uploading nothing. It was built, its parser's six paths were exercised against
+live PyPI and synthetic macaroons, six mutations ran against six new
+assertions and all six were caught — and it was still worthless, because a
+token minted by `pypi-publisher-check.yml` carries *that* filename and PyPI
+refuses it on the filename. The refusal is indistinguishable from a refusal on
+the environment, so the check reported **"the publisher is scoped to an
+environment"** in a repository where nothing was scoped at all.
+
+It said so out loud on its first real run. What exposed it was not a test but
+a contradiction with a known fact: `git show v1.1.1` proves the `pypi` job had
+no environment when 1.1.1 published successfully, so an environment-less token
+*did* match a publisher then, and could not legitimately be refused now. A
+probe then measured it instead of arguing about it (run `41470673853`):
+`workflow_ref` and `job_workflow_ref` both named the probe's own file.
+
+Deleted rather than patched. Registering a second publisher for the checking
+workflow would make it pass and defeat its purpose, since that workflow could
+then publish. `docs/deployment.md` now explains why the only things that can
+verify this setting are the release itself and the settings page.
+
+This is #73 again and from the inside: a green result is not evidence of the
+reason you believe it. Every guard around that check worked — the mutations,
+the parser tests, the leak checks — and all of them were checking that the
+check did what it was written to do, which was the wrong thing. Nothing in a
+mutation suite asks whether the question is the right question.
+
 ### Added — publishing to PyPI now waits for a human
 
 A tag used to publish to PyPI with nobody in the loop. Every other surface in
