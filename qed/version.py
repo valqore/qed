@@ -33,4 +33,4 @@ from typing import Final
 
 __all__ = ["VERSION"]
 
-VERSION: Final = "1.1.1"
+VERSION: Final = "1.2.0"

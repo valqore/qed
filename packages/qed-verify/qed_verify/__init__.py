@@ -3,4 +3,4 @@
 from qed_verify.verify import Problem, Report, load_jsonl, verify_records
 
 __all__ = ["Problem", "Report", "load_jsonl", "verify_records"]
-__version__ = "1.1.1"
+__version__ = "1.2.0"

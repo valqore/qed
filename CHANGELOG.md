@@ -4,15 +4,35 @@ All notable changes to this project. Format: [Keep a Changelog]. Versioning:
 semver, with `schema_version` of `ActionProposal` / `EvidenceRecord` tracked
 independently (SPEC §25.6).
 
-## [Unreleased]
+## [1.2.0] — 2026-11-13
+
+**All twelve of this project's runtime dependency floors were claims, and two
+of them were false.** Every `>=` in `pyproject.toml` says the project works
+with that version and above, and until the `minimum-versions` job added in
+this release, not one of them had ever been installed by anything.
+`joserfc>=1.0` had been wrong since 1.0.0: joserfc 1.0 through 1.4 cannot sign
+`alg: Ed25519`, which SPEC §20.3 settles for every token QED mints, so
+delegation did not work at all below 1.5 — most of the declared range.
+`python-ulid>=2` was the second: below 3.1, ids minted in the same millisecond
+do not sort in creation order, which `new_proposal_id` promises in its own
+docstring that they do. Both floors are corrected here, and that correction is
+the part of this release that changes what `pip install valqore-qed` resolves.
+
+The evidence format does not move. `schema_version` is still `1.0` and a record
+written by 1.0.0 verifies under this verifier unchanged (SPEC §25.6). What
+makes this a minor version rather than a patch is one new diagnostic: `qed
+policy lint` now reports a regex shape that backtracks exponentially, so a
+policy pack that linted clean on 1.1.1 can report a warning here. The shipped
+packs do not — all 48 regex predicates across the six pack files were run
+against the new check and none is flagged.
 
 ### Fixed — two declared dependency floors were false
 
 The first run of the new `minimum-versions` job found both.
 
 **`joserfc>=1.0`** was the first. joserfc 1.0 through
-1.4 raise `ValueError: Algorithm of "Ed25519" is not supported`; ADR-0019
-chose Ed25519 per RFC 9864; so **every delegation token operation failed
+1.4 raise `ValueError: Algorithm of "Ed25519" is not supported`; SPEC §20.3
+settles `alg: Ed25519` per RFC 9864; so **every delegation token operation failed
 across most of the declared range** — 27 tests, all of
 `tests/delegation/test_tokens.py` plus its dependents. The boundary was
 bisected to **1.5.0**, the first release that knows the algorithm, and the

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valqore-qed"
-version = "1.1.1"
+version = "1.2.0"
 description = "Self-hosted policy and evidence kernel for AI-agent actions"
 # The body of the PyPI project page. Omitted through v1.0.0, which meant the
 # page a reader reaches by searching for this name carried one line of summary,
@@ -54,8 +54,8 @@ dependencies = [
     # the same author, and it warns on import -- which this suite treats as an
     # error. `joserfc` is the successor, not an additional dependency.
     # The floor is **1.5**, not 1.0: joserfc 1.0 through 1.4 raise
-    # `ValueError: Algorithm of "Ed25519" is not supported`, and ADR-0019
-    # chose Ed25519 per RFC 9864, so delegation does not work at all below
+    # `ValueError: Algorithm of "Ed25519" is not supported`, and SPEC §20.3
+    # settles `alg: Ed25519` per RFC 9864, so delegation does not work below
     # it. Found by the `minimum-versions` CI job -- the old `>=1.0` had
     # never been installed by anything, which is what that job is for.
     "joserfc>=1.5,<2",
