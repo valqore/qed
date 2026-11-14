@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qed-verify"
-version = "1.1.1"
+version = "1.2.0"
 description = "Independent verifier for qed evidence chains"
 # The body of the PyPI project page, and the page an auditor lands on when they
 # are told to verify a chain. Through v1.0.0 there was no `readme` key here and

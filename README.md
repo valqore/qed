@@ -37,7 +37,7 @@ literals, and nowhere else.
 > **What each channel serves, and what it does not.**
 > `pip install valqore-qed` installs the kernel, and `pip install qed-verify`
 > the standalone verifier that checks a chain without it.
-> `docker run ghcr.io/valqore/qed:1.1.1` and the Helm chart at
+> `docker run ghcr.io/valqore/qed:1.2.0` and the Helm chart at
 > `oci://ghcr.io/valqore/charts/qed` are public and cosign-signed;
 > `docs/deployment.md` carries the `cosign verify` line to check that with.
 > `brew install valqore/tap/qed` works from a public tap holding three
