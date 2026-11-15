@@ -178,9 +178,12 @@ def test_the_index_lists_every_adr_and_only_real_ones() -> None:
     assert not listed - have, f"index.md lists ADRs with no file: {sorted(listed - have)}"
 
 
-@pytest.mark.parametrize("link", sorted(set(re.findall(
-    r"\(([0-9][0-9][0-9][0-9]-[^)]+\.md)\)", INDEX.read_text(encoding="utf-8")
-))))
+@pytest.mark.parametrize(
+    "link",
+    sorted(
+        set(re.findall(r"\(([0-9][0-9][0-9][0-9]-[^)]+\.md)\)", INDEX.read_text(encoding="utf-8")))
+    ),
+)
 def test_index_links_resolve(link: str) -> None:
     """A row can name the right ADR and still link to a filename that moved."""
     assert (ADR_DIR / link).is_file(), f"index.md links to missing {link}"
