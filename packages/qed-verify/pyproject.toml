@@ -37,3 +37,10 @@ qed-verify = "qed_verify.cli:main"
 
 [tool.setuptools]
 packages = ["qed_verify"]
+
+[tool.setuptools.package-data]
+# PEP 561, for the same reason as the kernel wheel. This one matters more than
+# it looks: `qed-verify` is the package an auditor installs on a machine that
+# has nothing else of ours on it, and it is the one most likely to be imported
+# from a script somebody type-checks.
+qed_verify = ["py.typed"]

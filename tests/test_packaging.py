@@ -103,11 +103,15 @@ def test_the_known_data_files_are_still_the_ones_we_think_they_are() -> None:
     assert any(name.startswith("core/policy/packs/") for name in found)
     assert any(name.startswith("infra/storage/migrations/") for name in found)
     assert any(name.startswith("compliance/packs/") for name in found)
+    # PEP 561's marker, which is data the wheel ships for a type checker rather
+    # than data `qed` reads. It is named here rather than admitted by a wide
+    # suffix rule, because this test exists to make a new data file a decision.
+    assert "py.typed" in found
     # No stray binaries, archives or credentials have crept into the package.
     assert not [
         name
         for name in found
-        if Path(name).suffix not in {".yaml", ".yml", ".sql", ".json", ".txt", ".md"}
+        if Path(name).suffix not in {".yaml", ".yml", ".sql", ".json", ".txt", ".md", ".typed"}
     ], found
 
 
