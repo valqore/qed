@@ -58,47 +58,60 @@ DISTRIBUTIONS = (
 )
 
 
-def build_wheel(project: Path, into: Path) -> Path:
-    """Build one wheel and return its path.
+#: The files a build of either project needs: its configuration, the `readme`
+#: and `license-files` it names, and the package itself.
+SUPPORT = ("pyproject.toml", "README.md", "LICENSE", "NOTICE")
 
-    `--no-isolation` keeps this to seconds: the build dependencies are already
-    in the test environment, and downloading setuptools into a fresh venv twice
-    would make an otherwise trivial check the slowest thing in the suite.
 
-    **`build/lib` is cleared first, and that is not tidiness.** setuptools
-    stages files into `<project>/build/lib` and reuses what is already there, so
-    a wheel built after an earlier build inherits the earlier build's staged
-    files. The first version of this test passed both of its mutations because
-    of exactly that: `py.typed` was removed from `package-data`, the wheel was
-    rebuilt, and the marker was still in it -- staged by the previous, correct
-    build. A guard reading contaminated state is worse than no guard, because
-    it reports the answer you were hoping for.
+def build_wheel(project: Path, package: str, into: Path) -> Path:
+    """Copy the project to a scratch directory, build there, return the wheel.
+
+    Two deliberate choices, each made after the obvious version failed in CI.
+
+    **`pip wheel`, not `python -m build`.** `build` is not a dependency of this
+    project -- the dev extra is pytest, pytest-asyncio, ruff and mypy -- so the
+    first version of this test passed locally, where it happened to be
+    installed, and failed every job that runs the full suite. `pip` is always
+    present by construction. `--no-build-isolation` keeps it offline: setuptools
+    is the build backend and is already installed.
+
+    **A copy, not the working tree.** setuptools stages into `<project>/build/lib`
+    and `include-package-data` consults `*.egg-info/SOURCES.txt`, so a build in
+    place inherits the previous build's staged files -- which is how the first
+    version of this test passed both of its mutations while proving nothing.
+    Clearing those caches would fix the measurement and mutate state the
+    repository's own editable install and other tests sit on top of. Building a
+    copy is hermetic without touching anything shared.
     """
-    # Two caches, not one. `build/lib` stages the files that go into the
-    # wheel, and `*.egg-info/SOURCES.txt` is what `include-package-data`
-    # consults -- which is on by default for a pyproject-configured project.
-    # Leaving either in place makes this test report the previous build.
-    for stale in (project / "build" / "lib", *project.glob("*.egg-info")):
-        if stale.exists():
-            shutil.rmtree(stale)
+    source = into / "src"
+    source.mkdir(parents=True)
+    for name in SUPPORT:
+        shutil.copy2(project / name, source / name)
+    shutil.copytree(
+        project / package,
+        source / package,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
 
+    out = into / "wheel"
     subprocess.run(
         [
             sys.executable,
             "-m",
-            "build",
-            "--wheel",
-            "--no-isolation",
-            "--outdir",
-            str(into),
-            str(project),
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--no-build-isolation",
+            "--wheel-dir",
+            str(out),
+            str(source),
         ],
         check=True,
         capture_output=True,
         text=True,
     )
-    wheels = sorted(into.glob("*.whl"))
-    assert len(wheels) == 1, f"expected one wheel in {into}, got {wheels}"
+    wheels = sorted(out.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel in {out}, got {wheels}"
     return wheels[0]
 
 
@@ -109,7 +122,7 @@ def build_wheel(project: Path, into: Path) -> Path:
 )
 def test_the_built_wheel_contains_the_marker(project: Path, package: str, tmp_path: Path) -> None:
     """The assertion a consumer's type checker actually depends on."""
-    wheel = build_wheel(project, tmp_path / package)
+    wheel = build_wheel(project, package, tmp_path)
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
 
