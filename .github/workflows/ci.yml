@@ -124,9 +124,10 @@ jobs:
   # everything else normally.
   #
   # It found two on its first run. `joserfc>=1.0` was a lie: 1.0 through 1.4
-  # raise `ValueError: Algorithm of "Ed25519" is not supported`, ADR-0019
-  # chose Ed25519 per RFC 9864, and so delegation did not work anywhere in
-  # most of the declared range -- 27 tests failed. And `python-ulid>=2` was a
+  # raise `ValueError: Algorithm of "Ed25519" is not supported`, and QED signs
+  # tokens `alg: Ed25519` per RFC 9864 (SPEC §20.3), so delegation
+  # did not work anywhere in most of the declared range -- 27 tests failed.
+  # And `python-ulid>=2` was a
   # lie: below 3.1 ids minted in the same millisecond do not sort in creation
   # order, which `new_proposal_id` promises they do. Both floors were raised
   # to the first version that holds, each measured rather than read off a
