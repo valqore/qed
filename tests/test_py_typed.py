@@ -132,11 +132,20 @@ def build_wheel(project: Path, package: str, into: Path) -> Path:
 #: environment, and eleven other CI jobs answer it. So it is skipped there,
 #: deterministically on whether the backend imports, rather than by catching a
 #: build failure and guessing why.
+#: Building a wheel needs BOTH pieces, and the first version of this skip
+#: checked only one. `.venv-min` is built by uv, and a uv venv ships neither
+#: `pip` nor `setuptools`: keyed on setuptools alone, the test still ran there
+#: and died on `No module named pip`. The condition is now the whole
+#: capability rather than one half of it.
+_CAN_BUILD_A_WHEEL = all(
+    importlib.util.find_spec(name) is not None for name in ("pip", "setuptools")
+)
+
 needs_a_build_backend = pytest.mark.skipif(
-    importlib.util.find_spec("setuptools") is None,
+    not _CAN_BUILD_A_WHEEL,
     reason=(
-        "no setuptools in this interpreter, so there is no build backend to"
-        " build a wheel with (uv venvs ship none)"
+        "this interpreter cannot build a wheel: it is missing pip, setuptools,"
+        " or both (a uv venv ships neither)"
     ),
 )
 
