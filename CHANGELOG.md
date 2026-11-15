@@ -4,6 +4,55 @@ All notable changes to this project. Format: [Keep a Changelog]. Versioning:
 semver, with `schema_version` of `ActionProposal` / `EvidenceRecord` tracked
 independently (SPEC §25.6).
 
+## [Unreleased]
+
+### Added — a guard for ADR citations, because 1.2.0 fixed two of three
+
+`ADR-0019` has never existed. 1.2.0 found it cited in this file and in
+`pyproject.toml`, corrected both, and said in its own release notes why
+nothing had caught it: the `anchors` job validates links and anchors, not
+prose references to documents that were never written. It missed a third
+citation. `.github/workflows/ci.yml` still credited ADR-0019 with choosing
+Ed25519 in the comment that explains the `minimum-versions` job — the one
+place a reader goes to understand why a dependency floor moved. That comment
+now cites SPEC §20.3 ("Token algorithm"), which is what this file had already
+been changed to say.
+
+`tests/docs/test_adr_references.py` is the check that would have found all
+three without anybody reading 425 files. It resolves every ADR number cited
+anywhere in the tracked tree, and it has to handle **two numbering spaces**:
+
+- four digits (`ADR-0001`..`ADR-0018`) are the accepted ADRs, one file each in
+  `docs/adr/`;
+- three digits (`ADR-001`..`ADR-008`) are the proposals in
+  `DESIGN_DECISIONS.md`, which says so itself — accepted ones enter the
+  repository as `docs/adr/NNNN-*.md`.
+
+They are different decisions, not the same ones with a zero missing:
+`ADR-001` is the credential broker, `docs/adr/0001` is the blast-radius
+table. A guard that resolved every citation against `docs/adr/` would have
+failed on about forty legitimate references in `QED_SPEC.md`,
+`DESIGN_DECISIONS.md` and this file — and the obvious way to make that
+failure go away is to pad the numbers, silently merging two sets of
+decisions. Each space is checked against its own source, and the failure
+message says not to pad. The index is checked too: `docs/adr/index.md` must
+carry a row for every ADR file, name none that has no file, and link only to
+filenames that exist.
+
+The guard's first green run was an accident, which is recorded in the file
+because it is the more useful half of the lesson. Its docstring names
+`ADR-0019` four times, so it should have failed itself; it passed only
+because the file was still untracked and `git ls-files` never showed it to
+itself. `git add -N` made it fail immediately. It is now excluded from its
+own walk by path — the same exemption `test_no_stale_promises.py` carries for
+quoting the stale sentence it forbids — and a phantom citation in a
+neighbouring test file is still caught, so the exclusion is narrow rather
+than a directory-wide skip. Eight mutations were run against it and eight
+were caught, each by the assertion meant to catch it. There is also an
+assertion that both input sets came back non-empty, because both are read off
+disk and a renamed directory would have made every other assertion hold
+vacuously.
+
 ## [1.2.0] — 2026-11-13
 
 **All twelve of this project's runtime dependency floors were claims, and two
