@@ -6,6 +6,82 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — neither wheel carried PEP 561's marker, so no consumer could see the types
+
+`qed` is fully annotated and `mypy --strict` passes over it here. None of that
+reached anybody: without a `py.typed` file **inside the wheel**, a project that
+installs `valqore-qed` and runs `mypy --strict` gets `Skipping analyzing
+"qed.core.jcs": module is installed, but missing library stubs or py.typed
+marker` on every import, and its only recourse is a blanket ignore that also
+hides its own mistakes. Both distributions now ship the marker.
+
+Nothing in this repository could have noticed. Every check here reads the
+source tree, where the annotations are present and the marker is irrelevant —
+it is only a consumer, resolving the installed package, that ever asks the
+question. It was found by `valqore-attest`, the first real downstream consumer:
+it imports `qed.core.jcs` so that the two tools cannot disagree about what a
+digest covers, and that one import was the entire untyped surface of an
+otherwise strict codebase.
+
+There is a small irony in the diff. Three `[[tool.mypy.overrides]]` blocks in
+`pyproject.toml` already existed to excuse `psycopg`, `boto3` and
+`google-cloud-storage` for exactly this, one of them noting a dependency
+"carries no `py.typed` marker when present".
+
+### Added — a test that builds the wheels and looks inside them
+
+`tests/docs`-style declaration checks were not enough, so
+`tests/test_py_typed.py` builds both wheels and asserts the marker is in the
+archive. The lesson it is written against has been paid for twice here already:
+a repository guard cannot see a property of the artefact. `package-data` was
+checked against the filesystem for eight weeks while ten catalogue files were
+absent from the wheel, because `fnmatch`'s `*` crosses a path separator and
+setuptools' does not.
+
+`tests/test_packaging.py` still checks the declaration and earned its keep
+immediately — it failed the moment `qed/py.typed` existed and was not yet
+declared, which is how the convention stays enforced.
+
+**Two measurements that corrected what this change was first written to
+claim.** Both are recorded in the test's own docstring.
+
+The first: the guard passed both of its mutations while proving nothing.
+Removing the `package-data` entry and rebuilding left the marker in the wheel,
+because setuptools stages into `build/lib` and consults
+`*.egg-info/SOURCES.txt`, and both still held the previous, correct build. The
+test now clears both caches before building. A guard reading contaminated state
+is worse than no guard, because it reports the answer you were hoping for.
+
+The second, found while explaining the first: **the `package-data` entry is not
+what makes the marker ship.** A build from a completely clean tree with the
+entry removed still puts `qed/py.typed` in the wheel, because
+`include-package-data` defaults to true for a pyproject-configured project and
+setuptools' file finder reaches inside the package directory. The entry is kept
+because this repository's convention is that every shipped data file is
+declared — but the honest mutation for the artefact test is deleting the
+**file**, not the declaration, and that is what it is now tested with.
+
+Verified end to end rather than reasoned about: with the workaround removed
+from the consumer and the published 1.2.0 wheel installed, `mypy` reports the
+`import-untyped` error; with the locally built wheel installed and the same
+consumer source, it reports success.
+
+### Changed — the single-file binary does not collect the marker
+
+`tests/deploy/test_binary.py` requires the PyInstaller spec to collect every
+extension the wheel ships, and it failed on the new `.typed` suffix. The rule
+is right and its premise did not reach this case: a type checker reads
+`py.typed` in an *installed package*, and nobody type checks against a frozen
+executable, so collecting it would add a file with no reader. The exclusion is
+named rather than the rule weakened, and a second test fails if an exclusion
+ever stops corresponding to something the wheel actually ships — otherwise a
+dead exclusion would silently leave the next file with that suffix out of the
+binary, which is the failure the original test exists to prevent.
+
+This one was only found by the full suite. The three gates the pull request
+template asks about were all green with it broken.
+
+
 ### Added — a guard for ADR citations, because 1.2.0 fixed two of three
 
 `ADR-0019` has never existed. 1.2.0 found it cited in this file and in

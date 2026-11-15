@@ -166,6 +166,15 @@ qed = [
     "infra/storage/migrations/*.sql",
     "compliance/*.yaml",
     "compliance/packs/*.yaml",
+    # PEP 561. Not read at runtime -- it is read by a type checker in whatever
+    # project installs this wheel. Without it `mypy --strict` in a consumer
+    # reports `import-untyped` on every `from qed... import`, however fully
+    # annotated this package is, and the consumer's only recourse is a blanket
+    # ignore that also hides its own mistakes. Found by `valqore-attest`, the
+    # first real downstream consumer: the library was fully typed and the
+    # marker was simply not in the wheel. The overrides further down this file
+    # grant exactly that courtesy to three dependencies of ours.
+    "py.typed",
 ]
 
 [tool.ruff]

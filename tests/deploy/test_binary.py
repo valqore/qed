@@ -53,6 +53,15 @@ class TestTheSpecFile:
         `__main__` differently and typer's command group goes missing."""
         assert '"qed" / "cli.py"' in spec_text()
 
+    #: Shipped in the wheel but deliberately absent from the binary: a type
+    #: checker reads `py.typed` in an *installed package*, and nobody type
+    #: checks against a frozen single-file executable. Collecting it would add
+    #: a file with no reader. This is an exception to the rule below rather
+    #: than a hole in it, so it is named, and
+    #: `test_the_binary_exclusions_are_still_shipped_by_the_wheel` fails if one
+    #: stops being a wheel file at all.
+    NOT_IN_THE_BINARY = frozenset({".typed"})
+
     def test_it_collects_every_extension_the_wheel_ships(self) -> None:
         """The data files are the thing most likely to drift, and the failure
         is remote from the cause: the binary starts and dies on the first
@@ -61,10 +70,24 @@ class TestTheSpecFile:
             patterns = tomllib.load(handle)["tool"]["setuptools"]["package-data"]["qed"]
         extensions = {Path(pattern).suffix for pattern in patterns}
         text = spec_text()
-        for extension in extensions:
+        for extension in sorted(extensions - self.NOT_IN_THE_BINARY):
             assert f"**/*{extension}" in text, (
                 f"the wheel ships {extension} files and the binary spec does not collect them"
             )
+
+    def test_the_binary_exclusions_are_still_shipped_by_the_wheel(self) -> None:
+        """An exclusion for an extension the wheel no longer ships is dead.
+
+        Without this, `NOT_IN_THE_BINARY` could keep excusing an extension long
+        after the file that justified it was removed -- and the next data file
+        to arrive with that suffix would be silently left out of the binary,
+        which is the exact failure the test above exists to prevent.
+        """
+        with (ROOT / "pyproject.toml").open("rb") as handle:
+            patterns = tomllib.load(handle)["tool"]["setuptools"]["package-data"]["qed"]
+        shipped = {Path(pattern).suffix for pattern in patterns}
+        dead = self.NOT_IN_THE_BINARY - shipped
+        assert not dead, f"exclusions for extensions the wheel no longer ships: {dead}"
 
     def test_it_puts_the_verifier_package_on_the_path(self) -> None:
         """`qed_verify` is an editable install in `packages/qed-verify/`.
