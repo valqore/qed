@@ -41,6 +41,7 @@ was mutation-tested the wrong way round, passing twice while proving nothing.
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -94,7 +95,7 @@ def build_wheel(project: Path, package: str, into: Path) -> Path:
     )
 
     out = into / "wheel"
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -106,15 +107,41 @@ def build_wheel(project: Path, package: str, into: Path) -> Path:
             str(out),
             str(source),
         ],
-        check=True,
         capture_output=True,
         text=True,
+        check=False,
+    )
+    # `check=True` would raise a CalledProcessError carrying only an exit
+    # status, and finding out what actually went wrong then means opening a CI
+    # log. It cost one round trip to learn that, so the build's own stderr is
+    # in the failure now.
+    assert result.returncode == 0, (
+        f"building {package} failed (exit {result.returncode}). "
+        f"stdout: {result.stdout[-1500:]} -- stderr: {result.stderr[-1500:]}"
     )
     wheels = sorted(out.glob("*.whl"))
     assert len(wheels) == 1, f"expected one wheel in {out}, got {wheels}"
     return wheels[0]
 
 
+#: `--no-build-isolation` needs the build backend already installed, and in one
+#: environment it is not: the `minimum-versions` job builds `.venv-min` with
+#: uv, and a uv venv ships no `setuptools`. The alternative is to drop the flag
+#: and let pip fetch a backend over the network, which would buy nothing -- the
+#: question this test asks is what is inside the wheel, it is identical in every
+#: environment, and eleven other CI jobs answer it. So it is skipped there,
+#: deterministically on whether the backend imports, rather than by catching a
+#: build failure and guessing why.
+needs_a_build_backend = pytest.mark.skipif(
+    importlib.util.find_spec("setuptools") is None,
+    reason=(
+        "no setuptools in this interpreter, so there is no build backend to"
+        " build a wheel with (uv venvs ship none)"
+    ),
+)
+
+
+@needs_a_build_backend
 @pytest.mark.parametrize(
     ("project", "package"),
     DISTRIBUTIONS,
