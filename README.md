@@ -212,7 +212,7 @@ did.
 ### Run more than one replica
 
 ```bash
-helm install qed ./deploy/helm/qed   --set signingKey.existingSecret=qed-signing-key   --set replicaCount=3   --set evidence.backend=postgres   --set evidence.postgres.existingSecret=qed-db
+helm install qed ./deploy/helm/qed   --set signingKey.existingSecret=qed-signing-key   --set adapters.existingSecret=qed-adapters   --set adapters.registered[0].id=mcp-proxy   --set replicaCount=3   --set evidence.backend=postgres   --set evidence.postgres.existingSecret=qed-db
 ```
 
 Every replica serves the API and decides. The decider writes its record
