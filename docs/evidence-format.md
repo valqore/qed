@@ -52,7 +52,7 @@ is written down.
 | The **baseline rule pack**, control catalogues, `policy_hash` | Policy is data the chain records, not part of how it is read. |
 | `engine_version` in a verdict | Deliberately in the record so an auditor can ask which build decided; deliberately not in the hash input. |
 | Export *containers* — CSV, OSCAL | Renderings of the same records. JSONL is the one a verifier reads. |
-| What a verifier must **report** | The freeze is a promise about bytes: a record written under 1.0 verifies under every later verifier. It is not a ceiling on what a verifier has to tell its user. Requirement 11 in the conformance list below was added on 11 October 2026, after the freeze, because the reference verifier was printing an unqualified pass over a check it had skipped. No record changed and no previously valid chain became invalid. |
+| What a verifier must **report** | The freeze is a promise about bytes: a record written under 1.0 verifies under every later verifier. It is not a ceiling on what a verifier has to tell its user. Requirements 11 and 12 in the conformance list below were added after the freeze — 11 on 11 October 2026, because the reference verifier was printing an unqualified pass over a check it had skipped; 12 on 16 November 2026, because it had no way to accept the anchor that detects a truncated chain. Neither changed a record, and no previously valid chain became invalid. |
 
 | Frozen | Why it is inside |
 |---|---|
@@ -240,12 +240,27 @@ It MUST, given a JSONL export and a set of Ed25519 public keys:
     or any other network service.
 11. State, in both its human and machine-readable output, whether the genesis
     binding in 2 was performed — and when it was not, that no instance is bound.
-    This is the one check in the list that can be skipped, and it is the only
-    one that distinguishes this chain from a chain generated anywhere else: 1
-    and 3 through 9 are satisfied just as well by records fabricated five
-    minutes ago and signed with a key made at the same time. A verifier that
-    prints an unqualified pass without it is overstating its own result, which
-    is the failure mode this format exists to remove.
+    This check and 12 are the only two in the list that can be skipped, and
+    together they are the only ones that distinguish this chain from a chain
+    generated anywhere else: 1 and 3 through 9 are satisfied just as well by
+    records fabricated five minutes ago and signed with a key made at the same
+    time. A verifier that prints an unqualified pass without them is
+    overstating its own result, which is the failure mode this format exists to
+    remove.
+12. Accept a **published checkpoint record** as an input, compare it against
+    the export, and state whether it was supplied. The comparison is: the
+    record at that `seq` is present, its `hash` is identical, and the records
+    in `from_seq..to_seq` recompute to the published `merkle_root`. This is the
+    only requirement in the list that can detect a chain with records removed
+    from the **end**, which 1 through 9 cannot: every one of them is satisfied
+    by any prefix of a chain, and the record that would say more followed is
+    the record that was removed. A verifier must also say how far the anchors
+    reach, because records after the newest one are present on the export's own
+    word. Added 16 November 2026, after nine of ten tampering mutations against
+    a live chain were caught and the tenth — truncation — had nowhere to be
+    caught, because the reference verifier had no input for the anchor that
+    catches it. As with 11, no record changed and no previously valid chain
+    became invalid.
 
 It MUST NOT:
 
@@ -275,5 +290,15 @@ records   : 14 (seq 0..13)
 keys      : ed25519:464e88767c380dcd, ed25519:e4b402f9126abfa9
 checkpoint: 2
 purged    : 1 payload(s) removed under retention
-result    : OK -- chain is contiguous, unmodified and signed
+bound to  : instance 'qed-conformance-1.0'
+anchored  : NOTHING -- no anchor supplied
+result    : OK SO FAR -- chain is contiguous, unmodified and signed, but 1 check(s) did not run
 ```
+
+**The fixture ships no anchor**, so requirement 12 cannot be exercised against
+it and the pass above stops short of complete. An implementer can extract the
+fixture's own checkpoint record and pass it with `--anchor` to exercise the
+comparison, and that tests the code path and nothing else: an anchor taken out
+of the file under review is the same tautology as reading the instance id out
+of it. A real anchor is fetched from the bucket or tag the instance published
+it to.

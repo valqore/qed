@@ -224,13 +224,15 @@ and asserts the refusals rather than the requests. Measured, on
 * a bucket with no policy accepts the upload, reports the caveat, and the
   object is deletable.
 
-**What is not measured, stated plainly:** that a *locked* policy cannot be
-removed. Locking is irreversible, so no throwaway bucket was locked to check
-it; `test_a_locked_policy_cannot_be_removed` exists and skips until
-`QED_TEST_GCS_BUCKET` names a locked bucket. That claim is Google's documented
-guarantee about Bucket Lock, and this publisher only reads and reports it —
-but a skipped test proves nothing, and the distinction belongs here rather than
-in a footnote.
+And on 2026-11-16, the half that had been a citation rather than a
+measurement: **a locked policy cannot be removed**, refused for a project
+owner, with the policy and `isLocked` still in place afterwards. It had been
+skipped for a month because locking is irreversible and no bucket was going to
+be sacrificed for it. The way out was a retention period of **one second**: the
+lock is just as permanent, and every object in the bucket is deletable
+immediately, so the throwaway bucket could still be deleted afterwards — which
+it was, confirming the escape. A skipped test proves nothing, and this one is
+no longer skipped.
 
 These tests are **not** in CI. There is no free, locally runnable GCS that
 enforces retention: `fsouza/fake-gcs-server` accepts `retention_period`, reads
@@ -361,7 +363,29 @@ jq -c 'select(.type == "checkpoint")' chain.jsonl
 aws s3 cp s3://acme-qed-anchors/checkpoints/qed-checkpoint-0000001234-ab12cd34ef567890.json -
 ```
 
-Byte-identical, or one of them is not the record that was signed.
+Byte-identical, or one of them is not the record that was signed. Hand the
+published copy to the verifier rather than comparing by eye, because it also
+checks what `diff` cannot:
+
+```bash
+qed-verify chain.jsonl --keys ./public --instance-id acme-prod   --anchor ./qed-checkpoint-0000001234-ab12cd34ef567890.json
+```
+
+That one flag is what covers the case no amount of reading the export can: a
+chain that **stops early**. Drop the last thousand records and what remains is
+contiguous, linked, signed and internally consistent — nothing inside an export
+can establish that it is the whole export, because the part that would say so
+is the part that was removed. An anchor naming a `seq` the export does not
+contain is reported as `anchor_not_in_export`, and an anchor covering records
+the export has rewritten is reported as `anchor_mismatch` and
+`anchor_root_mismatch` together: one says the export was changed, the other
+says where.
+
+An anchor covers the records it names and nothing later. With the newest one
+covering seq 1234 and an export running to 1600, the report says those 366
+records are present on the export's own word — which is also the practical
+argument for `every_seconds`: the unanchored tail is however much work has
+happened since the last checkpoint.
 
 ## Maintenance order
 

@@ -36,6 +36,27 @@ Checks, in order:
 6. Each ``key_rotated`` record is signed by the *old* key, which is what makes
    rotation a continuous chain rather than two chains.
 7. Each ``checkpoint`` record's Merkle root recomputes over the range it claims.
+8. Each anchor supplied from outside the export matches the export: the record
+   it names is present, is byte-identical, and its Merkle root recomputes over
+   the records in range.
+
+   Check 8 is the only one that can detect a chain that *stops early*, and like
+   check 2 it is skipped when its input is absent. Checks 1 and 3 through 7 are
+   satisfied by any prefix of a chain: drop the last thousand records, and what
+   remains is contiguous, correctly linked, correctly signed and internally
+   consistent. Nothing inside an export can establish that it is the whole
+   export, because the thing that would say so is the part that was removed.
+
+   An anchor is a checkpoint record the instance published somewhere it cannot
+   afterwards revise -- an object-locked S3 key, a GCS bucket with a locked
+   retention policy, a signed git tag. Comparing one against the export turns
+   truncation into a missing record, and an anchor only covers the records it
+   names: everything after the newest one supplied is still unanchored, and the
+   report says so rather than reporting an unqualified pass.
+
+   Like the instance id, an anchor must reach the verifier **from outside the
+   export**. One read out of the file under review proves nothing: the forger
+   chose both.
 """
 
 from __future__ import annotations
@@ -88,6 +109,11 @@ class Report:
     #: The instance id record 0 was successfully bound to, or ``None`` when the
     #: binding was not checked. Never populated from the export itself.
     genesis_bound_to: str | None = None
+    #: How many externally supplied anchors were matched against this export.
+    anchors: int = 0
+    #: The highest ``to_seq`` an anchor covered, or ``None`` when no anchor was
+    #: supplied. Records after it are in the export on the export's own word.
+    anchored_through: int | None = None
     #: Checks that did not run, in words an auditor can put in a working paper.
     #: A non-empty list does not make ``ok`` false -- nothing failed -- but it
     #: does mean the pass is narrower than it reads.
@@ -113,26 +139,33 @@ class Report:
             "purged_payloads": self.purged,
             "keys_used": sorted(self.keys_used),
             "genesis_bound_to": self.genesis_bound_to,
+            "anchors": self.anchors,
+            "anchored_through": self.anchored_through,
             "unchecked": list(self.unchecked),
             "problems": [{"seq": p.seq, "code": p.code, "detail": p.detail} for p in self.problems],
         }
 
     def summary(self) -> str:
         bound = f"instance {self.genesis_bound_to!r}" if self.genesis_bound_to else "NOTHING"
+        if self.anchors:
+            anchored = f"{self.anchors} anchor(s), covering seq 0..{self.anchored_through}"
+        else:
+            anchored = "NOTHING -- no anchor supplied"
         lines = [
             f"records   : {self.records} (seq {self.first_seq}..{self.last_seq})",
             f"keys      : {', '.join(sorted(self.keys_used)) or 'none'}",
             f"checkpoint: {self.checkpoints}",
             f"purged    : {self.purged} payload(s) removed under retention",
             f"bound to  : {bound}",
+            f"anchored  : {anchored}",
         ]
         if not self.ok:
             lines.append(f"result    : FAILED -- {len(self.problems)} problem(s)")
             lines += [f"  - {p}" for p in self.problems]
         elif self.complete:
             lines.append(
-                "result    : OK -- chain is contiguous, unmodified, signed, and bound "
-                "to the instance id supplied"
+                "result    : OK -- chain is contiguous, unmodified, signed, bound "
+                "to the instance id supplied, and anchored to its last record"
             )
         else:
             lines.append(
@@ -179,6 +212,7 @@ def verify_records(
     public_keys: dict[str, Ed25519PublicKey],
     *,
     instance_id: str | None = None,
+    anchors: Sequence[dict[str, Any]] | None = None,
 ) -> Report:
     report = Report()
     previous: dict[str, Any] | None = None
@@ -265,7 +299,145 @@ def verify_records(
     if report.records == 0:
         report.problems.append(Problem(None, "empty", "no records to verify"))
     report.keys_used = sorted(k for k in key_ids if k)
+    _check_anchors(anchors, hashes, public_keys, report)
     return report
+
+
+def _check_anchors(
+    anchors: Sequence[dict[str, Any]] | None,
+    hashes: dict[int, str],
+    public_keys: dict[str, Ed25519PublicKey],
+    report: Report,
+) -> None:
+    """Compare externally published checkpoints against this export (check 8).
+
+    This is the only check here that can fail on something the export does not
+    contain, which is the point: every other check reads the export and asks
+    whether it is self-consistent, and a truncated chain is perfectly
+    self-consistent. The anchor is the one input that knows a record existed.
+    """
+    if not anchors:
+        report.unchecked.append(
+            "chain completeness: no anchor was supplied, so a chain that stops early "
+            "verifies exactly like a complete one -- drop the last N records and what "
+            "remains is contiguous, linked, signed and internally consistent. Re-run "
+            "with --anchor, pointing at a checkpoint the instance published somewhere "
+            "it cannot revise (an object-locked S3 key, a locked-retention GCS bucket, "
+            "a signed tag), fetched from that target and never from this file"
+        )
+        return
+
+    covered_to: list[int] = []
+    for position, anchor in enumerate(anchors):
+        label = f"anchor {position + 1}"
+        seq = anchor.get("seq")
+        payload = anchor.get("payload")
+        if not isinstance(seq, int) or not isinstance(payload, dict):
+            report.problems.append(
+                Problem(None, "malformed_anchor", f"{label} is not a checkpoint record")
+            )
+            continue
+        try:
+            start = int(payload["from_seq"])
+            end = int(payload["to_seq"])
+            claimed = str(payload["merkle_root"])
+        except (KeyError, TypeError, ValueError):
+            report.problems.append(
+                Problem(seq, "malformed_anchor", f"{label} has no from_seq/to_seq/merkle_root")
+            )
+            continue
+
+        # The anchor is evidence only if it is itself intact and signed. An
+        # anchor nobody checked is a second file to forge, not a control.
+        try:
+            recomputed = _record_hash(anchor)
+        except KeyError:
+            report.problems.append(
+                Problem(seq, "malformed_anchor", f"{label} is missing fields the hash covers")
+            )
+            continue
+        if recomputed != anchor.get("hash"):
+            report.problems.append(
+                Problem(seq, "anchor_hash_mismatch", f"{label}'s hash does not match its fields")
+            )
+            continue
+        _check_signature(anchor, seq, public_keys, None, report)
+
+        # The record the anchor names has to be in the export, and has to be
+        # the same record. Absent is the truncation case: the instance
+        # published a checkpoint at this seq and then handed over an export
+        # that ends before it.
+        present = hashes.get(seq)
+        if present is None:
+            report.problems.append(
+                Problem(
+                    seq,
+                    "anchor_not_in_export",
+                    f"{label} was published for seq {seq}, which this export does not "
+                    f"contain (it ends at {report.last_seq}) -- the chain is truncated "
+                    "or the anchor belongs to another instance",
+                )
+            )
+            continue
+        matched = True
+        if present != anchor.get("hash"):
+            matched = False
+            report.problems.append(
+                Problem(
+                    seq,
+                    "anchor_mismatch",
+                    f"{label} and the export disagree about the record at seq {seq}; "
+                    "the export was rewritten after the anchor was published",
+                )
+            )
+
+        # And the range it vouches for has to recompute. Checked even when the
+        # record above already disagreed, because the two answer different
+        # questions -- *that* the export was rewritten, and *where* -- and an
+        # auditor reading one problem code should not have to guess the other.
+        in_range = [hashes[s] for s in range(start, end + 1) if s in hashes]
+        if len(in_range) != end - start + 1:
+            matched = False
+            report.problems.append(
+                Problem(
+                    seq,
+                    "anchor_range_missing",
+                    f"{label} covers seq {start}..{end}; this export does not contain all of them",
+                )
+            )
+        elif _merkle_root(in_range) != claimed:
+            matched = False
+            report.problems.append(
+                Problem(
+                    seq,
+                    "anchor_root_mismatch",
+                    f"{label}'s published Merkle root does not match the records at "
+                    f"seq {start}..{end} in this export",
+                )
+            )
+
+        if not matched:
+            continue
+        report.anchors += 1
+        # Both halves count. The Merkle root vouches for `start..end`, and the
+        # hash comparison above vouches for the checkpoint record itself, which
+        # sits at `seq` -- one past `end` in every checkpoint the kernel
+        # writes. Without this a chain whose last record is its own anchored
+        # checkpoint would always report an unanchored tail of one.
+        covered_to.append(max(end, seq))
+
+    if not covered_to:
+        return
+    report.anchored_through = max(covered_to)
+    if report.last_seq is not None and report.last_seq > report.anchored_through:
+        tail = report.last_seq - report.anchored_through
+        report.unchecked.append(
+            f"chain completeness past the newest anchor: seq "
+            f"{report.anchored_through + 1}..{report.last_seq} ({tail} record(s)) are "
+            "after everything anchored, so they are present on this export's own word "
+            "and truncation of that tail would not show here. An anchor covers the "
+            "records it names and nothing later"
+        )
 
 
 def _check_signature(

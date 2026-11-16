@@ -45,6 +45,27 @@ def _load_keys(paths: list[Path]) -> dict[str, Ed25519PublicKey]:
     return keys
 
 
+def _load_anchors(paths: list[Path]) -> list[dict[str, object]]:
+    """Published checkpoint records, as the publishers write them.
+
+    One JSON object per file -- `checkpoint_bytes` writes the whole record, not
+    just the root, because a bare Merkle root proves nothing about who computed
+    it. A directory is read as every `*.json` in it, so a bucket synced to disk
+    works without naming each object.
+    """
+    files: list[Path] = []
+    for path in paths:
+        files.extend(sorted(path.glob("*.json")) if path.is_dir() else [path])
+
+    anchors: list[dict[str, object]] = []
+    for file in files:
+        parsed = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{file} is not a single JSON object")
+        anchors.append(parsed)
+    return anchors
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qed-verify",
@@ -65,6 +86,21 @@ def build_parser() -> argparse.ArgumentParser:
             "this file (contract, engagement letter, the operator's published identity) "
             "and never read out of the export. Without it, nothing ties these records "
             "to any instance and a chain forged elsewhere verifies identically"
+        ),
+    )
+    parser.add_argument(
+        "--anchor",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="FILE",
+        help=(
+            "a checkpoint the instance published where it cannot revise it -- an "
+            "object-locked S3 object, a locked-retention GCS object, a signed tag -- "
+            "as a JSON file, or a directory of them (repeatable). This is the only "
+            "input that can detect a chain that stops early: every other check here "
+            "is satisfied by any prefix of a chain. Fetch it from that target, never "
+            "from the export"
         ),
     )
     parser.add_argument(
@@ -104,7 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         print("qed-verify: no usable public keys supplied", file=sys.stderr)
         return 2
 
-    report = verify_records(records, keys, instance_id=args.instance_id)
+    try:
+        anchors = _load_anchors(args.anchor)
+    except (OSError, ValueError) as exc:
+        print(f"qed-verify: cannot read anchor: {exc}", file=sys.stderr)
+        return 2
+
+    report = verify_records(records, keys, instance_id=args.instance_id, anchors=anchors)
     print(json.dumps(report.to_dict(), indent=2) if args.json else report.summary())
 
     for note in report.unchecked:
