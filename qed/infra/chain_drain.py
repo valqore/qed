@@ -121,17 +121,18 @@ def _chain(writer: ChainWriter, pending: PendingRecord) -> EvidenceRecord:
     Python variable across the loop, for the same reason week 1 gave: the
     sequence number and the previous hash belong to the database's state, and a
     cached one is a cached one that was right when it was read.
+
+    One statement for both halves (``chain_tip``), which is not a cache: it is
+    the same read, asked once. Two statements were two round trips per record
+    on a network database.
     """
-    last_seq = writer.store.last_seq()
-    if last_seq is None:  # pragma: no cover - genesis is written directly
+    tip = writer.store.chain_tip()
+    if tip is None:  # pragma: no cover - genesis is written directly
         from qed.core.evidence import hashing
 
         seq, prev_hash = 0, hashing.genesis_prev_hash(writer.instance_id)
     else:
-        previous = writer.store.last_hash()
-        if previous is None:  # pragma: no cover - last_seq implies a row
-            raise RuntimeError("chain has a sequence number but no last hash")
-        seq, prev_hash = last_seq + 1, previous
+        seq, prev_hash = tip[0] + 1, tip[1]
 
     return build_record(
         seq=seq,

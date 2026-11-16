@@ -240,7 +240,13 @@ class ChainWriter:
     def deferred(self) -> bool:
         return self.write_mode == "deferred"
 
-    def ensure_genesis(self, *, ts: datetime | None = None) -> EvidenceRecord | None:
+    def ensure_genesis(
+        self,
+        *,
+        ts: datetime | None = None,
+        tip: tuple[int, str] | None = None,
+        tip_known: bool = False,
+    ) -> EvidenceRecord | None:
         """Write record 0 if the chain is empty. Returns it, or None.
 
         ``ts`` for the same reason every other write path takes one: so a
@@ -251,7 +257,9 @@ class ChainWriter:
         the two backends produced identical records and different chains,
         because genesis had taken its own clock eight milliseconds apart.
         """
-        if self.store.last_seq() is not None:
+        if not tip_known:
+            tip = self.store.chain_tip()
+        if tip is not None:
             return None
         # Written directly even in deferred mode. Genesis is record 0 and
         # every `prev_hash` descends from it, so there is nothing for a leader
@@ -265,6 +273,8 @@ class ChainWriter:
                 "chain_format": CHAIN_FORMAT,
             },
             ts=ts,
+            tip=None,
+            tip_known=True,
         )
 
     def append(
@@ -285,10 +295,16 @@ class ChainWriter:
         Returns :class:`Appended`, whose ``seq`` is None exactly when the
         record is still in the outbox.
         """
+        # One read of the tip for the whole call. `ensure_genesis` and
+        # `_append` both need it, and asking twice cost a round trip that is
+        # free on a local file and 90 ms from another region.
+        tip = self.store.chain_tip()
         # The same `ts`, so a caller who pins the first record's clock pins the
         # genesis before it too. They are two records written in one call and
         # it would be odd for one to be reproducible and the other not.
-        self.ensure_genesis(ts=ts)
+        genesis = self.ensure_genesis(ts=ts, tip=tip, tip_known=True)
+        if genesis is not None:
+            tip = (genesis.seq, genesis.hash)
         if self.deferred:
             return self._enqueue(
                 type_=type_,
@@ -311,6 +327,8 @@ class ChainWriter:
             approval_id=approval_id,
             principal_hash=principal_hash,
             ts=ts,
+            tip=tip,
+            tip_known=True,
         )
         return Appended(ref=str(record.seq), type=record.type, record=record)
 
@@ -373,8 +391,18 @@ class ChainWriter:
         check that, because "am I the only writer" is not a question a writer
         can answer about itself.
         """
-        self.ensure_genesis(ts=ts)
-        return self._append(type_=type_, assurance=assurance, payload=payload, ts=ts)
+        tip = self.store.chain_tip()
+        genesis = self.ensure_genesis(ts=ts, tip=tip, tip_known=True)
+        if genesis is not None:
+            tip = (genesis.seq, genesis.hash)
+        return self._append(
+            type_=type_,
+            assurance=assurance,
+            payload=payload,
+            ts=ts,
+            tip=tip,
+            tip_known=True,
+        )
 
     def _append(
         self,
@@ -388,15 +416,18 @@ class ChainWriter:
         approval_id: str | None = None,
         principal_hash: str | None = None,
         ts: datetime | None = None,
+        tip: tuple[int, str] | None = None,
+        tip_known: bool = False,
     ) -> EvidenceRecord:
-        last_seq = self.store.last_seq()
-        if last_seq is None:
+        # `tip_known` and not `tip is not None`, because None is a real answer:
+        # it is what an empty chain looks like, and a caller that has already
+        # asked must not be made to ask again just to say so.
+        if not tip_known:
+            tip = self.store.chain_tip()
+        if tip is None:
             seq, prev_hash = 0, hashing.genesis_prev_hash(self.instance_id)
         else:
-            previous = self.store.last_hash()
-            if previous is None:  # pragma: no cover - last_seq implies a row
-                raise RuntimeError("chain has a sequence number but no last hash")
-            seq, prev_hash = last_seq + 1, previous
+            seq, prev_hash = tip[0] + 1, tip[1]
         record = build_record(
             seq=seq,
             prev_hash=prev_hash,
