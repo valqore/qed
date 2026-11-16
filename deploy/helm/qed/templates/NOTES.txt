@@ -4,6 +4,7 @@
   evidence store  : {{ .Values.evidence.backend }}
   replicas        : {{ .Values.replicaCount }}{{ if eq .Values.evidence.backend "sqlite" }}  (SQLite: one writer, by design){{ end }}
   image           : {{ .Values.image.repository }}:{{ include "qed.imageTag" . }}
+  adapters        : {{ range $i, $e := (fromYamlArray (include "qed.adapterEntries" .)) }}{{ if $i }}, {{ end }}{{ $e.adapter_id }}{{ if $e.previous_secret_env }} (rotating){{ end }}{{ end }}
 
 Check it can decide:
 
@@ -11,9 +12,15 @@ Check it can decide:
   curl -s localhost:{{ .Values.service.port }}/readyz | jq
 
 `ready: false` is the service telling you it will not decide yet, and
-`blockers` says why. The two usual answers are a signing key it cannot read and
-a policy bundle with errors -- deciding against a broken bundle would apply
-rules nobody wrote.
+`blockers` says why. The usual answers are a signing key it cannot read, an
+adapter whose secret variable is not set, and a policy bundle with errors --
+deciding against a broken bundle would apply rules nobody wrote.
+
+Each adapter above signs every request with the secret this release reads from
+`{{ .Values.adapters.existingSecret | default "<adapters.existingSecret>" }}` (SPEC §13), so it needs that same string. One holding the
+wrong secret is refused as an unknown adapter rather than told so. Registering
+another is a values change and a key in that Secret -- `qed adapters add`
+writes `qed.yaml`, which here is a read-only ConfigMap mount.
 
 {{ if eq .Values.config.mode "shadow" }}
 This release is in SHADOW mode: every decision is recorded, and nothing is

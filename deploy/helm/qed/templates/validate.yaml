@@ -26,3 +26,54 @@ pager.
 {{- if and (eq .Values.evidence.backend "sqlite") (not .Values.evidence.sqlite.persistence.enabled) }}
 {{- fail "\nevidence.backend=sqlite with persistence disabled would put the evidence chain on an ephemeral filesystem, where it is deleted with the pod.\n\nSet evidence.sqlite.persistence.enabled=true, or use evidence.backend=postgres.\n" }}
 {{- end }}
+
+{{/*
+Adapter authentication (SPEC §13, §17).
+
+The same class of refusal as the signing key, and the one an operator is most
+likely to meet: a release with a key and a database and no adapter installs
+cleanly, rolls out, and then never becomes ready. `/readyz` reports
+`adapter_auth: "unconfigured"` and every proposal is refused 503, because SPEC
+§17 requires unknown adapters to be rejected and an instance with no secret
+cannot tell one caller from another.
+
+It is also the one that cannot be fixed afterwards from inside the pod:
+`qed.yaml` is a read-only ConfigMap mount, so `qed adapters add` has nothing to
+write to.
+*/}}
+
+{{- range $i, $entry := .Values.adapters.registered }}
+{{- if not $entry.id }}
+{{- fail (printf "\nadapters.registered[%d] has no `id`.\n\nThe id is what the caller sends as X-QED-Adapter-Id and what every record in the chain carries, so the chart will not invent one.\n" $i) }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9_-]{1,62}$" $entry.id) }}
+{{- fail (printf "\nadapters.registered[%d].id is %q, which is not a usable adapter id.\n\nLowercase letters, digits, `_` and `-`; 2 to 63 characters. The id travels in an HTTP header and lands in evidence an auditor reads, so the character set is narrow on purpose: an id that renders differently in two tools is an identity nobody can follow through the chain.\n" $i $entry.id) }}
+{{- end }}
+{{- if and $entry.previousSecretKey (eq $entry.previousSecretKey (default $entry.id $entry.secretKey)) }}
+{{- fail (printf "\nadapters.registered[%d] (%s) names the same Secret key as both its current and its previous secret, so there is no overlap.\n\nA rotation needs two live secrets at once: between the instance accepting the new one and the last adapter being restarted with it, requests signed with the old one would be refused as AG-IDN-005 -- an unknown adapter, which under `fail: closed` is a blocked action. Put the new secret under a new key, leave the old key where it is, and remove `previousSecretKey` once the fleet has caught up.\n" $i $entry.id) }}
+{{- end }}
+{{- end }}
+
+{{- if and .Values.adapters.registered (not .Values.adapters.existingSecret) }}
+{{- fail "\nadapters.existingSecret is required when adapters.registered is set.\n\nA shared secret is a credential, so it is never rendered into a manifest: qed.yaml names the environment variable and the Secret supplies the value.\n\n  kubectl create secret generic qed-adapters \\\n    --from-literal=mcp-proxy=\"$(openssl rand -base64 32)\"\n\nThe adapter needs that same string. Anything shorter than 32 characters is refused at startup as a password somebody typed.\n" }}
+{{- end }}
+
+{{- $entries := fromYamlArray (include "qed.adapterEntries" .) }}
+
+{{- if not $entries }}
+{{- fail "\nNo adapter is registered, so this release would install and never become ready.\n\nSPEC §17 requires QED to reject adapters it cannot identify. With no secret it cannot identify any of them, so `/readyz` stays 503 with `adapter_auth: \"unconfigured\"` and every proposal is refused -- a deployment that rolls out green and decides nothing.\n\nThis is not fixable from inside the pod: qed.yaml is a read-only ConfigMap mount, so `qed adapters add` has nothing to write to. Register the adapter here instead:\n\n  kubectl create secret generic qed-adapters \\\n    --from-literal=mcp-proxy=\"$(openssl rand -base64 32)\"\n\n  adapters:\n    existingSecret: qed-adapters\n    registered:\n      - id: mcp-proxy\n\nThe same string goes to the adapter, which signs each request with it (SPEC §13). `--dev`, where signatures are not checked, is not offered by this chart: it is for a loopback process, and this one has a Service in front of it.\n" }}
+{{- end }}
+
+{{- $ids := list }}
+{{- range $entries }}
+{{- if not .adapter_id }}
+{{- fail (printf "\nAn entry in `config.adapters` has no `adapter_id`:\n\n%s\nThat list is the raw qed.yaml shape and is only worth using to name your own variables. `adapters.registered` is the one with the Secret wiring.\n" (toYaml .)) }}
+{{- end }}
+{{- if not .secret_env }}
+{{- fail (printf "\nAn entry in `config.adapters` has no `secret_env`:\n\n%s\nThe secret itself never goes in qed.yaml -- the entry names the environment variable holding it, and `extraEnv` supplies that variable from a Secret. Or use `adapters.registered`, which does both.\n" (toYaml .)) }}
+{{- end }}
+{{- $ids = append $ids .adapter_id }}
+{{- end }}
+{{- if ne (len $ids) (len (uniq $ids)) }}
+{{- fail (printf "\nTwo adapters are registered under the same id: %s.\n\nOne of them would silently win, and the evidence would attribute both adapters' decisions to it. Check `config.adapters` as well as `adapters.registered` -- entries from both end up in the same list.\n" (join ", " $ids)) }}
+{{- end }}

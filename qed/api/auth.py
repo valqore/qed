@@ -66,8 +66,19 @@ __all__ = [
     "sign",
 ]
 
-#: Environment variable prefix used when an adapter is not in ``qed.yaml``.
+#: The conventional prefix for an adapter's secret variable:
 #: ``QED_ADAPTER_SECRET_ADP_LAPTOP_ALI`` for adapter id ``adp_laptop_ali``.
+#:
+#: A **convention and not a mechanism**, which the comment here claimed the
+#: opposite of until 16 November 2026: it read "used when an adapter is not in
+#: `qed.yaml`", and nothing has ever discovered an adapter from the
+#: environment. Only ``config.registered_adapters`` is read, and each entry
+#: names its own variable, so an adapter absent from the config is absent
+#: however many variables are set. The name is derived in two places that have
+#: to agree — ``qed.cli._secret_env_name``, which prints it after generating a
+#: secret, and the Helm chart's ``qed.adapterSecretEnv``, which writes it into
+#: a ConfigMap — and `tests/deploy/test_helm_chart.py` asserts the second
+#: against the first rather than against a copy of the rule.
 ENV_PREFIX: Final = "QED_ADAPTER_SECRET_"
 
 #: Shortest secret accepted. 32 bytes of entropy, hex or base64, is 43+ chars;

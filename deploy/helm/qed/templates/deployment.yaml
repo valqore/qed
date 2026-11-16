@@ -79,6 +79,26 @@ spec:
                   name: {{ .Values.evidence.postgres.existingSecret }}
                   key: {{ .Values.evidence.postgres.secretKey }}
             {{- end }}
+            {{- /* One variable per registered adapter, and a second while a
+                   rotation is in flight. `qed.yaml` names them; the values
+                   come from the Secret and are never rendered here. */}}
+            {{- range .Values.adapters.registered }}
+            {{- if .id }}
+            {{- $env := include "qed.adapterSecretEnv" .id }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.adapters.existingSecret }}
+                  key: {{ default .id .secretKey }}
+            {{- if .previousSecretKey }}
+            - name: {{ $env }}_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.adapters.existingSecret }}
+                  key: {{ .previousSecretKey }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

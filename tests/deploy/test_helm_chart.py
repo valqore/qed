@@ -9,6 +9,8 @@ What is asserted is the set of properties that are *about QED* rather than
 about Helm:
 
 * it refuses to install without an evidence signing key;
+* it refuses to install with no adapter registered, which would otherwise be a
+  release that rolls out green and is never ready;
 * it refuses more than one replica on SQLite, because two writers fork the
   chain;
 * the DSN is never rendered into a manifest;
@@ -23,7 +25,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import yaml
@@ -33,8 +35,20 @@ CHART = Path(__file__).resolve().parents[2] / "deploy" / "helm" / "qed"
 
 pytestmark = pytest.mark.skipif(HELM is None, reason="helm is not installed")
 
-#: Enough to get past the install-time checks, and nothing more.
-MINIMAL = ["--set", "signingKey.existingSecret=qed-signing-key"]
+#: A signing key and nothing else. `readyz` needs one more thing.
+KEY_ONLY = ["--set", "signingKey.existingSecret=qed-signing-key"]
+
+#: Enough to get past the install-time checks, and nothing more. Both halves
+#: are what `/readyz` gates on: a key to sign evidence with, and a way to tell
+#: adapters apart. A release with only the first installs, rolls out, and then
+#: refuses every proposal with `adapter-auth-unconfigured`.
+MINIMAL = [
+    *KEY_ONLY,
+    "--set",
+    "adapters.existingSecret=qed-adapters",
+    "--set",
+    "adapters.registered[0].id=mcp-proxy",
+]
 
 POSTGRES = [
     *MINIMAL,
@@ -130,6 +144,71 @@ class TestWhatItRefusesToInstall:
     def test_an_unknown_backend(self) -> None:
         assert "sqlite or postgres" in refusal(*MINIMAL, "--set", "evidence.backend=mysql")
 
+    def test_no_adapter_registered(self) -> None:
+        """The failure this one is really about is not a crash: it is a release
+        that installs cleanly, rolls out green, and then never becomes ready.
+        SPEC §17 requires unknown adapters to be rejected, and an instance with
+        no secret cannot tell one caller from another, so `/readyz` stays 503
+        with `adapter_auth: "unconfigured"`."""
+        message = refusal(*KEY_ONLY)
+        assert "No adapter is registered" in message
+        assert 'adapter_auth: "unconfigured"' in message
+        # And it says what to do, because the pod cannot be told afterwards:
+        # qed.yaml is a read-only ConfigMap mount, so `qed adapters add` has
+        # nothing to write to.
+        assert "read-only ConfigMap mount" in message
+        assert "adapters.registered" in message or "registered:" in message
+
+    def test_an_adapter_with_no_secret(self) -> None:
+        message = refusal(*KEY_ONLY, "--set", "adapters.registered[0].id=mcp-proxy")
+        assert "adapters.existingSecret is required" in message
+
+    def test_an_adapter_with_no_id(self) -> None:
+        """A Go template error is not a sentence, and which template Helm
+        renders first should not decide which one the operator gets."""
+        message = refusal(
+            *KEY_ONLY,
+            "--set",
+            "adapters.existingSecret=qed-adapters",
+            "--set",
+            "adapters.registered[0].kind=mcp",
+        )
+        assert "has no `id`" in message
+        assert "invalid value" not in message, "a template error leaked instead of the refusal"
+
+    def test_an_unusable_adapter_id(self) -> None:
+        """The id travels in an HTTP header and lands in evidence an auditor
+        reads: an id that renders differently in two tools is an identity
+        nobody can follow through the chain."""
+        message = refusal(
+            *KEY_ONLY,
+            "--set",
+            "adapters.existingSecret=qed-adapters",
+            "--set",
+            "adapters.registered[0].id=MCP_Proxy",
+        )
+        assert "not a usable adapter id" in message
+
+    def test_a_rotation_with_no_overlap(self) -> None:
+        """A shared secret cannot change on two machines at the same instant.
+        One key named as both the current and the previous secret is a cutover
+        dressed as a rotation."""
+        message = refusal(*MINIMAL, "--set", "adapters.registered[0].previousSecretKey=mcp-proxy")
+        assert "no overlap" in message
+        assert "AG-IDN-005" in message
+
+    def test_two_adapters_under_one_id(self) -> None:
+        """One would silently win, and the evidence would attribute both
+        adapters' decisions to it."""
+        message = refusal(*MINIMAL, "--set", "adapters.registered[1].id=mcp-proxy")
+        assert "same id" in message
+
+    def test_a_raw_config_entry_with_no_variable(self) -> None:
+        """`config.adapters` is the escape hatch for naming your own
+        variables. An entry with no `secret_env` names nothing."""
+        message = refusal(*KEY_ONLY, "--set", "config.adapters[0].adapter_id=raw")
+        assert "has no `secret_env`" in message
+
 
 class TestTheSigningKey:
     def test_it_is_mounted_read_only_outside_the_writable_directory(self) -> None:
@@ -152,6 +231,136 @@ class TestTheSigningKey:
         secret = next(v for v in volumes if v["name"] == "signing-key")["secret"]
         assert secret["secretName"] == "qed-signing-key"
         assert secret["defaultMode"] == 0o400
+
+
+class TestAdapterAuthentication:
+    """The other half of what `/readyz` gates on (SPEC §13, §17).
+
+    The chart has to get two things right that nothing on the cluster would
+    report: the variable names in `qed.yaml` must be the ones the Deployment
+    supplies, and they must be the names `qed adapters add` prints -- an
+    operator who generates the secret locally is told to export *that* name.
+    Either one wrong is a pod whose only symptom is `readyz: false` next to an
+    adapter that looks registered.
+    """
+
+    SET: ClassVar[list[str]] = [
+        "--set",
+        "adapters.existingSecret=qed-adapters",
+        "--set",
+        "adapters.registered[0].id=mcp-proxy",
+        "--set",
+        "adapters.registered[1].id=ci-runner",
+        "--set",
+        "adapters.registered[1].kind=ci",
+        "--set",
+        "adapters.registered[1].previousSecretKey=ci-runner-old",
+    ]
+
+    def documents(self) -> list[dict[str, Any]]:
+        return render(*KEY_ONLY, *self.SET)
+
+    def test_the_config_registers_them(self) -> None:
+        config = yaml.safe_load(kind(self.documents(), "ConfigMap")["data"]["qed.yaml"])
+        entries = {e["adapter_id"]: e for e in config["adapters"]}
+        assert set(entries) == {"mcp-proxy", "ci-runner"}
+        assert entries["mcp-proxy"]["secret_env"] == "QED_ADAPTER_SECRET_MCP_PROXY"
+        assert entries["mcp-proxy"]["kind"] == "mcp"
+        assert entries["ci-runner"]["kind"] == "ci"
+        assert "previous_secret_env" not in entries["mcp-proxy"]
+
+    def test_every_variable_it_names_is_one_the_pod_is_given(self) -> None:
+        """The assertion the two templates cannot make about themselves. A
+        config naming a variable nothing sets is exactly the state the real
+        instance reports as `adapter <id> names <VAR>, which is not set`."""
+        documents = self.documents()
+        config = yaml.safe_load(kind(documents, "ConfigMap")["data"]["qed.yaml"])
+        named = set()
+        for entry in config["adapters"]:
+            named.add(entry["secret_env"])
+            if entry.get("previous_secret_env"):
+                named.add(entry["previous_secret_env"])
+        supplied = {e["name"] for e in container(documents)["env"]}
+        assert named and not named - supplied, f"named but never set: {named - supplied}"
+
+    def test_the_variable_names_are_the_ones_the_cli_prints(self) -> None:
+        """`qed adapters add` generates the secret and prints `export
+        QED_ADAPTER_SECRET_...=`. A chart that picked its own spelling would
+        send the operator to the wrong variable."""
+        from qed.cli import _secret_env_name
+
+        config = yaml.safe_load(kind(self.documents(), "ConfigMap")["data"]["qed.yaml"])
+        for entry in config["adapters"]:
+            assert entry["secret_env"] == _secret_env_name(entry["adapter_id"])
+
+    def test_no_secret_is_rendered_into_a_manifest(self) -> None:
+        """A shared secret is a credential, so it travels the same way the DSN
+        does: the manifest names the variable, Kubernetes supplies the value."""
+        documents = self.documents()
+        env = {e["name"]: e for e in container(documents)["env"]}
+        for name in env:
+            if name.startswith("QED_ADAPTER_SECRET_"):
+                assert "value" not in env[name], f"{name} has a literal value"
+                assert env[name]["valueFrom"]["secretKeyRef"]["name"] == "qed-adapters"
+        config = kind(documents, "ConfigMap")["data"]["qed.yaml"]
+        assert "secret:" not in config
+
+    def test_the_secret_key_defaults_to_the_id(self) -> None:
+        env = {e["name"]: e for e in container(self.documents())["env"]}
+        assert env["QED_ADAPTER_SECRET_MCP_PROXY"]["valueFrom"]["secretKeyRef"]["key"] == (
+            "mcp-proxy"
+        )
+
+    def test_a_rotation_gets_a_second_variable_of_its_own(self) -> None:
+        """Both secrets are live during a rotation, so the old one needs
+        somewhere to live that is not the variable being overwritten."""
+        documents = self.documents()
+        config = yaml.safe_load(kind(documents, "ConfigMap")["data"]["qed.yaml"])
+        entry = next(e for e in config["adapters"] if e["adapter_id"] == "ci-runner")
+        assert entry["previous_secret_env"] == "QED_ADAPTER_SECRET_CI_RUNNER_PREVIOUS"
+        assert entry["previous_secret_env"] != entry["secret_env"]
+
+        env = {e["name"]: e for e in container(documents)["env"]}
+        keys = {
+            name: env[name]["valueFrom"]["secretKeyRef"]["key"]
+            for name in (entry["secret_env"], entry["previous_secret_env"])
+        }
+        assert keys == {
+            "QED_ADAPTER_SECRET_CI_RUNNER": "ci-runner",
+            "QED_ADAPTER_SECRET_CI_RUNNER_PREVIOUS": "ci-runner-old",
+        }
+
+    def test_the_rendered_config_is_one_the_kernel_accepts(self) -> None:
+        """`helm template` output that the real schema rejects is a chart that
+        installs and crash-loops. Parse it with `QedConfig` and resolve the
+        adapters with the real `AdapterAuth`, which is what decides whether
+        `/readyz` comes up."""
+        import os
+        from unittest import mock
+
+        from qed.api.auth import AdapterAuth
+        from qed.config import QedConfig
+
+        config = QedConfig.model_validate(
+            yaml.safe_load(kind(self.documents(), "ConfigMap")["data"]["qed.yaml"])
+        )
+        variables = {}
+        for entry in config.registered_adapters:
+            variables[entry.secret_env] = "x" * 44
+            if entry.previous_secret_env:
+                variables[entry.previous_secret_env] = "y" * 44
+        with mock.patch.dict(os.environ, variables, clear=False):
+            mode = AdapterAuth(config).mode
+        assert mode.kind == "signed", mode.reason
+        assert set(mode.adapters) == {"mcp-proxy", "ci-runner"}
+
+    def test_a_secret_change_rolls_the_pods(self) -> None:
+        """Registering an adapter changes `qed.yaml`, so the checksum
+        annotation has to move with it -- otherwise the running pods keep the
+        adapter list they started with."""
+        before = kind(render(*MINIMAL), "Deployment")["spec"]["template"]["metadata"]["annotations"]
+        after = kind(self.documents(), "Deployment")["spec"]["template"]["metadata"]["annotations"]
+        assert before["checksum/config"] != after["checksum/config"]
 
 
 class TestTheEvidenceStore:
