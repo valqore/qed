@@ -6,6 +6,8 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-16
+
 ### Added — `qed-verify --anchor`, because the control existed and was unusable
 
 Nine of ten tampering mutations against a real cloud chain were rejected. The
