@@ -2375,6 +2375,25 @@ def checkpoint(
 # -------------------------------------------------------------------- verify
 
 
+def _load_anchor_files(paths: list[Path]) -> list[dict[str, object]]:
+    """Published checkpoints, as the publishers wrote them: one object per file.
+
+    Deliberately the same shape `qed-verify --anchor` reads, so an operator who
+    learns one does not have to learn the other.
+    """
+    files: list[Path] = []
+    for path in paths:
+        files.extend(sorted(path.glob("*.json")) if path.is_dir() else [path])
+
+    anchors: list[dict[str, object]] = []
+    for file in files:
+        parsed = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{file} is not a single JSON object")
+        anchors.append(parsed)
+    return anchors
+
+
 @app.command()
 def verify(
     records: Annotated[
@@ -2391,11 +2410,25 @@ def verify(
             "from a file; taken from the local config when no file is given.",
         ),
     ] = None,
+    anchor: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--anchor",
+            help="A published checkpoint, as a JSON file or a directory of them. The "
+            "only input that can detect a chain that stops early. Fetch it from the "
+            "target it was published to, never from the export.",
+        ),
+    ] = None,
 ) -> None:
     """Verify a chain. A thin wrapper; auditors should run `qed-verify` itself.
 
     With no argument this verifies the local chain and binds it to the instance
-    id in the local configuration, so every check runs. Given a *file*, there is
+    id in the local configuration. That is still not every check: completeness
+    needs an anchor, and an anchor the local instance hands you is not one --
+    an instance that rewrote its chain would hand you a matching anchor. Pass
+    `--anchor` with a copy fetched from the bucket or tag it was published to.
+
+    Given a *file*, there is
     no configuration to trust: the id has to come from `--instance-id`, and
     without it the genesis binding does not run and the report says so. Binding
     a foreign export to the local instance id by default would turn a real check
@@ -2417,8 +2450,17 @@ def verify(
     else:
         text = records.read_text(encoding="utf-8")
 
+    try:
+        anchors = _load_anchor_files(anchor or [])
+    except (OSError, ValueError) as exc:
+        _fail(f"cannot read anchor: {exc}")
+        return
+
     report = verify_records(
-        load_jsonl(text), load_public_keys(directory / PUBLIC_DIR_NAME), instance_id=instance_id
+        load_jsonl(text),
+        load_public_keys(directory / PUBLIC_DIR_NAME),
+        instance_id=instance_id,
+        anchors=anchors,
     )
     typer.echo(json.dumps(report.to_dict(), indent=2) if as_json else report.summary())
     for note in report.unchecked:
@@ -3584,15 +3626,21 @@ def _demo_verify(state: Path, session: Session, records: list[EvidenceRecord]) -
         load_public_keys(state / PUBLIC_DIR_NAME),
         instance_id=session.config.instance_id,
     )
-    if report.ok and report.complete:
+    if report.ok:
         typer.secho(
             "          verified: contiguous, unmodified, signed, and bound to "
             f"instance {session.config.instance_id!r}",
             fg=typer.colors.GREEN,
         )
+        # The demo publishes no anchor, so chain completeness is not among the
+        # checks that ran. Saying which check was skipped is the same rule the
+        # verifier itself follows: a tick over a check that did not run is the
+        # one failure this tool must never have.
+        for note in report.unchecked:
+            typer.secho(f"          not checked: {note.split(':')[0]}", fg=typer.colors.YELLOW)
         return
     for line in report.summary().splitlines():
-        typer.secho(f"          {line}", fg=typer.colors.RED if not report.ok else None)
+        typer.secho(f"          {line}", fg=typer.colors.RED)
 
 
 def main() -> None:

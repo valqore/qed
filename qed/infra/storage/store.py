@@ -275,6 +275,24 @@ class SqlStore:
 
     # ---------------------------------------------------------------- evidence
 
+    def chain_tip(self) -> tuple[int, str] | None:
+        """The last record's ``seq`` and ``hash``, in one round trip.
+
+        ``last_seq`` and ``last_hash`` both exist and both still work, but a
+        caller that needs the tip needs both halves and every append does --
+        and on a network database two statements are two round trips. A
+        decision issued eight statements purely to locate the tip, measured on
+        2026-11-16, which is invisible on a local file and about 90 ms each
+        from another region. The ordering is the primary key's, so this is one
+        index seek either way.
+        """
+        row = self._conn.execute(
+            "SELECT seq, hash FROM evidence ORDER BY seq DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row["seq"]), str(row["hash"])
+
     def last_seq(self) -> int | None:
         row = self._conn.execute("SELECT MAX(seq) AS m FROM evidence").fetchone()
         return None if row["m"] is None else int(row["m"])

@@ -327,6 +327,43 @@ curl -s localhost:8711/readyz | jq .ready
 Both, not one. The startup race only appeared because *both* were checked — the
 survivor looked perfectly healthy.
 
+## What a run against real cloud found that none of this did
+
+2026-11-16, against Azure PostgreSQL Flexible Server, AKS, real GCS and real
+S3, using only the published artifacts. Five findings, in the order of how
+little the test suite could have seen them:
+
+* **A default `helm install` rolled out green and was never ready.** The chart
+  refused five things and said nothing about adapters, which is the one that
+  gates `/readyz` — and the obvious repair, `qed adapters add`, cannot work in
+  the pod, because `qed.yaml` is a read-only ConfigMap mount. Nothing in a
+  rendered template is wrong; the gap is between two correct files.
+* **The 50 ms budget is a claim about round trips.** A decision makes 18 SQL
+  statements, so from another region each one costs the RTT and p95 was 1,085
+  ms against a 50 ms budget. In-region it is 46 ms — inside, with 8% of
+  headroom rather than the 5x the in-process figure suggests. No local test can
+  see this, because the only variable is the distance to the database.
+* **Tail truncation had nowhere to be caught.** Nine of ten tampering
+  mutations were rejected; the tenth was dropping the end of the export, which
+  every other check is satisfied by. The anchor that catches it existed and
+  was published to object-locked storage, and `qed-verify` had no flag to
+  accept one. The control was real and unreachable.
+* **A one-day-retention S3 object-lock test asserted a refusal it never
+  reached.** It sent `ObjectLockRetainUntilDate=utcnow()`, and S3 validates
+  the date *before* the bucket configuration: real AWS answered
+  `InvalidArgument: The retain until date must be in the future!` rather than
+  the `InvalidRequest: Bucket is missing ObjectLockConfiguration` the test was
+  written to observe. It had only ever run against an emulator that accepts
+  anything, where it was marked AWS-only and never executed.
+* **Two GCS retention tests had been skipped for months** because one locks a
+  policy irreversibly. A throwaway bucket with a **one-second** retention
+  period makes the lock harmless — objects are deletable immediately, so the
+  bucket can still be removed — and both now run.
+
+The common shape: each is a claim that was true about the artifact and false
+about the deployment, and the only thing that distinguished them was running
+the published artifact somewhere real.
+
 ## The full pass
 
 `tests/perf` and `tests/deploy -m slow` are excluded from the matrix and run in
@@ -338,8 +375,28 @@ QED_TEST_POSTGRES_DSN=postgresql://... pytest -q
 pytest tests/deploy -q -m slow                 # both architectures
 pytest tests/perf -q -m perf -s                # p95, with the distributions printed
 docker compose -f deploy/docker-compose.yml up --build -d && ...
-helm template qed deploy/helm/qed --set signingKey.existingSecret=k
+helm install qed deploy/helm/qed --dry-run \
+  --set signingKey.existingSecret=k \
+  --set adapters.existingSecret=a --set adapters.registered[0].id=mcp-proxy
 ```
+
+And the cloud-only ones, which need credentials and cost a few cents:
+
+```bash
+# real S3 object-lock: 11 tests, incl. the one LocalStack cannot model
+QED_TEST_S3_ENDPOINT=https://s3.<region>.amazonaws.com QED_TEST_S3_AWS=1 \
+  pytest tests/evidence/test_s3_object_lock_live.py -q
+
+# real GCS retention: 13 tests. Two buckets, one with a retention policy.
+# For the locked half, create a bucket with --retention-period=1s and lock it:
+# the lock is irreversible, and at one second the bucket is still deletable.
+QED_TEST_GCS_BUCKET=<retention bucket> QED_TEST_GCS_PLAIN_BUCKET=<plain> \
+  QED_TEST_GCS_DESTRUCTIVE=1 pytest tests/evidence/test_gcs_retention_live.py -q
+```
+
+An object-lock bucket cannot be emptied until its retention expires, so a run
+with `RETAIN_DAYS=1` leaves one bucket to delete tomorrow. That is the control
+working, not a leak.
 
 Plus the one thing no automation covers: install the wheel on a machine that
 has never had the source, and follow `README.md` from the top. Every gap in the

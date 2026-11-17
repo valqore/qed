@@ -6,6 +6,183 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Added — `qed-verify --anchor`, because the control existed and was unusable
+
+Nine of ten tampering mutations against a real cloud chain were rejected. The
+tenth was deleting records from the **end** of the export, and it is not
+detectable inside an export by construction: any prefix of a chain is
+contiguous, correctly linked, correctly signed and internally consistent, and
+the record that would say more followed is the record that was removed.
+
+The defence for that has existed since week 7 and is tested against real
+object-lock storage: publish the checkpoint root somewhere the instance cannot
+revise it. What was missing is the last step. `qed-verify` had no input for an
+anchor — no flag, no field in the report, no mention in the summary. An auditor
+could fetch the published checkpoint and compare it by eye, and nothing else.
+A control that is implemented, tested, documented and unreachable from the tool
+whose entire job is checking it is not a control.
+
+So `--anchor FILE` (repeatable; a file, or a directory of them) is check 8. It
+takes the published checkpoint record as the publishers write it, verifies the
+anchor's own hash and signature — an anchor nobody checks is a second file to
+forge — and then compares it against the export:
+
+* the record it names is missing → `anchor_not_in_export`, naming the seq the
+  export ends at. This is the truncation case;
+* the record is there and different → `anchor_mismatch`;
+* the records in the anchor's range are missing or recompute to a different
+  Merkle root → `anchor_range_missing` / `anchor_root_mismatch`. Reported
+  *alongside* `anchor_mismatch` rather than instead of it, because the two
+  answer different questions: that the export was rewritten, and where.
+
+`qed verify --anchor` takes the same thing, and both read the same file shape.
+
+Two consequences worth stating plainly. **Without `--anchor`, the report now
+names chain completeness as a check that did not run**, and
+`--require-complete` exits non-zero — the same treatment `--instance-id` has
+had since the summary was fixed for printing `OK` over a skipped check. A
+pipeline using `--require-complete` needs both inputs now, and that is the
+honest reading of what the flag has always claimed. **And an anchor covers the
+records it names and nothing later**: with the newest anchor at seq 1234 and an
+export running to 1600, the report says those 366 records are there on the
+export's own word. An unqualified pass over an unanchored tail would be the
+same overstatement in a new place.
+
+Like the instance id, an anchor has to reach the verifier from outside the
+export. One the instance under audit hands you is a file it could have written
+to match.
+
+### Fixed — a default `helm install` rolled out green and was never ready
+
+The chart refused five things at install time and said nothing about the sixth,
+which is the one an operator actually meets. `helm install` with a signing key
+and nothing else rendered cleanly, the Deployment rolled out, and the pod then
+sat at `/readyz` 503 with `adapter_auth: "unconfigured"`, refusing every
+proposal — because SPEC §17 requires QED to reject adapters it cannot identify,
+and an instance holding no adapter secret cannot identify any of them.
+
+Worse, there was no way out from inside the pod. The obvious move is
+`qed adapters add`, which writes `qed.yaml` — and under this chart `qed.yaml`
+is a read-only ConfigMap mount. The working arrangement existed only as a
+commented-out `extraEnv` example: hand-write `config.adapters` with a
+`secret_env`, then hand-write the matching `extraEnv` entry with a
+`secretKeyRef`, and keep the variable name in the two places in step.
+
+So adapters are now a first-class value, wired end to end from one id:
+
+```yaml
+adapters:
+  existingSecret: qed-adapters
+  registered:
+    - id: mcp-proxy
+```
+
+which names `QED_ADAPTER_SECRET_MCP_PROXY` in `qed.yaml` and supplies it from
+that Secret's `mcp-proxy` key. The variable name is derived the same way
+`qed adapters add` derives it, and a test asserts that against the CLI's own
+`_secret_env_name` rather than against a copy of the rule — an operator who
+generates the secret locally is told to export *that* name, and a chart with
+its own spelling would produce a pod whose only symptom is `readyz: false` next
+to an adapter that looks registered.
+
+A release with no adapter is now refused at install time, in the same sentence
+the missing-signing-key refusal is written in. Five narrower refusals come with
+it: an entry with no `id`, an id outside `[a-z0-9][a-z0-9_-]{1,62}` (the id
+travels in a header and lands in evidence an auditor reads), `registered`
+without `existingSecret`, two entries under one id (one would silently win and
+the evidence would attribute both adapters' decisions to it), and a
+`previousSecretKey` naming the key already in use — a rotation whose whole
+point is an overlap, with no overlap.
+
+`adapters.registered` also handles rotation, which the `extraEnv` arrangement
+could not express without inventing a second variable name by hand:
+`previousSecretKey` names the old Secret key, both secrets are accepted while
+it is set, and it is removed once the fleet has restarted.
+
+`--dev`, where signatures are accepted unverified, is deliberately not offered.
+It is for a loopback process, and everything this chart installs has a Service
+in front of it.
+
+### Changed — four fewer round trips per decision, and a performance page that says what the number is
+
+The 50 ms budget is a claim about **round trips**, and the published figures
+were being quoted as though it were a claim about query cost. p95 of 4.5 ms on
+SQLite and 10.6 ms on PostgreSQL are both in-process numbers taken with the
+database on the same machine. Against Azure PostgreSQL from another region —
+90 ms RTT — p50 was **1035 ms** and `test_p95_on_postgres` failed by a factor
+of twenty. In the same region it is **46 ms**: inside the budget, with about 8%
+of headroom rather than the 5x the in-process number suggests, and a p99 of
+50.4 ms already over.
+
+Nothing was slow. `1035 / 90` is about 11.5, which is roughly the number of
+statements a decision issues, and the query cost is in the noise. So the first
+thing done was to count instead of estimate: wrap the connection, run ten
+decisions, print the statements. **22 per decision**, of which eight existed
+only to locate the chain tip — `SELECT MAX(seq)` six times and
+`SELECT hash … ORDER BY seq DESC` twice, for two records written.
+
+Two of those three reads per append were redundant rather than load-bearing:
+
+* `last_seq()` and `last_hash()` are two statements for one row. `chain_tip()`
+  returns both in one, ordering by the primary key either way;
+* `append()` called `ensure_genesis()`, which read the tip to ask whether the
+  chain was empty, and then `_append()` read it again to use it. The tip is now
+  read once per call and threaded through, with an explicit `tip_known` flag
+  because `None` is a real answer — it is what an empty chain looks like, and a
+  caller that has already asked should not have to ask again to say so.
+
+**18 statements per decision**, measured the same way. The third read, inside
+`append_evidence`'s write transaction, stays: it is the check that stops two
+writers agreeing on the same `seq`, and it is inside the transaction for that
+reason. Of what is left, six statements are transaction control for three
+separate write transactions, which is a larger saving still and a change to
+durability semantics rather than to plumbing — not something to do in the same
+hour as noticing it.
+
+`docs/performance.md` now leads with the round-trip framing, carries both cloud
+rows, and says the in-process figures are in-process. `README.md` says it too.
+The practical sentence, which was nowhere before: **co-locating the kernel and
+its database is a requirement, not an optimisation.**
+
+### Fixed — an object-lock test asserted a refusal it could never reach
+
+`test_a_bucket_without_object_lock_refuses_the_request` is the one assertion in
+the S3 suite that LocalStack cannot model, so it is gated on
+`QED_TEST_S3_AWS=1` and had never run. Run against real AWS for the first time
+on 2026-11-16, it failed: `InvalidArgument: The retain until date must be in
+the future!` where it expected `InvalidRequest: Bucket is missing
+ObjectLockConfiguration`.
+
+The docstring's claim about S3 was right. The test could not reach it. It sent
+`ObjectLockRetainUntilDate=utcnow()`, and S3 validates the date *before* it
+looks at the bucket's configuration — so the refusal it was written to observe
+never happened, and a passing version of it would have been reporting on date
+validation in the same words. A probe settled which, rather than a guess: on a
+plain bucket a future date gives `InvalidRequest: Bucket is missing
+ObjectLockConfiguration`, and `utcnow()` gives `InvalidArgument` on a plain and
+an object-lock bucket alike.
+
+It now sends what the publisher sends — `retain_days` in the future — and
+asserts the **message** as well as the code, so a date error can no longer pass
+for a missing configuration. All 11 tests pass against real S3.
+
+### Fixed — the locked-retention GCS test had been skipped for a month
+
+`test_a_locked_policy_cannot_be_removed` is the half of the three-state
+argument that makes a GCS anchor the equal of an S3 object-lock one, and it was
+a citation of Google's documentation rather than a measurement, because locking
+a retention policy cannot be undone and no bucket was going to be given up for
+it.
+
+A **one-second** retention period resolves that: the lock is exactly as
+permanent, and every object in the bucket is deletable immediately, so the
+throwaway bucket can still be removed afterwards — which it was, which is the
+confirmation. Measured: removing a locked policy is refused for a project
+owner, and the policy and `isLocked` are still in place afterwards. Its
+unlocked counterpart, which removes the policy and then deletes the anchor,
+ran the same day on a separate unlocked bucket. `THREAT_MODEL.md` and
+`docs/checkpoints.md` no longer carry the caveat.
+
 ### Fixed — neither wheel carried PEP 561's marker, so no consumer could see the types
 
 `qed` is fully annotated and `mypy --strict` passes over it here. None of that

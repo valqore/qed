@@ -86,7 +86,8 @@ is the shape of the product.
 |---|---|---|
 | A record is edited in the database | `payload_hash` → `hash` → next record's `prev_hash`; any edit breaks linkage | `qed-verify` reports the first broken link |
 | A record is deleted | `seq` is contiguous; a gap is reported | `qed-verify` |
-| The whole chain is rewritten by the operator | **Only detectable with an anchor.** Checkpoint roots published outside the instance (S3 object-lock, git tag, transparency log). The object-lock path is tested against a real S3 server that enforces retention, not a mock: the locked version cannot be deleted, cannot be deleted with `BypassGovernanceRetention`, and survives both a delete marker and an overwrite | `qed/infra/publishers/`, `qed/remote/anchor.py`, `tests/evidence/test_s3_object_lock_live.py`. `qed doctor` says "anchors: none" in yellow when there are none, because without one this row is not covered |
+| Records are deleted **from the end** | **Not detectable inside the export, by construction**: any prefix of a chain is contiguous, correctly linked, correctly signed and internally consistent, and the record that would say more followed is the one removed. Caught only by an anchor covering a later `seq` than the export contains, which `qed-verify --anchor` reports as `anchor_not_in_export`. Measured: of ten mutations against a real cloud chain, this was the one the verifier could not see | `qed-verify --anchor`, `packages/qed-verify/tests/test_verify.py::TestTheAnchor` |
+| The whole chain is rewritten by the operator | **Only detectable with an anchor**, and only if somebody compares it: `qed-verify --anchor`. Checkpoint roots published outside the instance (S3 object-lock, git tag, transparency log). The object-lock path is tested against a real S3 server that enforces retention, not a mock: the locked version cannot be deleted, cannot be deleted with `BypassGovernanceRetention`, and survives both a delete marker and an overwrite | `qed/infra/publishers/`, `qed/remote/anchor.py`, `tests/evidence/test_s3_object_lock_live.py`. `qed doctor` says "anchors: none" in yellow when there are none, because without one this row is not covered. `qed-verify` reports chain completeness as unchecked when no anchor is passed |
 | A forged history signed with a leaked key | Rotation **destroys** the old private key; `key_rotated` is signed by the retiring key | ADR-0010 |
 | A chain from another instance is substituted **into a running instance** | `genesis` binds `instance_id`; the writer refuses a mismatch | `InstanceMismatch` |
 | A chain is **fabricated wholesale** and handed to an auditor | Partial, and auditor-side only. `qed-verify --instance-id` binds record 0 to an identity, which fails a forgery labelled with a different id — but the id and the public key must both reach the auditor out of band, since both appear in the export and were chosen by whoever wrote it. `InstanceMismatch` protects the operator's own chain from reuse and does nothing here. Without an out-of-band id and key, every other check in the verifier is satisfied by records made five minutes ago | `qed-verify`, `docs/evidence-format.md` conformance 11 |
@@ -195,12 +196,29 @@ server rather than a fake. `s3-object-lock` in compliance mode is the stronger
 of the two: `tests/evidence/test_s3_object_lock_live.py` runs in CI and the job
 fails if those tests skip. `gcs-retention` was measured by hand against real
 GCS (`tests/evidence/test_gcs_retention_live.py`) — a delete and an overwrite
-both refused for a project owner — but against an **unlocked** retention
-policy, and it is only a *locked* policy that an administrator cannot remove.
-That last link is Google's documented guarantee rather than something measured
-here; `docs/checkpoints.md` says so in the same words. The other three
-publishers move the root somewhere else without a server that refuses to give
-it back, which is weaker and worth knowing when you pick one.
+both refused for a project owner. The locked half was measured on 2026-11-16
+and no longer rests on Google's documentation: against a bucket whose retention
+policy is genuinely locked, removing the policy is refused for a project owner,
+and against an unlocked one the same removal succeeds and the anchor is then
+deletable. Both halves of that argument are now tests rather than sentences.
+The locked test was skipped for months because locking cannot be undone; it
+runs on a throwaway bucket with a **one-second** retention period, where the
+lock is permanent and harmless. The other three publishers move the root
+somewhere else without a server that refuses to give it back, which is weaker
+and worth knowing when you pick one.
+
+**An anchor has to reach the verifier, and for twelve weeks it could not.**
+Publishing a root defeats a rewrite only if somebody compares it against the
+export, and `qed-verify` had no input for one: the control was implemented,
+tested against real object-lock storage, and unusable. `qed-verify --anchor`
+(and `qed verify --anchor`) now takes the published checkpoint, checks its own
+hash and signature, and compares it against the export — which is also the one
+check that catches a chain that simply **stops early**, the single tampering
+mutation everything else here is satisfied by. Without `--anchor` the report
+names chain completeness as a check that did not run, and `--require-complete`
+exits non-zero, the same way it already did for a missing `--instance-id`. The
+anchor must be fetched from the bucket or tag it was published to; one the
+instance under audit hands you is a second file it could have forged.
 
 `qed replay <proposal_id>` narrows it, and the distinction is worth being
 precise about. It decides a recorded proposal again against the bundle whose

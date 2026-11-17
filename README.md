@@ -212,7 +212,7 @@ did.
 ### Run more than one replica
 
 ```bash
-helm install qed ./deploy/helm/qed   --set signingKey.existingSecret=qed-signing-key   --set replicaCount=3   --set evidence.backend=postgres   --set evidence.postgres.existingSecret=qed-db
+helm install qed ./deploy/helm/qed   --set signingKey.existingSecret=qed-signing-key   --set adapters.existingSecret=qed-adapters   --set adapters.registered[0].id=mcp-proxy   --set replicaCount=3   --set evidence.backend=postgres   --set evidence.postgres.existingSecret=qed-db
 ```
 
 Every replica serves the API and decides. The decider writes its record
@@ -321,11 +321,14 @@ log is `qed-cloud`'s, SPEC §24.2), and SPEC §19's live-stream and budget
 pages.
 
 **Measured, not estimated:** p95 decision latency is **4.5 ms** on SQLite and
-10.6 ms on PostgreSQL, against SPEC §18's 50 ms target — though that budget is
-a claim about the disk, not about Python, and slow storage can blow through it.
-Throughput is 250–400 decisions/s per replica, so SPEC §22's "1k rps" is
-several replicas rather than one. `docs/performance.md` has the numbers,
-including the ones that are less flattering.
+10.6 ms on PostgreSQL against SPEC §18's 50 ms target — both in-process, with
+the database on the same machine. Over HTTP to PostgreSQL in the same cloud
+region it is **46 ms**, and from another region, 1,085 ms. A decision makes 18
+SQL statements, so the figure is the round-trip count times the round-trip
+time; **co-locating the kernel and its database is a requirement, not an
+optimisation.** Throughput is 250–400 decisions/s per replica, so SPEC §22's
+"1k rps" is several replicas rather than one. `docs/performance.md` has the
+numbers, including the ones that are less flattering.
 
 ## Documentation
 

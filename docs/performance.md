@@ -19,10 +19,58 @@ transport latency belongs to whoever runs the network, and including it would
 make the number depend on the client. `/metrics` measures exactly the same span
 in production, so a dashboard and this page are talking about one thing.
 
+It is also an **in-process** number, and that distinction has been quoted away
+before. It excludes the HTTP hop to the kernel, and it was taken with the
+database on the same machine. A decision that crosses a network to its
+database costs what that network charges, multiplied by the number of
+statements a decision makes.
+
 PostgreSQL is slower per decision and is expected to be. A decision reads
 history, the budget and the dedupe window, and on PostgreSQL each is a network
 round trip rather than a local page read. The reason to use it is more than one
 replica, not speed.
+
+**Both rows were measured with the database next to the process** — the same
+host, or a container on it. Do not quote either number for a deployment where
+they are apart. The next section is why.
+
+### The 50 ms budget is a claim about round trips
+
+A decision is not one query. Counted on 2026-11-16 by wrapping the connection
+and running ten decisions, one decision issues **18 SQL statements**: two
+`INSERT`s into `evidence`, three write transactions (`BEGIN`/`COMMIT` are
+statements too), the dedupe check, the budget read and charge, the proposal
+row, and two reads of the chain tip. It was 22 before that date; see the
+changelog entry for what came out.
+
+Eighteen statements is nothing at all on a local socket and decisive over a
+network, because latency multiplies by the count:
+
+| | p50 | p95 | measured against the 50 ms budget |
+|---|---|---|---|
+| In-region (same cluster) | 35.5 ms | **46.0 ms** | inside, with ~8% headroom |
+| Cross-region (90 ms RTT) | 1035 ms | **1085 ms** | 20x over; `test_p95_on_postgres` fails |
+
+The cross-region row is not a slow database. One round trip to that server was
+90 ms, and 90 ms times the statements in a decision is the whole figure —
+`1035 / 90` comes to about 11.5, which is the statement count arrived at from
+the other side. The query cost is in the noise.
+
+Two things follow, and they are the practical content of this page:
+
+* **Co-locating the kernel and its database is a requirement, not an
+  optimisation.** Same region at minimum; same availability zone if the
+  provider charges you nothing for it. A kernel in one region deciding against
+  a database in another cannot meet SPEC §18 and no tuning will fix it.
+* **The in-region figure has about 8% of headroom, not 5x.** p99 was 50.4 ms
+  and the slowest sample 51.5 ms — already over. Treat 46 ms as the number to
+  plan with for an HTTP decision against a networked database, and
+  `qed_decision_latency_seconds` as the thing to watch.
+
+Both rows are from a real cloud run documented in full in
+`docs/validation.md`. The in-region row was measured through HTTP against
+PostgreSQL running on the same Kubernetes cluster, not a managed instance: a
+managed server adds a hop and would be somewhat worse, not better.
 
 ### The budget depends on the disk
 

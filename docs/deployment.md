@@ -105,12 +105,49 @@ qed keys init --dir ./qed-keys
 kubectl create secret generic qed-signing-key \
   --from-file=evidence-key.pem=./qed-keys/evidence-key.pem
 
+kubectl create secret generic qed-adapters \
+  --from-literal=mcp-proxy="$(openssl rand -base64 32)"
+
 helm install qed ./deploy/helm/qed \
-  --set signingKey.existingSecret=qed-signing-key
+  --set signingKey.existingSecret=qed-signing-key \
+  --set adapters.existingSecret=qed-adapters \
+  --set adapters.registered[0].id=mcp-proxy
 ```
 
 Keep `./qed-keys/public/` — that is the half an auditor verifies an export
 with, and the half that is safe to publish.
+
+### Adapters
+
+Two secrets, not one, and they gate the same thing. `/readyz` is false without
+a signing key because an unsigned decision is not evidence, and false without
+an adapter secret because SPEC §17 requires QED to reject adapters it cannot
+identify — with no secret it cannot identify any of them.
+
+```yaml
+adapters:
+  existingSecret: qed-adapters
+  registered:
+    - id: mcp-proxy
+    - id: ci-runner
+      kind: ci
+```
+
+The chart derives `QED_ADAPTER_SECRET_MCP_PROXY` from the id — the name `qed
+adapters add` prints — names it in `qed.yaml` and supplies it from the Secret,
+the same arrangement as the DSN. The same string goes to the adapter, which
+signs every request with it (SPEC §13).
+
+`qed adapters add` cannot be used to fix this from inside the pod: `qed.yaml`
+is a read-only ConfigMap mount, so it has nothing to write to. And the chart
+offers no `--dev`, where signatures are accepted unchecked — that is for a
+loopback process, and a Helm release has a Service in front of it.
+
+Rotation is the two-step the CLI's is: put the new secret under a new key in
+the Secret, name the old key as `previousSecretKey`, roll the fleet, then
+remove it. Both are accepted meanwhile, which is the overlap a shared secret
+needs — refusing the old one before the last adapter has restarted turns a
+rotation into an outage.
 
 ### What the chart refuses to install
 
@@ -122,6 +159,15 @@ at which the answer can be a sentence instead of a pager.
   chart will not generate a key: one created by an install hook lives wherever
   the hook wrote it, and one created per pod starts a new chain on every
   restart.
+* **No adapter registered.** The only one of these whose symptom is not a
+  crash: the release installs, rolls out green, and refuses every proposal with
+  `adapter-auth-unconfigured` because it cannot tell one caller from another.
+  It is also the only one that cannot be fixed from inside the pod, since
+  `qed.yaml` is a read-only ConfigMap mount. Related refusals: an entry with no
+  `id` or an id outside `[a-z0-9][a-z0-9_-]{1,62}`, `adapters.registered` with
+  no `adapters.existingSecret`, two entries under one id, and a
+  `previousSecretKey` naming the key already in use — a rotation with no
+  overlap.
 * **`replicaCount > 1` with `evidence.backend: sqlite`.** See the one rule
   above.
 * **`evidence.backend: postgres` with no `existingSecret` for the DSN.** The DSN

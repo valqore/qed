@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -297,15 +297,25 @@ class TestABucketWithoutObjectLock:
         """The first reason `_bucket_has_object_lock` exists, and the half this
         environment cannot show.
 
-        Real S3 answers `InvalidRequest` -- "Bucket is missing Object Lock
-        Configuration" -- so a publisher that sent the lock blindly would turn
-        every checkpoint against an ordinary bucket into an error that reads
-        like the network. LocalStack 4 instead **accepts** it and stores no
-        lock, which is the second reason to ask: an endpoint can refuse the
-        request or it can quietly provide nothing, and only asking first tells
-        the two apart. Measured, not assumed -- this test failed against
-        LocalStack with DID NOT RAISE, which is how the paragraph above got
-        written.
+        Real S3 answers `InvalidRequest` -- "Bucket is missing
+        ObjectLockConfiguration" -- so a publisher that sent the lock blindly
+        would turn every checkpoint against an ordinary bucket into an error
+        that reads like the network. LocalStack 4 instead **accepts** it and
+        stores no lock, which is the second reason to ask: an endpoint can
+        refuse the request or it can quietly provide nothing, and only asking
+        first tells the two apart. Measured, not assumed -- this test failed
+        against LocalStack with DID NOT RAISE, which is how the paragraph above
+        got written.
+
+        **The retain-until date has to be in the future**, and that is the
+        whole reason this assertion also reads the message. The first version
+        of this test sent `utcnow()`, which S3 validates *before* it looks at
+        the bucket: against real AWS it answered `InvalidArgument: The retain
+        until date must be in the future!` and the refusal it was written to
+        observe never happened. A test that cannot reach the condition it
+        names is worse than no test, because it reports on something else in
+        the same words -- so the code *and* the sentence are both asserted
+        here, and a date error can no longer pass for a missing configuration.
         """
         with pytest.raises(ClientError) as caught:
             admin.put_object(
@@ -314,9 +324,14 @@ class TestABucketWithoutObjectLock:
                 Body=b"{}",
                 ChecksumAlgorithm="SHA256",
                 ObjectLockMode="COMPLIANCE",
-                ObjectLockRetainUntilDate=utcnow(),
+                # What the publisher itself sends: `retain_days` in the future.
+                ObjectLockRetainUntilDate=utcnow() + timedelta(days=RETAIN_DAYS),
             )
         assert client_error(caught.value) == "InvalidRequest"
+        message = str(caught.value.response.get("Error", {}).get("Message", ""))
+        assert "ObjectLock" in message, (
+            f"refused, but not for the missing object-lock configuration: {message!r}"
+        )
 
 
 def test_an_unreachable_endpoint_is_a_receipt_and_not_an_exception() -> None:

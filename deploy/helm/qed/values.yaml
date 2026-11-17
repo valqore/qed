@@ -43,11 +43,12 @@ config:
   evidence:
     masking: default
 
-# Extra environment variables, for the credentials `config` refers to by name:
+# Extra environment variables, for the credentials `config` refers to by name.
+# Adapter secrets are not among them -- `adapters` below wires those itself:
 #   extraEnv:
-#     - name: QED_ADAPTER_SECRET
+#     - name: QED_SLACK_SIGNING_SECRET
 #       valueFrom:
-#         secretKeyRef: {name: qed-adapters, key: mcp-proxy}
+#         secretKeyRef: {name: qed-slack, key: signing-secret}
 extraEnv: []
 extraEnvFrom: []
 
@@ -72,6 +73,57 @@ signingKey:
   # public one is derived from it, and the `public/` directory exists for
   # `qed-verify`, which reads an export rather than a running instance.
   privateKeyKey: evidence-key.pem
+
+# ---------------------------------------------------------------------------
+# Adapter authentication (SPEC §13, §17)
+# ---------------------------------------------------------------------------
+# The *other* thing `readyz` is false without, and the one that is easy to miss
+# because nothing on the cluster says the word "adapter". SPEC §17 requires
+# unknown adapters to be rejected; an instance holding no adapter secret cannot
+# tell one caller from another, so it refuses every proposal with
+# `adapter-auth-unconfigured` and never becomes ready. So the chart refuses to
+# install without one, exactly as it refuses to install without a signing key.
+#
+# There is no way to fix this from inside the pod: `qed.yaml` is a read-only
+# ConfigMap mount, so `qed adapters add` has nothing it can write to.
+# Registration here is a chart value plus a Secret.
+#
+#   kubectl create secret generic qed-adapters \
+#     --from-literal=mcp-proxy="$(openssl rand -base64 32)"
+#
+#   adapters:
+#     existingSecret: qed-adapters
+#     registered:
+#       - id: mcp-proxy
+#
+# `--dev`, where signatures are accepted unverified, is deliberately not
+# offered: it is for a loopback process, and anything this chart installs has a
+# Service in front of it.
+adapters:
+  # Name of an existing Secret holding one shared secret per adapter. Required
+  # as soon as `registered` has an entry. The secrets never reach a manifest:
+  # the chart names the variable and Kubernetes supplies the value, the same
+  # arrangement as the Postgres DSN.
+  existingSecret: ""
+
+  # One entry per adapter allowed to send proposals. The id is what the caller
+  # puts in `X-QED-Adapter-Id` and what the evidence records, so it wants to
+  # name a thing that exists -- a process, a CI job, a laptop -- rather than a
+  # person.
+  #
+  #   registered:
+  #     - id: mcp-proxy
+  #       # Key within existingSecret. Defaults to the id.
+  #       secretKey: mcp-proxy
+  #       # Recorded in evidence; `mcp` unless you have a reason.
+  #       kind: mcp
+  #       # The *old* key, while a rotation is in flight. Both secrets are
+  #       # accepted until you remove this, which is the overlap a rotation
+  #       # needs: a shared secret cannot change on two machines at the same
+  #       # instant, and refusing the old one before the fleet has restarted
+  #       # turns a rotation into an outage.
+  #       previousSecretKey: ""
+  registered: []
 
 # ---------------------------------------------------------------------------
 # Evidence store

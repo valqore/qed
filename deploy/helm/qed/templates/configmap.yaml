@@ -22,6 +22,12 @@ data:
     {{- /* The key is a secret mount; the chain is a volume or a database. */}}
     {{- $_ := set $evidence "signing_key" (printf "/etc/qed/keys/%s" .Values.signingKey.privateKeyKey) }}
     {{- $_ := set $config "evidence" $evidence }}
+    {{- /* Adapter secrets are environment variables for the same reason the
+           DSN is: this file is a ConfigMap anyone with read access prints. */}}
+    {{- $adapters := fromYamlArray (include "qed.adapterEntries" .) }}
+    {{- if $adapters }}
+    {{- $_ := set $config "adapters" $adapters }}
+    {{- end }}
     {{- if .Values.policies.existingConfigMap }}
     {{- $_ := set $config "policies" (list .Values.policies.mountPath) }}
     {{- end }}
