@@ -111,6 +111,13 @@ class Report:
     genesis_bound_to: str | None = None
     #: How many externally supplied anchors were matched against this export.
     anchors: int = 0
+    #: How many were *supplied*, matched or not. The two are different
+    #: questions and one counter cannot answer both: an anchor that was
+    #: supplied and failed left `anchors` at zero, and the summary then read
+    #: "no anchor supplied" on the very run where the anchor caught a
+    #: truncation. The worst thing a verifier can do is understate the
+    #: evidence it was handed.
+    anchors_supplied: int = 0
     #: The highest ``to_seq`` an anchor covered, or ``None`` when no anchor was
     #: supplied. Records after it are in the export on the export's own word.
     anchored_through: int | None = None
@@ -140,6 +147,7 @@ class Report:
             "keys_used": sorted(self.keys_used),
             "genesis_bound_to": self.genesis_bound_to,
             "anchors": self.anchors,
+            "anchors_supplied": self.anchors_supplied,
             "anchored_through": self.anchored_through,
             "unchecked": list(self.unchecked),
             "problems": [{"seq": p.seq, "code": p.code, "detail": p.detail} for p in self.problems],
@@ -149,6 +157,14 @@ class Report:
         bound = f"instance {self.genesis_bound_to!r}" if self.genesis_bound_to else "NOTHING"
         if self.anchors:
             anchored = f"{self.anchors} anchor(s), covering seq 0..{self.anchored_through}"
+            if self.anchors_supplied > self.anchors:
+                failed = self.anchors_supplied - self.anchors
+                anchored += f" ({failed} further anchor(s) supplied did not verify)"
+        elif self.anchors_supplied:
+            anchored = (
+                f"NOTHING -- {self.anchors_supplied} anchor(s) supplied, none of which "
+                "verified against this export; see the problems below"
+            )
         else:
             anchored = "NOTHING -- no anchor supplied"
         lines = [
@@ -327,6 +343,7 @@ def _check_anchors(
         )
         return
 
+    report.anchors_supplied = len(anchors)
     covered_to: list[int] = []
     for position, anchor in enumerate(anchors):
         label = f"anchor {position + 1}"
