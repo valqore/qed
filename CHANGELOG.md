@@ -6,6 +6,25 @@ independently (SPEC §25.6).
 
 ## [Unreleased]
 
+### Fixed — a failed anchor no longer reports as no anchor at all
+
+Found by running 1.3.0 from PyPI against a truncated chain. `qed-verify`
+caught the truncation and named it correctly in the problem list, and then the
+line above it said `anchored : NOTHING -- no anchor supplied` — on the one run
+where an anchor had been supplied and had just done its job.
+
+The counter it read, `report.anchors`, is incremented only when an anchor
+*matches*, so it answers "how many anchors verified" and was being used to
+answer "was an anchor supplied". Two different questions; one counter cannot
+hold both. `anchors_supplied` now tracks the second, the summary distinguishes
+"none supplied" from "supplied and none verified", and a partial set says how
+many of the rest failed. `to_dict()` carries the new count for anything
+parsing the JSON.
+
+Nothing about the verdict changes — the exit code and the problem list were
+right before and are right now. What changes is that the summary no longer
+invites an auditor to go and supply what they already supplied.
+
 ## [1.3.0] — 2026-11-16
 
 ### Added — `qed-verify --anchor`, because the control existed and was unusable

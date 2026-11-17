@@ -512,6 +512,46 @@ class TestCommandLine:
         assert "OK SO FAR" in out.out
         assert "not checked" in out.err
 
+    def test_a_supplied_anchor_that_fails_is_not_reported_as_no_anchor(
+        self, tmp_path: Path, private, capsys
+    ) -> None:
+        """The summary counted verified anchors and answered a different
+        question with it.
+
+        `report.anchors` is incremented only when an anchor matches, so a
+        truncated export checked against a real published checkpoint left it
+        at zero -- and the line read `anchored : NOTHING -- no anchor
+        supplied` on the exact run where the anchor had just caught the
+        truncation. A verifier that understates the evidence it was handed
+        invites the reader to go and supply what they already supplied.
+        """
+        chain, keys_dir, anchor = self._write_anchored(tmp_path, private)
+        records = [json.loads(line) for line in chain.read_text(encoding="utf-8").splitlines()]
+        # Drop the tail the anchor vouches for: the anchor is now about a
+        # record this export does not contain.
+        chain.write_text(
+            "".join(json.dumps(r, sort_keys=True) + "\n" for r in records[:-1]),
+            encoding="utf-8",
+        )
+        assert (
+            cli_main(
+                [
+                    str(chain),
+                    "--keys",
+                    str(keys_dir),
+                    "--instance-id",
+                    INSTANCE,
+                    "--anchor",
+                    str(anchor),
+                ]
+            )
+            == 1
+        )
+        out = capsys.readouterr()
+        assert "anchor_not_in_export" in out.out
+        assert "no anchor supplied" not in out.out
+        assert "1 anchor(s) supplied, none of which verified" in out.out
+
     def test_a_bound_and_anchored_pass_is_the_unqualified_one(
         self, tmp_path: Path, private, capsys
     ) -> None:
